@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Sidebar from "./sidebar";
+import ServiceWorkerRegistration from "./service-worker-registration";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -37,6 +38,7 @@ export default function RootLayout({
             </main>
           </div>
         </div>
+        <ServiceWorkerRegistration />
       </body>
     </html>
   );

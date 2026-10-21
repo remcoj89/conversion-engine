@@ -9,14 +9,21 @@
     "start": "node dist/server.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/app.test.ts"
+    "test": "tsx --test src/app.test.ts",
+    "db:test": "node --env-file=.env --import tsx --test src/db.test.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
-    "fastify": "^5.12.7"
+    "drizzle-orm": "^0.45.4",
+    "fastify": "^5.12.7",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "tsx": "^4.23.15",
     "typescript": "~6.0",
