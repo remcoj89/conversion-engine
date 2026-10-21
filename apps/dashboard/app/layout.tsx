@@ -30,7 +30,7 @@ export default function RootLayout({
                 Klantomgeving <span aria-hidden="true">/</span>{" "}
                 <strong>Vandaag</strong>
               </p>
-              <span className="badge">Statische basis</span>
+              <span className="badge">Conversion Engine</span>
             </header>
             <main id="content" className="content">
               {children}
