@@ -1,0 +1,14 @@
+{
+  "name": "conversion-engine",
+  "private": true,
+  "packageManager": "npm@11.19.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace dashboard run dev",
+    "build": "npm --workspace dashboard run build",
+    "lint": "npm --workspace dashboard run lint",
+    "typecheck": "npm --workspace dashboard run typecheck"
+  }
+}
