@@ -1,0 +1,122 @@
+{
+  "meta": {
+    "tenant_demo_id": "nf",
+    "company": "NoordFit Coaching",
+    "version": 3,
+    "status": "Review nodig",
+    "source_schemas": [
+      "Q1-v1.0",
+      "Q2-v1.0",
+      "Q3-v1.0",
+      "Q4-v1.0"
+    ],
+    "is_demo": true
+  },
+  "client_supplied": {
+    "business": [
+      [
+        "Bedrijf",
+        "NoordFit Coaching",
+        "Q1 · business.name"
+      ],
+      [
+        "Bedrijfsverhaal",
+        "Persoonlijke begeleiding vanuit ervaring als sportcoach",
+        "Q1 · story.origin"
+      ],
+      [
+        "Specialisatie",
+        "Begeleid krachttrainingsprogramma",
+        "Q1 · authority.specialties"
+      ]
+    ],
+    "audience": [
+      [
+        "Primaire doelgroep",
+        "Drukke professionals (30–50 jaar)",
+        "Q2 · audience.primary"
+      ],
+      [
+        "Kernprobleem",
+        "Weinig tijd en moeite met een consistente routine",
+        "Q2 · audience.pain_points"
+      ],
+      [
+        "Koopbezwaar",
+        "Twijfel of coaching in agenda past",
+        "Q2 · audience.objections"
+      ]
+    ],
+    "offer": [
+      [
+        "Hoofdaanbod",
+        "Personal training traject",
+        "Q3 · offer.primary.name"
+      ],
+      [
+        "Tarief",
+        "Vanaf €149 per maand — klantverklaring, te verifiëren",
+        "Q3 · offer.primary.price"
+      ],
+      [
+        "Hoofd-CTA",
+        "Plan een kennismakingsgesprek",
+        "Q3 · funnel.primary_cta"
+      ]
+    ],
+    "brand": [
+      [
+        "Bestaande identiteit",
+        "Donkergroen + crème, bestaande huisstijl",
+        "Q4 · brand.tokens"
+      ],
+      [
+        "Fotografie",
+        "8 uploads — rechten nog te verifiëren",
+        "Q4 · assets.photography"
+      ],
+      [
+        "Boekingslink",
+        "Aangeleverd, technisch nog te toetsen",
+        "Q4 · technical.booking_url"
+      ]
+    ]
+  },
+  "questionnaires": {
+    "q1": true,
+    "q2": true,
+    "q3": true,
+    "q4": true
+  },
+  "checks": {
+    "claims": false,
+    "rights": false,
+    "scope": false,
+    "technical": true
+  },
+  "extras": {
+    "photography": true,
+    "branding": false,
+    "pages": false,
+    "decision": "pending"
+  },
+  "approvals": {
+    "brief": false,
+    "strategy": false,
+    "client_content": false
+  },
+  "production_stage": "Intake",
+  "review_notes": "Graag je certificering onderbouwen en bevestigen of de foto’s online gepubliceerd mogen worden.",
+  "history": [
+    [
+      "17 okt · 14:20",
+      "Project Brief v3 gegenereerd",
+      "Systeem — concept, geen AI-goedkeuring"
+    ],
+    [
+      "17 okt · 14:22",
+      "Twee reviewpunten gevonden",
+      "Controle van resultaatclaims en beeldrechten"
+    ]
+  ]
+}

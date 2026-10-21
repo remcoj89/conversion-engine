@@ -1,0 +1,453 @@
+{
+  "form_id": "Q1_KICKOFF",
+  "version": "1.0.0-draft",
+  "lang": "nl-NL",
+  "title": "Kickoff & Bedrijfsidentiteit",
+  "target_minutes": "8-12",
+  "status": "ontwerp ter review",
+  "last_updated": "2026-10-17",
+  "sections": [
+    {
+      "id": "bedrijf",
+      "title": "Bedrijf in het kort",
+      "subtitle": "Eerst de basis: wat doet jouw bedrijf precies?",
+      "fields": [
+        {
+          "id": "company_name",
+          "question": "Hoe heet je bedrijf?",
+          "type": "text",
+          "required": true,
+          "max": 120,
+          "min": 2,
+          "example": "Sterk & Fit Coaching",
+          "mapping": "business.name",
+          "notes": "Vooraf invullen vanuit account; ondernemer mag corrigeren."
+        },
+        {
+          "id": "contact_name",
+          "question": "Wie is het aanspreekpunt voor deze website?",
+          "type": "text",
+          "required": true,
+          "min": 2,
+          "max": 120,
+          "example": "Sam de Vries",
+          "mapping": "business.primary_contact_name",
+          "notes": "Alleen zakelijke contactfunctie, geen onnodige privégegevens."
+        },
+        {
+          "id": "company_one_liner",
+          "question": "Wat doet jouw bedrijf in één of twee zinnen?",
+          "type": "textarea",
+          "required": true,
+          "min": 20,
+          "max": 350,
+          "example": "Ik help drukke professionals met persoonlijke krachttraining en haalbare voedingsgewoonten.",
+          "mapping": "business.summary",
+          "notes": "Dit is broninput, geen definitieve H1."
+        },
+        {
+          "id": "founding_year",
+          "question": "In welk jaar is je bedrijf gestart?",
+          "type": "number",
+          "required": false,
+          "min": 1900,
+          "max": 2026,
+          "example": "2021",
+          "mapping": "business.founding_year",
+          "notes": "Alleen plausibel jaartal; niet hetzelfde als jaren ervaring."
+        }
+      ]
+    },
+    {
+      "id": "verhaal",
+      "title": "Oorsprong & ondernemersverhaal",
+      "subtitle": "Wat bracht je ertoe dit bedrijf te beginnen?",
+      "fields": [
+        {
+          "id": "why_started",
+          "question": "Waarom ben je dit bedrijf begonnen?",
+          "type": "textarea",
+          "required": true,
+          "min": 30,
+          "max": 1200,
+          "example": "Ik zag dat veel mensen afhaken bij rigide trainingsprogramma’s ...",
+          "mapping": "story.motivation",
+          "notes": "AI mag geen persoonlijke details verzinnen."
+        },
+        {
+          "id": "founder_background",
+          "question": "Welke achtergrond of ervaring heeft jou gevormd als ondernemer?",
+          "type": "textarea",
+          "required": false,
+          "max": 1200,
+          "example": "Vanuit mijn werk als trainer heb ik geleerd ...",
+          "mapping": "story.background",
+          "notes": "Geen medische of andere gevoelige privégegevens uitvragen."
+        },
+        {
+          "id": "story_turning_point",
+          "question": "Is er een gebeurtenis of kantelpunt dat jouw verhaal bijzonder maakt?",
+          "type": "textarea",
+          "required": false,
+          "max": 750,
+          "example": "Tijdens mijn eerste jaar als coach ontdekte ik ...",
+          "mapping": "story.turning_point",
+          "notes": "Vrijwillig; geen druk om persoonlijke trauma’s te delen."
+        },
+        {
+          "id": "story_usage",
+          "question": "Hoe mogen we jouw verhaal in het websitevoorstel gebruiken?",
+          "type": "single_choice",
+          "required": true,
+          "choices": [
+            {
+              "value": "proposal",
+              "label": "Gebruik als basis voor conceptteksten; ik keur ze eerst goed"
+            },
+            {
+              "value": "internal_only",
+              "label": "Alleen intern gebruiken voor de strategie"
+            }
+          ],
+          "mapping": "story.proposed_use",
+          "notes": "Geen automatische publicatie; altijd expliciete inhoudelijke goedkeuring."
+        }
+      ]
+    },
+    {
+      "id": "expertise",
+      "title": "Ervaring & geloofwaardigheid",
+      "subtitle": "Wat laat zien dat klanten bij jou in goede handen zijn?",
+      "fields": [
+        {
+          "id": "expertise_sources",
+          "question": "Waar komt jouw vakkennis vooral vandaan?",
+          "type": "multi_choice",
+          "required": true,
+          "min_items": 1,
+          "max_items": 6,
+          "choices": [
+            {
+              "value": "practice",
+              "label": "Praktijkervaring"
+            },
+            {
+              "value": "education",
+              "label": "Opleiding of certificering"
+            },
+            {
+              "value": "lived",
+              "label": "Ervaringsdeskundigheid"
+            },
+            {
+              "value": "military",
+              "label": "Militaire achtergrond"
+            },
+            {
+              "value": "sport",
+              "label": "(Top)sportachtergrond"
+            },
+            {
+              "value": "other",
+              "label": "Anders"
+            }
+          ],
+          "mapping": "authority.expertise_sources",
+          "notes": "Geen keuze publiceert automatisch persoonskenmerken."
+        },
+        {
+          "id": "expertise_other",
+          "question": "Welke andere achtergrond bedoel je?",
+          "type": "text",
+          "required": true,
+          "when": {
+            "field": "expertise_sources",
+            "includes": "other"
+          },
+          "min": 3,
+          "max": 160,
+          "example": "Jarenlang leidinggevende in de horeca",
+          "mapping": "authority.expertise_other",
+          "notes": "Alleen zichtbaar/verplicht bij Anders."
+        },
+        {
+          "id": "expertise_years",
+          "question": "Hoeveel jaar relevante ervaring heb je in dit vakgebied?",
+          "type": "number",
+          "required": false,
+          "min": 0,
+          "max": 70,
+          "example": "8",
+          "mapping": "authority.years_experience",
+          "notes": "Maak onderscheid met oprichtingsjaar."
+        },
+        {
+          "id": "expertise_description",
+          "question": "Wat maakt jou deskundig in wat je doet?",
+          "type": "textarea",
+          "required": true,
+          "min": 30,
+          "max": 800,
+          "example": "Ik begeleid al acht jaar cliënten en volg elk jaar bijscholing ...",
+          "mapping": "authority.expertise_description",
+          "notes": "Concrete toetsbare feiten; AI maakt geen certificeringen of resultaten bij."
+        },
+        {
+          "id": "special_background_context",
+          "question": "Wil je toelichten hoe deze achtergrond jouw werkwijze beïnvloedt?",
+          "type": "textarea",
+          "required": false,
+          "max": 650,
+          "when": {
+            "field": "expertise_sources",
+            "includes_any": [
+              "lived",
+              "military",
+              "sport"
+            ]
+          },
+          "example": "Mijn militaire achtergrond heeft mijn aanpak gestructureerd gemaakt.",
+          "mapping": "authority.special_background_context",
+          "notes": "Optioneel, alleen bij relevante specifieke expertise."
+        },
+        {
+          "id": "credentials",
+          "question": "Welke diploma’s, certificaten of erkenningen kunnen we noemen?",
+          "type": "textarea",
+          "required": false,
+          "max": 650,
+          "example": "NASM-CPT, 2022; sportopleiding ...",
+          "mapping": "authority.credentials_claimed",
+          "notes": "Wordt gemarkeerd voor verificatie voordat het in public copy wordt gebruikt."
+        },
+        {
+          "id": "proof_assets",
+          "question": "Welk bewijs heb je beschikbaar?",
+          "type": "multi_choice",
+          "required": false,
+          "min_items": 0,
+          "max_items": 5,
+          "choices": [
+            {
+              "value": "reviews",
+              "label": "Reviews"
+            },
+            {
+              "value": "cases",
+              "label": "Klantcases"
+            },
+            {
+              "value": "portfolio",
+              "label": "Werkvoorbeelden"
+            },
+            {
+              "value": "certificates",
+              "label": "Certificaatbestanden"
+            },
+            {
+              "value": "none",
+              "label": "Nog niets beschikbaar"
+            }
+          ],
+          "mapping": "authority.proof_available",
+          "notes": "none sluit andere keuzes uit; materialen worden pas in Q4 geüpload."
+        }
+      ]
+    },
+    {
+      "id": "positionering",
+      "title": "Werkwijze & onderscheid",
+      "subtitle": "Waarom kiest een klant voor jou en niet voor een alternatief?",
+      "fields": [
+        {
+          "id": "unique_approach",
+          "question": "Wat is er anders aan jouw aanpak ten opzichte van anderen?",
+          "type": "textarea",
+          "required": true,
+          "min": 25,
+          "max": 750,
+          "example": "Geen standaard schema’s maar elke zes weken een nieuw plan ...",
+          "mapping": "positioning.differentiation",
+          "notes": "Verifieer vergelijkende claims; geen onbewezen superlatieven."
+        },
+        {
+          "id": "working_principles",
+          "question": "Wat vind je absoluut belangrijk in je manier van werken?",
+          "type": "textarea",
+          "required": false,
+          "max": 550,
+          "example": "Eerlijk advies, haalbare stappen en persoonlijke aandacht.",
+          "mapping": "positioning.working_principles",
+          "notes": "Vormt input voor werkwijze en waarden."
+        },
+        {
+          "id": "brand_values",
+          "question": "Welke woorden passen het beste bij jouw bedrijf?",
+          "type": "multi_choice",
+          "required": true,
+          "min_items": 2,
+          "max_items": 4,
+          "choices": [
+            {
+              "value": "reliable",
+              "label": "Betrouwbaar"
+            },
+            {
+              "value": "direct",
+              "label": "Direct"
+            },
+            {
+              "value": "personal",
+              "label": "Persoonlijk"
+            },
+            {
+              "value": "disciplined",
+              "label": "Gedisciplineerd"
+            },
+            {
+              "value": "innovative",
+              "label": "Vernieuwend"
+            },
+            {
+              "value": "accessible",
+              "label": "Toegankelijk"
+            },
+            {
+              "value": "premium",
+              "label": "Exclusief"
+            },
+            {
+              "value": "practical",
+              "label": "Praktisch"
+            }
+          ],
+          "mapping": "positioning.brand_values",
+          "notes": "Kies 2–4; eigen woord kan later als open aanvulling."
+        },
+        {
+          "id": "desired_impression",
+          "question": "Welk gevoel moet iemand overhouden aan een bezoek aan jouw website?",
+          "type": "textarea",
+          "required": false,
+          "max": 350,
+          "example": "Ik voel me serieus genomen en durf contact op te nemen.",
+          "mapping": "positioning.desired_impression",
+          "notes": "Dient als UX- en copytoets; geen gegarandeerd effect."
+        }
+      ]
+    },
+    {
+      "id": "toon",
+      "title": "Tone of voice",
+      "subtitle": "Hoe wil je dat jouw website klinkt?",
+      "fields": [
+        {
+          "id": "tone_traits",
+          "question": "Hoe mag de tekst op je website klinken?",
+          "type": "multi_choice",
+          "required": true,
+          "min_items": 2,
+          "max_items": 4,
+          "choices": [
+            {
+              "value": "professional",
+              "label": "Professioneel"
+            },
+            {
+              "value": "direct",
+              "label": "Direct"
+            },
+            {
+              "value": "warm",
+              "label": "Warm"
+            },
+            {
+              "value": "energetic",
+              "label": "Energiek"
+            },
+            {
+              "value": "calm",
+              "label": "Rustig"
+            },
+            {
+              "value": "expert",
+              "label": "Deskundig"
+            },
+            {
+              "value": "no_nonsense",
+              "label": "No-nonsense"
+            },
+            {
+              "value": "playful",
+              "label": "Speels"
+            }
+          ],
+          "mapping": "voice.traits",
+          "notes": "Geselecteerde waarden sturen schrijfstijl, niet tone-only generatieve aannames."
+        },
+        {
+          "id": "address_style",
+          "question": "Spreken we je bezoekers aan met je/jij of u?",
+          "type": "single_choice",
+          "required": true,
+          "choices": [
+            {
+              "value": "jij",
+              "label": "Je/jij"
+            },
+            {
+              "value": "u",
+              "label": "U"
+            },
+            {
+              "value": "advise",
+              "label": "Laat Westend adviseren"
+            }
+          ],
+          "mapping": "voice.address_style",
+          "notes": "AI moet advieskeuze in Project Brief markeren als te beslissen."
+        },
+        {
+          "id": "words_prefer",
+          "question": "Welke woorden of uitdrukkingen passen bij jouw bedrijf?",
+          "type": "textarea",
+          "required": false,
+          "max": 350,
+          "example": "Haalbaar, persoonlijk, vooruitgang",
+          "mapping": "voice.preferred_terms",
+          "notes": "Optionele stijlinput."
+        },
+        {
+          "id": "words_avoid",
+          "question": "Welke woorden, claims of uitdrukkingen wil je absoluut vermijden?",
+          "type": "textarea",
+          "required": false,
+          "max": 350,
+          "example": "Summer body, gegarandeerd resultaat",
+          "mapping": "voice.avoid_terms",
+          "notes": "Negatieve copyregels worden centraal bewaard."
+        }
+      ]
+    }
+  ],
+  "status_flow": [
+    "draft",
+    "submitted",
+    "review_needed",
+    "approved"
+  ],
+  "autosave": {
+    "production": "authentieke server-side draft, debounce 700ms, versiecheck; geen gevoelige data in client storage",
+    "prototype": "alleen browser localStorage op eigen apparaat"
+  },
+  "rules": {
+    "publication": "nooit automatisch; goedkeuring door Westend en klant",
+    "proof": "credentials/claims standaard verification_needed",
+    "conditional_hidden_values": "bij selectie weghalen van parent ook verborgen child wissen"
+  },
+  "out_of_scope": [
+    "doelgroepsegment en pijnpunten (Q2)",
+    "aanbod en prijzen (Q3)",
+    "logo/beeldrechten/integraties (Q4)"
+  ]
+}

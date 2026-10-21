@@ -9,6 +9,11 @@
     "dev": "npm --workspace dashboard run dev",
     "build": "npm --workspace dashboard run build",
     "lint": "npm --workspace dashboard run lint",
-    "typecheck": "npm --workspace dashboard run typecheck"
+    "typecheck": "npm --workspace dashboard run typecheck",
+    "api:dev": "npm --workspace api run dev",
+    "api:build": "npm --workspace api run build",
+    "api:lint": "npm --workspace api run lint",
+    "api:typecheck": "npm --workspace api run typecheck",
+    "api:test": "npm --workspace api run test"
   }
 }

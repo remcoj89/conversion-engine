@@ -1,0 +1,569 @@
+{
+  "form_id": "Q2_DOELGROEP",
+  "schema_version": "1.0.0",
+  "version": "1.0.0-draft",
+  "lang": "nl-NL",
+  "title": "Doelgroep & Klantinzichten",
+  "target_minutes": "10-15 (pilotindicatie, geen garantie)",
+  "status": "ter review",
+  "last_updated": "2026-10-17",
+  "sections": [
+    {
+      "id": "doelgroep",
+      "title": "Je ideale klant",
+      "subtitle": "Kies één primaire doelgroep waarop de website zich eerst richt.",
+      "fields": [
+        {
+          "id": "primary_audience",
+          "question": "Hoe noem jij je ideale klant?",
+          "type": "text",
+          "required": true,
+          "mapping": "audience.primary.label",
+          "min": 4,
+          "max": 100,
+          "example": "Drukke professionals die fitter willen worden",
+          "notes": "Label is intern; geen onbewezen doelgroepclaim."
+        },
+        {
+          "id": "market_type",
+          "question": "Werk je vooral voor particulieren of bedrijven?",
+          "type": "single_choice",
+          "required": true,
+          "mapping": "audience.primary.market_type",
+          "choices": [
+            {
+              "value": "b2c",
+              "label": "Particulieren (B2C)"
+            },
+            {
+              "value": "b2b",
+              "label": "Bedrijven (B2B)"
+            },
+            {
+              "value": "mixed",
+              "label": "Allebei, met één primaire doelgroep"
+            }
+          ],
+          "notes": "Voor mixed blijft primaire doelgroep verplicht; geen twee gelijkwaardige homepages in standaardpakket."
+        },
+        {
+          "id": "primary_description",
+          "question": "Beschrijf jouw ideale klant. Wat voor persoon of organisatie is dit?",
+          "type": "textarea",
+          "required": true,
+          "mapping": "audience.primary.description",
+          "min": 35,
+          "max": 800,
+          "example": "Zelfstandige professionals die weinig tijd hebben om te sporten, maar wel structureel aan hun fitheid willen werken.",
+          "notes": "Gebruik observeerbare kenmerken, taken en behoeften; geen gevoelige persoonskenmerken."
+        },
+        {
+          "id": "service_area",
+          "question": "Waar bevindt jouw ideale klant zich?",
+          "type": "single_choice",
+          "required": true,
+          "mapping": "audience.primary.service_area",
+          "choices": [
+            {
+              "value": "local",
+              "label": "Lokaal, in één plaats of regio"
+            },
+            {
+              "value": "regional",
+              "label": "Meerdere regio’s"
+            },
+            {
+              "value": "national",
+              "label": "Heel Nederland"
+            },
+            {
+              "value": "remote",
+              "label": "Online / niet locatiegebonden"
+            }
+          ],
+          "notes": "Exact werkgebied en vestigingsgegevens komen uit Q1/Q4; geen precieze persoonsgegevens."
+        },
+        {
+          "id": "secondary_audience",
+          "question": "Is er een tweede doelgroep die we moeten kennen?",
+          "type": "textarea",
+          "required": false,
+          "mapping": "audience.secondary.description",
+          "max": 450,
+          "example": "Ook ondernemers die zelfstandig trainen en een concreet schema willen.",
+          "notes": "Optioneel; AI mag deze groep niet als primaire doelgroep behandelen."
+        }
+      ]
+    },
+    {
+      "id": "context",
+      "title": "Context & geschiktheid",
+      "subtitle": "Wanneer past jouw dienst écht goed bij een klant?",
+      "fields": [
+        {
+          "id": "customer_situation",
+          "question": "In welke situatie zit je ideale klant wanneer die hulp zoekt?",
+          "type": "textarea",
+          "required": true,
+          "mapping": "audience.context.current_situation",
+          "min": 25,
+          "max": 650,
+          "example": "Werkt lange dagen, sport onregelmatig en zoekt een haalbaar plan.",
+          "notes": "Beschrijf de situatie zonder medische diagnoses of andere gevoelige details."
+        },
+        {
+          "id": "purchase_trigger",
+          "question": "Wat gebeurt er meestal waardoor die klant actief op zoek gaat?",
+          "type": "textarea",
+          "required": true,
+          "mapping": "audience.context.triggers",
+          "min": 20,
+          "max": 650,
+          "example": "Na maanden zonder vooruitgang besluit de klant persoonlijke begeleiding te zoeken.",
+          "notes": "Trigger is hypothese tenzij onderbouwd door echte gesprekken."
+        },
+        {
+          "id": "b2b_roles",
+          "question": "Welke functies beslissen meestal mee over een aankoop?",
+          "type": "text",
+          "required": false,
+          "mapping": "audience.b2b.decision_roles",
+          "max": 200,
+          "when": {
+            "field": "market_type",
+            "in": [
+              "b2b",
+              "mixed"
+            ]
+          },
+          "example": "Eigenaar, HR-manager of teamleider",
+          "notes": "Alleen bij B2B of gemengde markt."
+        },
+        {
+          "id": "b2b_company_profile",
+          "question": "Welke soorten bedrijven passen het beste bij jouw aanbod?",
+          "type": "textarea",
+          "required": false,
+          "mapping": "audience.b2b.company_profile",
+          "max": 400,
+          "when": {
+            "field": "market_type",
+            "in": [
+              "b2b",
+              "mixed"
+            ]
+          },
+          "example": "Dienstverleners met 10 tot 50 medewerkers.",
+          "notes": "Geen specifieke bedrijfsnamen vereist."
+        },
+        {
+          "id": "good_fit",
+          "question": "Welke klanten zijn een goede match voor jouw aanpak?",
+          "type": "textarea",
+          "required": true,
+          "mapping": "audience.fit.good_fit",
+          "min": 20,
+          "max": 500,
+          "example": "Mensen die openstaan voor begeleiding en tijd willen vrijmaken voor hun doelen.",
+          "notes": "Geschiktheid moet relevant zijn voor dienst, niet discriminerend."
+        },
+        {
+          "id": "bad_fit",
+          "question": "Voor wie is jouw dienstverlening juist niet geschikt?",
+          "type": "textarea",
+          "required": false,
+          "mapping": "audience.fit.not_fit",
+          "max": 450,
+          "example": "Wie uitsluitend een eenmalig trainingsschema zoekt zonder begeleiding.",
+          "notes": "Verzamel geen uitsluitingen op gevoelige of beschermde kenmerken."
+        }
+      ]
+    },
+    {
+      "id": "problemen",
+      "title": "Problemen & gewenste uitkomst",
+      "subtitle": "Schrijf vanuit de situatie van de klant, niet vanuit jouw dienst.",
+      "fields": [
+        {
+          "id": "main_problems",
+          "question": "Welke drie problemen of frustraties hoor je het vaakst?",
+          "type": "textarea",
+          "required": true,
+          "mapping": "audience.pain.primary_problems",
+          "min": 35,
+          "max": 850,
+          "example": "1. Geen structuur in trainen\n2. Moeite met volhouden\n3. Geen idee wat werkt",
+          "notes": "Bij voorkeur concrete voorbeelden; voeg geen niet-onderbouwde percentages toe."
+        },
+        {
+          "id": "problem_impact",
+          "question": "Wat zijn de gevolgen van deze problemen?",
+          "type": "multi_choice",
+          "required": false,
+          "mapping": "audience.pain.consequences",
+          "min_items": 0,
+          "max_items": 5,
+          "choices": [
+            {
+              "value": "time",
+              "label": "Tijdverlies"
+            },
+            {
+              "value": "cost",
+              "label": "Extra kosten"
+            },
+            {
+              "value": "uncertainty",
+              "label": "Twijfel of gebrek aan overzicht"
+            },
+            {
+              "value": "frustration",
+              "label": "Frustratie"
+            },
+            {
+              "value": "missed_opportunity",
+              "label": "Gemiste kansen"
+            },
+            {
+              "value": "other",
+              "label": "Iets anders"
+            }
+          ],
+          "notes": "Antwoorden geven mogelijke copyhoeken, geen objectief bewezen impact."
+        },
+        {
+          "id": "current_solutions",
+          "question": "Wat heeft de klant meestal al geprobeerd?",
+          "type": "textarea",
+          "required": false,
+          "mapping": "audience.pain.prior_attempts",
+          "max": 550,
+          "example": "Zelfstandig trainen met gratis online schema’s.",
+          "notes": "Vrijwillig."
+        },
+        {
+          "id": "desired_outcome",
+          "question": "Wat wil deze klant uiteindelijk bereiken?",
+          "type": "textarea",
+          "required": true,
+          "mapping": "audience.goals.desired_outcome",
+          "min": 25,
+          "max": 650,
+          "example": "Met vertrouwen twee of drie keer per week trainen volgens een haalbaar plan.",
+          "notes": "Geen gegarandeerd resultaat in websitecopy zonder bewijs."
+        },
+        {
+          "id": "success_definition",
+          "question": "Waaraan merkt de klant dat jouw begeleiding helpt?",
+          "type": "textarea",
+          "required": false,
+          "mapping": "audience.goals.success_signals",
+          "max": 500,
+          "example": "Kan oefeningen zelfstandig uitvoeren en houdt het trainingsritme vol.",
+          "notes": "Beschrijf waarneembare signalen en vermijd belofte van medische effecten."
+        },
+        {
+          "id": "decision_urgency",
+          "question": "Hoe snel wil de ideale klant meestal beginnen?",
+          "type": "single_choice",
+          "required": false,
+          "mapping": "audience.goals.typical_urgency",
+          "choices": [
+            {
+              "value": "now",
+              "label": "Binnen enkele dagen"
+            },
+            {
+              "value": "weeks",
+              "label": "Binnen een paar weken"
+            },
+            {
+              "value": "research",
+              "label": "Oriënteert zich meestal langer"
+            },
+            {
+              "value": "varies",
+              "label": "Verschilt sterk per klant"
+            }
+          ],
+          "notes": "Vrijblijvende indicatie; niet gebruiken voor manipulerende urgentieclaims."
+        }
+      ]
+    },
+    {
+      "id": "koopgedrag",
+      "title": "Bezwaren & koopgedrag",
+      "subtitle": "Wat maakt dat iemand wel of niet voor jou kiest?",
+      "fields": [
+        {
+          "id": "objections",
+          "question": "Wat houdt jouw ideale klant vaak tegen om contact op te nemen?",
+          "type": "multi_choice",
+          "required": true,
+          "mapping": "audience.decision.objections",
+          "min_items": 1,
+          "max_items": 5,
+          "choices": [
+            {
+              "value": "price",
+              "label": "Prijs / budget"
+            },
+            {
+              "value": "time",
+              "label": "Geen tijd"
+            },
+            {
+              "value": "trust",
+              "label": "Nog onvoldoende vertrouwen"
+            },
+            {
+              "value": "uncertainty",
+              "label": "Onzeker over het resultaat"
+            },
+            {
+              "value": "prior_bad",
+              "label": "Eerdere slechte ervaring"
+            },
+            {
+              "value": "commitment",
+              "label": "Bang voor een lang traject"
+            },
+            {
+              "value": "other",
+              "label": "Anders"
+            }
+          ],
+          "notes": "Kies echte bezwaren; verzin geen weerstand die je nooit ziet."
+        },
+        {
+          "id": "objection_other",
+          "question": "Welk ander bezwaar hoor je vaak?",
+          "type": "text",
+          "required": true,
+          "mapping": "audience.decision.objections_other",
+          "min": 3,
+          "max": 180,
+          "when": {
+            "field": "objections",
+            "includes": "other"
+          },
+          "example": "Ik wil eerst overleggen met mijn partner.",
+          "notes": "Alleen verplicht bij keuze Anders."
+        },
+        {
+          "id": "purchase_drivers",
+          "question": "Wat geeft vaak de doorslag in de beslissing?",
+          "type": "multi_choice",
+          "required": true,
+          "mapping": "audience.decision.drivers",
+          "min_items": 1,
+          "max_items": 4,
+          "choices": [
+            {
+              "value": "personal",
+              "label": "Persoonlijke aandacht"
+            },
+            {
+              "value": "expertise",
+              "label": "Aantoonbare deskundigheid"
+            },
+            {
+              "value": "clarity",
+              "label": "Duidelijke aanpak"
+            },
+            {
+              "value": "reviews",
+              "label": "Ervaringen van anderen"
+            },
+            {
+              "value": "practical",
+              "label": "Praktische uitvoerbaarheid"
+            },
+            {
+              "value": "price_value",
+              "label": "Goede verhouding tussen prijs en waarde"
+            },
+            {
+              "value": "speed",
+              "label": "Snel kunnen starten"
+            }
+          ],
+          "notes": "Wordt gebruikt om bewijs- en FAQ-secties te prioriteren."
+        },
+        {
+          "id": "frequent_questions",
+          "question": "Welke twee of drie vragen krijg je vlak vóór iemand klant wordt?",
+          "type": "textarea",
+          "required": true,
+          "mapping": "audience.decision.pre_purchase_questions",
+          "min": 15,
+          "max": 700,
+          "example": "Hoeveel tijd moet ik vrijmaken? Is het een vast traject? Wat als ik een week niet kan?",
+          "notes": "Vraag/antwoordbasis voor FAQ. Antwoorden over aanbod komen uit Q3."
+        },
+        {
+          "id": "discovery_channels",
+          "question": "Hoe vinden klanten je meestal?",
+          "type": "multi_choice",
+          "required": false,
+          "mapping": "audience.discovery.channels",
+          "min_items": 0,
+          "max_items": 6,
+          "choices": [
+            {
+              "value": "google",
+              "label": "Google / zoeken"
+            },
+            {
+              "value": "ai",
+              "label": "AI-assistenten (bijv. ChatGPT)"
+            },
+            {
+              "value": "social",
+              "label": "Social media"
+            },
+            {
+              "value": "referrals",
+              "label": "Aanbevelingen"
+            },
+            {
+              "value": "local",
+              "label": "Lokale zichtbaarheid"
+            },
+            {
+              "value": "partners",
+              "label": "Partners / netwerk"
+            },
+            {
+              "value": "unknown",
+              "label": "Weet ik niet"
+            }
+          ],
+          "notes": "AI/GEO wordt niet als bewezen kanaal geregistreerd zonder analytics-data; onbekend is exclusief."
+        }
+      ]
+    },
+    {
+      "id": "communicatie",
+      "title": "Boodschap & kwalificatie",
+      "subtitle": "Wat moet de website duidelijk maken, en welke vragen mogen we bij een lead stellen?",
+      "fields": [
+        {
+          "id": "first_message",
+          "question": "Wat moet een bezoeker binnen vijf seconden begrijpen?",
+          "type": "textarea",
+          "required": true,
+          "mapping": "audience.messaging.primary_message",
+          "min": 20,
+          "max": 450,
+          "example": "Je hoeft niet dagelijks te sporten om structureel fitter te worden.",
+          "notes": "Copyrichting, niet letterlijk de definitieve hero-H1."
+        },
+        {
+          "id": "trust_factors",
+          "question": "Wat helpt jouw ideale klant vertrouwen te krijgen?",
+          "type": "multi_choice",
+          "required": false,
+          "mapping": "audience.messaging.trust_factors",
+          "min_items": 0,
+          "max_items": 5,
+          "choices": [
+            {
+              "value": "reviews",
+              "label": "Echte reviews"
+            },
+            {
+              "value": "credentials",
+              "label": "Diploma’s of certificering"
+            },
+            {
+              "value": "story",
+              "label": "Jouw achtergrond/verhaal"
+            },
+            {
+              "value": "process",
+              "label": "Heldere werkwijze"
+            },
+            {
+              "value": "cases",
+              "label": "Cases of voorbeelden"
+            },
+            {
+              "value": "photos",
+              "label": "Professionele foto’s"
+            }
+          ],
+          "notes": "Alleen gebruiken als materiaal daadwerkelijk beschikbaar is (Q1/Q4)."
+        },
+        {
+          "id": "qualification_questions",
+          "question": "Welke vragen wil je bij een nieuwe aanvraag als eerste weten? (max. drie)",
+          "type": "textarea",
+          "required": false,
+          "mapping": "audience.qualification.preferred_questions",
+          "max": 550,
+          "example": "Wat wil je bereiken? Wanneer wil je starten? Zoek je online of op locatie begeleiding?",
+          "notes": "Voorstellen voor AI-eerste reactie; Westend keurt prompts apart goed. Geen medische, religieuze of andere gevoelige intakegegevens."
+        },
+        {
+          "id": "context_evidence",
+          "question": "Waarop zijn jouw antwoorden vooral gebaseerd?",
+          "type": "single_choice",
+          "required": true,
+          "mapping": "audience.evidence.source_quality",
+          "choices": [
+            {
+              "value": "customer_conversations",
+              "label": "Gesprekken met echte klanten"
+            },
+            {
+              "value": "sales_history",
+              "label": "Eerdere aanvragen of verkoopervaring"
+            },
+            {
+              "value": "market_research",
+              "label": "Eigen marktonderzoek"
+            },
+            {
+              "value": "assumptions",
+              "label": "Vooral mijn eigen aannames"
+            },
+            {
+              "value": "mixed",
+              "label": "Een combinatie hiervan"
+            }
+          ],
+          "notes": "Vermelding van bewijskwaliteit, zodat AI geen hypotheses als feiten presenteert."
+        },
+        {
+          "id": "context_uncertainty",
+          "question": "Waar twijfel je nog over bij je doelgroep?",
+          "type": "textarea",
+          "required": false,
+          "mapping": "audience.evidence.uncertainties",
+          "max": 550,
+          "example": "Of online coaching belangrijk genoeg is om op de homepage te benoemen.",
+          "notes": "Input voor Westend-review en toekomstig websiteadvies."
+        }
+      ]
+    }
+  ],
+  "status_flow": [
+    "draft",
+    "submitted",
+    "review_needed",
+    "approved"
+  ],
+  "autosave": {
+    "production": "server-side drafts met debounced opslaan, conflictcontrole en zichtbare save-bevestiging; geen gevoelige browseropslag",
+    "prototype": "uitsluitend browser localStorage op dit apparaat"
+  },
+  "rules": {
+    "primary_audience": "één primaire doelgroep; optionele tweede doelgroep nooit automatische tweede landingspagina",
+    "sensitive_info": "geen diagnoses, etniciteit, religie, politieke voorkeur, seksueel leven of andere gevoelige persoonsgegevens verzamelen; geen individuele bezoekersprofielen",
+    "evidence": "client claim en onderbouwd feit apart labelen",
+    "ai": "geen eigen conclusies als geverifieerde klantinzichten presenteren",
+    "marketing": "no consent inferred; geen persoonsgegevens van bestaande klanten uploaden in dit formulier",
+    "no_auto_publish": true
+  }
+}

@@ -1,0 +1,789 @@
+{
+  "form_id": "Q4_BRANDING_ASSETS",
+  "schema_version": "1.0.0",
+  "version": "v1.0-concept",
+  "date": "2026-10-17",
+  "language": "nl-NL",
+  "title": "Branding, Content & Assets",
+  "target": "Business Owner",
+  "sections": [
+    {
+      "id": "brand",
+      "title": "Bestaande huisstijl",
+      "subtitle": "We gebruiken wat je al hebt. Een nieuwe identiteit is optioneel meerwerk.",
+      "fields": [
+        {
+          "id": "brand_status",
+          "question": "Hoe compleet is je huidige huisstijl?",
+          "type": "single_choice",
+          "mapping": "brand.current.status",
+          "required": true,
+          "choices": [
+            {
+              "value": "complete",
+              "label": "Logo, kleuren en richtlijnen aanwezig"
+            },
+            {
+              "value": "basic",
+              "label": "Logo en/of kleuren aanwezig"
+            },
+            {
+              "value": "none",
+              "label": "Er is nog geen huisstijl"
+            }
+          ],
+          "note": "Geen automatische complete rebranding in het standaardpakket."
+        },
+        {
+          "id": "logo_assets",
+          "question": "Upload je logo of logo-varianten",
+          "type": "file",
+          "mapping": "assets.logo",
+          "required": false,
+          "accept": [
+            ".svg",
+            ".png",
+            ".webp",
+            ".pdf"
+          ],
+          "max_files": 5,
+          "max_mb": 10,
+          "when": {
+            "field": "brand_status",
+            "in": [
+              "complete",
+              "basic"
+            ]
+          },
+          "note": "Voorkeur: origineel vectorbestand (SVG/PDF). Bestanden worden pas via beveiligde upload opgeslagen in de echte app."
+        },
+        {
+          "id": "brandbook_assets",
+          "question": "Heb je een bestaande brand guide of stijlgids? Upload die hier.",
+          "type": "file",
+          "mapping": "assets.brandbook",
+          "required": false,
+          "accept": [
+            ".pdf"
+          ],
+          "max_files": 2,
+          "max_mb": 15,
+          "when": {
+            "field": "brand_status",
+            "eq": "complete"
+          }
+        },
+        {
+          "id": "brand_colors",
+          "question": "Welke merkkleuren gebruik je?",
+          "type": "text",
+          "mapping": "brand.current.colors_raw",
+          "required": false,
+          "max": 200,
+          "example": "#19372C en #F7EFE2 of “donkergroen en crème”",
+          "note": "AI zet dit later om naar design tokens; twijfelachtige kleurcodes zijn reviewpunten."
+        },
+        {
+          "id": "brand_fonts",
+          "question": "Welke lettertypen gebruik je?",
+          "type": "text",
+          "mapping": "brand.current.fonts_raw",
+          "required": false,
+          "max": 160,
+          "example": "Poppins en Instrument Serif"
+        },
+        {
+          "id": "brand_style",
+          "question": "Welke drie woorden passen het beste bij de uitstraling?",
+          "type": "multi_choice",
+          "mapping": "brand.current.style_keywords",
+          "required": true,
+          "min_items": 1,
+          "max_items": 3,
+          "choices": [
+            {
+              "value": "premium",
+              "label": "Premium"
+            },
+            {
+              "value": "minimal",
+              "label": "Minimalistisch"
+            },
+            {
+              "value": "modern",
+              "label": "Modern"
+            },
+            {
+              "value": "personal",
+              "label": "Persoonlijk"
+            },
+            {
+              "value": "sporty",
+              "label": "Sportief"
+            },
+            {
+              "value": "warm",
+              "label": "Warm"
+            },
+            {
+              "value": "corporate",
+              "label": "Zakelijk"
+            },
+            {
+              "value": "energetic",
+              "label": "Energiek"
+            }
+          ]
+        },
+        {
+          "id": "new_branding_request",
+          "question": "Wil je een offerte voor nieuwe branding of een uitgebreid brandbook?",
+          "type": "single_choice",
+          "mapping": "commercial.upsells.branding",
+          "required": true,
+          "choices": [
+            {
+              "value": "no",
+              "label": "Nee, bestaande branding gebruiken"
+            },
+            {
+              "value": "quote",
+              "label": "Ja, ontvang vrijblijvend een voorstel"
+            },
+            {
+              "value": "unsure",
+              "label": "Ik wil graag advies"
+            }
+          ],
+          "note": "Nieuwe branding: aparte offerte, uitgevoerd door ontwerper of AI-ondersteund afhankelijk van budget."
+        }
+      ]
+    },
+    {
+      "id": "photography",
+      "title": "Fotografie & beeldmateriaal",
+      "subtitle": "Authentieke beelden maken een website geloofwaardig. We controleren kwaliteit en gebruiksrechten.",
+      "fields": [
+        {
+          "id": "photo_status",
+          "question": "Welk geschikt beeldmateriaal heb je al?",
+          "type": "single_choice",
+          "mapping": "assets.photos.availability",
+          "required": true,
+          "choices": [
+            {
+              "value": "professional",
+              "label": "Professionele eigen foto’s"
+            },
+            {
+              "value": "mixed",
+              "label": "Een combinatie van eigen en andere beelden"
+            },
+            {
+              "value": "little",
+              "label": "Weinig tot geen geschikt materiaal"
+            }
+          ]
+        },
+        {
+          "id": "photo_upload",
+          "question": "Upload geschikte bedrijfsfoto’s",
+          "type": "file",
+          "mapping": "assets.photos.uploads",
+          "required": false,
+          "accept": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "max_files": 15,
+          "max_mb": 15,
+          "note": "In demo alleen bestandsnamen; in productie bestandsscan, opslag, limieten en verwijdering."
+        },
+        {
+          "id": "photo_categories",
+          "question": "Welke onderwerpen zijn afgebeeld?",
+          "type": "multi_choice",
+          "mapping": "assets.photos.categories",
+          "required": false,
+          "max_items": 5,
+          "choices": [
+            {
+              "value": "portrait",
+              "label": "Ondernemer of medewerkers"
+            },
+            {
+              "value": "workspace",
+              "label": "Werkruimte / praktijk / locatie"
+            },
+            {
+              "value": "service",
+              "label": "Diensten in actie"
+            },
+            {
+              "value": "product",
+              "label": "Producten en materialen"
+            },
+            {
+              "value": "clients",
+              "label": "Klanten of herkenbare derden"
+            }
+          ]
+        },
+        {
+          "id": "image_license",
+          "question": "Heb je het recht om de aangeleverde foto’s commercieel op de website te gebruiken?",
+          "type": "single_choice",
+          "mapping": "assets.photos.license_state",
+          "required": true,
+          "when": {
+            "field": "photo_status",
+            "in": [
+              "professional",
+              "mixed"
+            ]
+          },
+          "choices": [
+            {
+              "value": "yes",
+              "label": "Ja, ik kan de gebruiksrechten bevestigen"
+            },
+            {
+              "value": "check",
+              "label": "Dat moet ik nog controleren"
+            },
+            {
+              "value": "no",
+              "label": "Nee / ik weet het niet"
+            }
+          ],
+          "note": "Onzekere rechten blokkeren publicatie van de betrokken beelden, niet het opslaan van de intake."
+        },
+        {
+          "id": "people_consent",
+          "question": "Is publicatie van herkenbare personen op deze beelden toegestaan?",
+          "type": "single_choice",
+          "mapping": "assets.photos.people_permission",
+          "required": true,
+          "when": {
+            "field": "photo_categories",
+            "includes_any": [
+              "portrait",
+              "clients"
+            ]
+          },
+          "choices": [
+            {
+              "value": "yes",
+              "label": "Ja, waar nodig is toestemming/rechtsgrond geregeld"
+            },
+            {
+              "value": "check",
+              "label": "Nog controleren"
+            },
+            {
+              "value": "no",
+              "label": "Nee, deze beelden niet publiceren"
+            }
+          ]
+        },
+        {
+          "id": "stock_policy",
+          "question": "Mogen we geschikte stockbeelden voorstellen als eigen beelden ontbreken?",
+          "type": "single_choice",
+          "mapping": "assets.photos.stock_policy",
+          "required": true,
+          "choices": [
+            {
+              "value": "allowed",
+              "label": "Ja, na selectie en licentiecontrole"
+            },
+            {
+              "value": "consult",
+              "label": "Alleen na overleg"
+            },
+            {
+              "value": "not_allowed",
+              "label": "Nee, liever uitsluitend eigen foto’s"
+            }
+          ]
+        },
+        {
+          "id": "photoshoot_request",
+          "question": "Wil je een offerte voor professionele bedrijfsfotografie?",
+          "type": "single_choice",
+          "mapping": "commercial.upsells.photography",
+          "required": true,
+          "choices": [
+            {
+              "value": "no",
+              "label": "Nee"
+            },
+            {
+              "value": "quote",
+              "label": "Ja, stuur een voorstel"
+            },
+            {
+              "value": "unsure",
+              "label": "Misschien, adviseer mij"
+            }
+          ],
+          "note": "Fotoshoot nooit standaard inbegrepen; aparte offerte en licentieafspraken."
+        }
+      ]
+    },
+    {
+      "id": "content",
+      "title": "Bestaande content & referenties",
+      "subtitle": "We hergebruiken goede informatie, maar nemen nooit automatisch claims of teksten over.",
+      "fields": [
+        {
+          "id": "current_website",
+          "question": "Wat is de URL van je huidige website?",
+          "type": "url",
+          "mapping": "website.existing.url",
+          "required": false,
+          "max": 300,
+          "example": "https://voorbeeld.nl"
+        },
+        {
+          "id": "available_assets",
+          "question": "Welke bestaande content kunnen we gebruiken?",
+          "type": "multi_choice",
+          "mapping": "content.sources.available",
+          "required": true,
+          "min_items": 1,
+          "max_items": 6,
+          "choices": [
+            {
+              "value": "site",
+              "label": "Huidige website"
+            },
+            {
+              "value": "texts",
+              "label": "Bestaande teksten"
+            },
+            {
+              "value": "brochure",
+              "label": "Brochure of PDF"
+            },
+            {
+              "value": "reviews",
+              "label": "Reviews of referenties"
+            },
+            {
+              "value": "faq",
+              "label": "FAQ / veelgestelde vragen"
+            },
+            {
+              "value": "cases",
+              "label": "Cases / werkvoorbeelden"
+            },
+            {
+              "value": "none",
+              "label": "Nog geen content"
+            }
+          ],
+          "exclusive": [
+            "none"
+          ]
+        },
+        {
+          "id": "content_files",
+          "question": "Upload brochures, tekstdocumenten of voorbeelden",
+          "type": "file",
+          "mapping": "assets.content.documents",
+          "required": false,
+          "accept": [
+            ".pdf",
+            ".docx",
+            ".txt",
+            ".png"
+          ],
+          "max_files": 10,
+          "max_mb": 15
+        },
+        {
+          "id": "copy_preference",
+          "question": "Wat mogen we met de bestaande teksten doen?",
+          "type": "single_choice",
+          "mapping": "content.copy.preference",
+          "required": true,
+          "choices": [
+            {
+              "value": "rewrite",
+              "label": "Herschrijven op basis van bestaande feiten"
+            },
+            {
+              "value": "reuse",
+              "label": "Waar mogelijk grotendeels behouden"
+            },
+            {
+              "value": "new",
+              "label": "Nieuw schrijven op basis van de intake"
+            }
+          ]
+        },
+        {
+          "id": "website_references",
+          "question": "Welke websites of stijlen spreken je aan?",
+          "type": "textarea",
+          "mapping": "brand.references.external",
+          "required": false,
+          "max": 700,
+          "example": "https://voorbeeld.nl — goede navigatie, maar liever minder druk."
+        },
+        {
+          "id": "westend_reference",
+          "question": "Heb je een voorkeur voor een bestaande Westend-website of stijl?",
+          "type": "text",
+          "mapping": "brand.references.westend",
+          "required": false,
+          "max": 200,
+          "example": "De rustige opbouw van de website van klant X",
+          "note": "Referenties zijn inspiratie; teksten, ontwerpen en beelden van andere klanten worden niet zonder rechten gekopieerd."
+        },
+        {
+          "id": "proof_sources",
+          "question": "Waar kunnen we jouw reviews, certificaten of andere bewijsstukken verifiëren?",
+          "type": "textarea",
+          "mapping": "content.proof_sources",
+          "required": false,
+          "max": 550,
+          "example": "Google Bedrijfsprofiel; certificaat is beschikbaar als PDF",
+          "note": "AI mag nooit testimonials of resultaten verzinnen."
+        },
+        {
+          "id": "legal_docs",
+          "question": "Zijn privacyverklaring en eventuele voorwaarden aanwezig?",
+          "type": "single_choice",
+          "mapping": "content.legal.status",
+          "required": true,
+          "choices": [
+            {
+              "value": "ready",
+              "label": "Ja, documenten zijn beschikbaar"
+            },
+            {
+              "value": "need_review",
+              "label": "Ja, maar ze moeten nagekeken worden"
+            },
+            {
+              "value": "missing",
+              "label": "Nee, hier heb ik hulp bij nodig"
+            }
+          ],
+          "note": "Geen juridische juistheid garanderen; noodzakelijke privacy- en cookie-informatie vóór livegang controleren."
+        }
+      ]
+    },
+    {
+      "id": "technical",
+      "title": "Domein, contact & metingen",
+      "subtitle": "We verzamelen alleen projectgegevens — nooit wachtwoorden of herstelcodes.",
+      "fields": [
+        {
+          "id": "domain_status",
+          "question": "Heb je al een domeinnaam voor deze website?",
+          "type": "single_choice",
+          "mapping": "website.domain.status",
+          "required": true,
+          "choices": [
+            {
+              "value": "existing",
+              "label": "Ja"
+            },
+            {
+              "value": "new",
+              "label": "Nog niet"
+            },
+            {
+              "value": "unsure",
+              "label": "Ik weet het niet"
+            }
+          ]
+        },
+        {
+          "id": "domain_name",
+          "question": "Welke domeinnaam gaat de website gebruiken?",
+          "type": "domain",
+          "mapping": "website.domain.name",
+          "required": true,
+          "when": {
+            "field": "domain_status",
+            "eq": "existing"
+          },
+          "max": 253,
+          "example": "voorbeeld.nl"
+        },
+        {
+          "id": "site_relation",
+          "question": "Wat gebeurt er met je huidige website?",
+          "type": "single_choice",
+          "mapping": "website.migration.relation",
+          "required": true,
+          "choices": [
+            {
+              "value": "replace",
+              "label": "We vervangen een bestaande website"
+            },
+            {
+              "value": "new",
+              "label": "Het wordt een nieuwe website"
+            },
+            {
+              "value": "unknown",
+              "label": "Nog afstemmen"
+            }
+          ]
+        },
+        {
+          "id": "dns_control",
+          "question": "Wie kan de DNS of domeininstellingen wijzigen?",
+          "type": "single_choice",
+          "mapping": "website.domain.access_status",
+          "required": true,
+          "choices": [
+            {
+              "value": "customer",
+              "label": "Ik of mijn team"
+            },
+            {
+              "value": "provider",
+              "label": "Mijn huidige leverancier"
+            },
+            {
+              "value": "unknown",
+              "label": "Onbekend"
+            }
+          ],
+          "note": "Geen wachtwoorden in het formulier. Toegang later via een veilige, aparte procedure."
+        },
+        {
+          "id": "contact_email",
+          "question": "Op welk zakelijk e-mailadres mogen websiteaanvragen binnenkomen?",
+          "type": "email",
+          "mapping": "website.contact.recipient_email",
+          "required": true,
+          "max": 254,
+          "example": "info@voorbeeld.nl",
+          "note": "Adres wordt vóór livegang via test gecontroleerd; niet automatisch marketingmail sturen."
+        },
+        {
+          "id": "ga4_status",
+          "question": "Is Google Analytics 4 al ingericht?",
+          "type": "single_choice",
+          "mapping": "integrations.ga4.status",
+          "required": true,
+          "choices": [
+            {
+              "value": "yes",
+              "label": "Ja"
+            },
+            {
+              "value": "no",
+              "label": "Nee"
+            },
+            {
+              "value": "unknown",
+              "label": "Geen idee"
+            }
+          ]
+        },
+        {
+          "id": "gsc_status",
+          "question": "Is Google Search Console al gekoppeld?",
+          "type": "single_choice",
+          "mapping": "integrations.gsc.status",
+          "required": true,
+          "choices": [
+            {
+              "value": "yes",
+              "label": "Ja"
+            },
+            {
+              "value": "no",
+              "label": "Nee"
+            },
+            {
+              "value": "unknown",
+              "label": "Geen idee"
+            }
+          ]
+        },
+        {
+          "id": "clarity_status",
+          "question": "Gebruik je Microsoft Clarity al?",
+          "type": "single_choice",
+          "mapping": "integrations.clarity.status",
+          "required": true,
+          "choices": [
+            {
+              "value": "yes",
+              "label": "Ja"
+            },
+            {
+              "value": "no",
+              "label": "Nee"
+            },
+            {
+              "value": "unknown",
+              "label": "Geen idee"
+            }
+          ]
+        },
+        {
+          "id": "cookie_setup",
+          "question": "Heb je al een cookiebanner of toestemmingsbeheer?",
+          "type": "single_choice",
+          "mapping": "website.privacy.consent_manager",
+          "required": true,
+          "choices": [
+            {
+              "value": "yes",
+              "label": "Ja"
+            },
+            {
+              "value": "no",
+              "label": "Nee"
+            },
+            {
+              "value": "unknown",
+              "label": "Geen idee"
+            }
+          ],
+          "note": "Metingen en Clarity pas activeren conform de vereiste privacy-/toestemmingsinstellingen."
+        }
+      ]
+    },
+    {
+      "id": "handoff",
+      "title": "Laatste controle & aanvullende wensen",
+      "subtitle": "Tot slot controleren we of de input en gebruiksrechten klaar zijn voor productie.",
+      "fields": [
+        {
+          "id": "social_links",
+          "question": "Welke socialmediaprofielen mogen op de website staan?",
+          "type": "textarea",
+          "mapping": "website.social.links",
+          "required": false,
+          "max": 650,
+          "example": "https://www.linkedin.com/company/voorbeeld/"
+        },
+        {
+          "id": "booking_link",
+          "question": "Wat is je boekingslink, als je er een hebt?",
+          "type": "url",
+          "mapping": "integrations.booking.url",
+          "required": false,
+          "max": 500,
+          "example": "https://calendly.com/voorbeeld/gesprek",
+          "note": "Wordt afgestemd op Q3; een ontbrekende link bij boekings-CTA blokkeert livegang."
+        },
+        {
+          "id": "important_urls",
+          "question": "Welke bestaande pagina’s of URL’s moeten behouden blijven of worden doorgestuurd?",
+          "type": "textarea",
+          "mapping": "website.migration.important_urls",
+          "required": false,
+          "max": 700,
+          "when": {
+            "field": "site_relation",
+            "eq": "replace"
+          },
+          "example": "/diensten en /contact — bestaande SEO-pagina’s",
+          "note": "Redirection mapping wordt door Westend beoordeeld; geen automatische 301 op basis van onvolledige input."
+        },
+        {
+          "id": "restrictions",
+          "question": "Zijn er specifieke zaken die we absoluut niet mogen veranderen of publiceren?",
+          "type": "textarea",
+          "mapping": "project.constraints.restrictions",
+          "required": false,
+          "max": 800,
+          "example": "Geen klantfoto’s zonder schriftelijk akkoord; gebruik de huidige bedrijfsnaam."
+        },
+        {
+          "id": "third_party_rights",
+          "question": "Zijn alle aangeleverde logo’s, teksten en bestanden van jou of heb je gebruiksrecht?",
+          "type": "single_choice",
+          "mapping": "assets.rights.overall",
+          "required": true,
+          "choices": [
+            {
+              "value": "confirmed",
+              "label": "Ja, rechten zijn geregeld"
+            },
+            {
+              "value": "review",
+              "label": "Deels, ik moet iets controleren"
+            },
+            {
+              "value": "not_confirmed",
+              "label": "Nee / onbekend"
+            }
+          ],
+          "note": "Bij twijfel gaat het project naar review_needed. Geen publicatie van niet-vrijgegeven assets."
+        },
+        {
+          "id": "approval_contact",
+          "question": "Wie kan de definitieve inhoud namens je bedrijf goedkeuren?",
+          "type": "text",
+          "mapping": "project.approval.contact_name",
+          "required": true,
+          "min": 2,
+          "max": 120,
+          "example": "Voornaam Achternaam"
+        },
+        {
+          "id": "extra_notes",
+          "question": "Wil je nog iets meegeven voor de website?",
+          "type": "textarea",
+          "mapping": "project.notes",
+          "required": false,
+          "max": 1000,
+          "example": "Liever rustige animaties en een duidelijke knop om een intake te boeken."
+        }
+      ]
+    }
+  ],
+  "project_brief_outputs": [
+    "brand.current",
+    "brand.references",
+    "assets",
+    "content",
+    "website",
+    "integrations",
+    "commercial.upsells",
+    "project.constraints"
+  ],
+  "status_flow": [
+    "draft",
+    "submitted",
+    "review_needed",
+    "approved"
+  ],
+  "rules": {
+    "existing_branding_only": "Standaardwebsite past alleen bestaande branding toe en maakt technische design tokens; nieuwe branding wordt geoffreerd.",
+    "professional_photos": "Optionele upsell met offerte en gebruiksrechten.",
+    "source_of_truth": "Q1/Q2/Q3 leidend voor merk/ICP/aanbod; afwijkingen zijn reviewpunten.",
+    "dataforseo": "Westend-platformintegratie; geen credentials of keuze in klantintake.",
+    "analytics": "GA4, GSC en Clarity-status inventariseren; echte toegang via providerautorisatie, niet via wachtwoordformulier.",
+    "assets": "Bestanden gecontroleerd opslaan; scan, rechten, versies, maximaal toegestane MIME-types; private toegang.",
+    "privacy": "Clarity-opnames en analytics pas activeren volgens geldende privacy-/toestemmingsvereisten; masking van invoervelden.",
+    "launch": "Gebrekkige assetrechten, ontbrekende essentiële domeinconfiguratie of contactontvangst kunnen livegang blokkeren, maar de intake mag ingestuurd worden.",
+    "no_credentials": true,
+    "no_auto_publish": true,
+    "no_auto_upsell_billing": true
+  },
+  "production_security": {
+    "tenant_bound_upload": true,
+    "virus_scan": true,
+    "signed_upload": true,
+    "media_license_review": true,
+    "file_hashes": true,
+    "file_retention_policy_required": true
+  },
+  "prototype_limits": "Statische browserdemo; bestanden en antwoorden blijven lokaal, geen echte uploads of integraties."
+}

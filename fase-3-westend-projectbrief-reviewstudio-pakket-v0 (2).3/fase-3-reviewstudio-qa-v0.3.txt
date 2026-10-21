@@ -1,0 +1,9 @@
+Scope zonder besluit blijft geblokkeerd: OK
+Conceptnotitie behouden na re-render: OK
+Nieuwe bronversie trekt vrijgaven in: OK
+Project Brief JSON-export bevat correcte bronversie: OK
+Integratie vanuit bestaande Operations-navigatie: OK
+Bestaande Website Intelligence intact: OK
+Mobiel 390px zonder overflow (brief + checks): OK
+Mobiel 320px zonder overflow (brief + checks): OK
+Geen JavaScript runtime-errors: OK

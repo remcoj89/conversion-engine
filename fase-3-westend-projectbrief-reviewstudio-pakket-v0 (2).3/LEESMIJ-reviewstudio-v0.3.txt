@@ -1,0 +1,30 @@
+WESTEND DIGITAL — PROJECT BRIEF REVIEW v0.3
+===========================================
+
+OPENEN
+1. Open 'fase-3-westend-beheeromgeving-reviewstudio-v0.3.html' in een moderne browser.
+2. De pagina start automatisch in 'Project Brief Review'.
+3. Selecteer NoordFit Coaching voor de complete goedkeuringsflow.
+4. Ga naar 'Review & blokkades', markeer bewijs en beeldrechten gecontroleerd.
+5. Kies bij meerwerk bewust 'Als meerwerk uitsluiten' of 'Offerte-akkoord simuleren'.
+6. Keur de Project Brief goed, keur vervolgens de strategie goed bij 'Productie & vrijgave'.
+7. Simuleer staging, QA en het klantakkoord om de livegereedmelding te testen.
+8. Ga naar 'Historie' om een klantwijziging en versie-invalidering te simuleren.
+
+ANDERE DEMOKLANTEN
+- Vita Coaching: onvolledige Q4 en ontbrekende branding; goedkeuring geblokkeerd.
+- Dak & Techniek: QA nog niet klaar; klantakkoord en checks nodig.
+- Studio Strong: maatwerkproject met ontbrekende Q3/Q4; geen automatisch akkoord.
+
+LET OP
+- Alleen fictieve gegevens.
+- Geen echte backend, login, AI-model, bestanden, verzending, offerte, betaling of publicatie.
+- De demo bewaart acties alleen in werkgeheugen; een browserrefresh herstelt voorbeelddata.
+- Geen externe libraries of bronnen vereist.
+
+BESTANDEN
+- HTML: geïntegreerd, interactief beheerprototype.
+- DOCX/MD: functionele UX-specificatie met regels, statusmodel en acceptatiecriteria.
+- PNG: schermafbeeldingen voor desktop, mobiel en reviewcontroles.
+- JSON: fictieve voorbeeld-Project Brief, export uit prototype.
+- TXT: geautomatiseerde UI-testresultaten.
