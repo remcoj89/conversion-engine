@@ -1,11 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME, sessionCookiePolicy } from "../session/cookies";
+import { needsRefresh, type RefreshOutcome, type RefreshSession, type SessionTokens } from "../session/refresh";
 
 export type TodayHandlerDependencies = Readonly<{
   apiBaseUrl: string;
-  // Returns the session's access token, or null when there is no valid session.
-  lookupSession: (sessionId: string) => Promise<{ accessToken: string } | null>;
+  // Returns the session's tokens, or null when there is no valid session.
+  lookupSession: (sessionId: string) => Promise<SessionTokens | null>;
+  // Refreshes under a database lock; see lib/session/refresh.ts.
+  refreshSession: RefreshSession;
   fetch: typeof fetch;
+  now?: () => Date;
 }>;
 
 const noStore = { "Cache-Control": "no-store" };
@@ -13,21 +17,40 @@ const noStore = { "Cache-Control": "no-store" };
 // Alleen deze 400-codes zijn bedoeld voor de browser; al het andere wordt generiek.
 const forwardedBadRequestErrors = new Set(["tenant_required", "invalid_tenant"]);
 
-export function createTodayHandler({ apiBaseUrl, lookupSession, fetch }: TodayHandlerDependencies) {
+export function createTodayHandler({ apiBaseUrl, lookupSession, refreshSession, fetch, now = () => new Date() }: TodayHandlerDependencies) {
+  const callApi = (request: NextRequest, accessToken: string) =>
+    fetch(`${apiBaseUrl}/v1/dashboard/today`, {
+      cache: "no-store",
+      headers: apiHeaders(request, accessToken),
+      signal: AbortSignal.timeout(3000),
+    });
+
   return async function GET(request: NextRequest): Promise<Response> {
     try {
       // Alleen de sessiecookie telt; een Authorization-header uit de browser wordt genegeerd.
       const sessionId = request.cookies.get(SESSION_COOKIE_NAME)?.value;
       const session = sessionId ? await lookupSession(sessionId) : null;
-      if (!session) {
+      if (!sessionId || !session) {
         return unauthorizedWithoutSession();
       }
 
-      const response = await fetch(`${apiBaseUrl}/v1/dashboard/today`, {
-        cache: "no-store",
-        headers: apiHeaders(request, session.accessToken),
-        signal: AbortSignal.timeout(3000),
-      });
+      let accessToken = session.accessToken;
+      if (needsRefresh(session, now()) || session.accessExpiresAt.getTime() <= now().getTime()) {
+        const outcome = await refreshSession(sessionId);
+        if (outcome.status !== "ok") return refreshFailed(outcome);
+        accessToken = outcome.accessToken;
+      }
+
+      let response = await callApi(request, accessToken);
+
+      // Een API-401 betekent een verlopen of ingetrokken token: precies één refresh en één nieuwe poging.
+      // Een 403 gaat over autorisatie en leidt nooit tot een refresh.
+      if (response.status === 401) {
+        await discardBody(response);
+        const outcome = await refreshSession(sessionId, accessToken);
+        if (outcome.status !== "ok") return refreshFailed(outcome);
+        response = await callApi(request, outcome.accessToken);
+      }
 
       if (response.ok) {
         return reply(await response.json(), response.status);
@@ -36,9 +59,8 @@ export function createTodayHandler({ apiBaseUrl, lookupSession, fetch }: TodayHa
         return reply({ error: await badRequestError(response) }, 400);
       }
 
-      // Body is niet nodig; vrijgeven zodat de verbinding terug kan naar de pool.
-      await response.body?.cancel().catch(() => undefined);
-      // Nog geen refresh in deze slice: een API-401 gaat ongewijzigd door en de sessie blijft.
+      await discardBody(response);
+      // Ook na een verse refresh geweigerd: generiek 401, zonder nog een poging; de sessie blijft.
       if (response.status === 401) return reply({ error: "unauthorized" }, 401);
       if (response.status === 403) return reply({ error: "forbidden" }, 403);
       return reply({ error: "api_unavailable" }, 502);
@@ -47,6 +69,16 @@ export function createTodayHandler({ apiBaseUrl, lookupSession, fetch }: TodayHa
       return reply({ error: "api_unavailable" }, 503);
     }
   };
+}
+
+function refreshFailed(outcome: Exclude<RefreshOutcome, { status: "ok" }>): Response {
+  // Een ongeldige sessie is al verwijderd; de provider-fout laat de sessie staan.
+  return outcome.status === "invalid" ? unauthorizedWithoutSession() : reply({ error: "api_unavailable" }, 503);
+}
+
+// Body is niet nodig; vrijgeven zodat de verbinding terug kan naar de pool.
+async function discardBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
 }
 
 // De BFF beslist niets over tenanttoegang; x-tenant-id gaat ongewijzigd door, het token komt uit de sessie.

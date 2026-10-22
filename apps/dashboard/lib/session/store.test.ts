@@ -3,7 +3,15 @@ import { randomBytes } from "node:crypto";
 import test from "node:test";
 import { Pool, type PoolClient } from "pg";
 import { decryptSecret, generateSessionId, hashSessionId } from "./crypto";
-import { createSession, deleteSession, findSession, touchSession, type NewSession } from "./store";
+import {
+  createSession,
+  deleteSession,
+  findSession,
+  touchSession,
+  withLockedSession,
+  type LockedSession,
+  type NewSession,
+} from "./store";
 
 const key = randomBytes(32);
 const HOUR = 60 * 60 * 1000;
@@ -109,13 +117,13 @@ test("onbekend of misvormd sessie-ID geeft null", async () => {
   });
 });
 
-test("verlopen access token of verlopen sessie geeft null", async () => {
+test("verlopen sessie geeft null; verlopen access token niet, zodat het ververst kan worden", async () => {
   await withRollback(async (client) => {
     const past = new Date(Date.now() - HOUR);
     const accessExpired = await createSession(client, key, newSession({ accessExpiresAt: past }));
     const sessionExpired = await createSession(client, key, newSession({ absoluteExpiresAt: past }));
 
-    assert.equal(await findSession(client, key, accessExpired), null);
+    assert.equal((await findSession(client, key, accessExpired))?.accessExpiresAt.getTime(), past.getTime());
     assert.equal(await findSession(client, key, sessionExpired), null);
   });
 });
@@ -155,6 +163,98 @@ test("last_seen_at kan worden bijgewerkt", async () => {
     assert.equal(rows[0]?.fresh, true);
     assert.equal(await touchSession(client, generateSessionId()), false);
   });
+});
+
+// Row locks need real, committed rows and two connections, so these tests clean up after themselves.
+async function withCommittedSession(fn: (pool: Pool, sessionId: string) => Promise<void>, overrides: Partial<NewSession> = {}) {
+  const pool = testPool();
+  const sessionId = await createSession(pool, key, newSession(overrides));
+  try {
+    await fn(pool, sessionId);
+  } finally {
+    await deleteSession(pool, sessionId);
+    await pool.end();
+  }
+}
+
+test("withLockedSession geeft refresh-token en vervalmomenten en past rotatie toe", async () => {
+  await withCommittedSession(async (pool, sessionId) => {
+    const accessExpiresAt = new Date(Date.now() + 2 * HOUR);
+    const seen = await withLockedSession(pool, key, sessionId, async (session) => ({
+      result: session,
+      change: { kind: "rotate", accessToken: "rotated-access", refreshToken: "rotated-refresh", accessExpiresAt },
+    }));
+    assert.equal(seen?.accessToken, tokens.accessToken);
+    assert.equal(seen?.refreshToken, tokens.refreshToken);
+
+    const after = await withLockedSession(pool, key, sessionId, async (session) => ({ result: session }));
+    assert.equal(after?.accessToken, "rotated-access");
+    assert.equal(after?.refreshToken, "rotated-refresh");
+    assert.equal(after?.accessExpiresAt.getTime(), accessExpiresAt.getTime());
+
+    const { rows } = await pool.query<Record<string, unknown>>("select * from bff_sessions where id_hash = $1", [
+      hashSessionId(sessionId),
+    ]);
+    const stored = JSON.stringify(rows[0]);
+    assert.ok(!stored.includes("rotated-access") && !stored.includes("rotated-refresh"), "plaintext token in sessierij");
+  });
+});
+
+test("withLockedSession serialiseert gelijktijdige aanroepen op dezelfde sessie", async () => {
+  await withCommittedSession(async (pool, sessionId) => {
+    const seenRefreshTokens: string[] = [];
+    let counter = 0;
+    const refreshOnce = () =>
+      withLockedSession(pool, key, sessionId, async (session) => {
+        assert.ok(session);
+        seenRefreshTokens.push(session.refreshToken);
+        // Long enough for the other call to reach the lock while this one holds it.
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        counter += 1;
+        return {
+          result: counter,
+          change: {
+            kind: "rotate",
+            accessToken: `access-${counter}`,
+            refreshToken: `refresh-${counter}`,
+            accessExpiresAt: new Date(Date.now() + HOUR),
+          },
+        };
+      });
+
+    await Promise.all([refreshOnce(), refreshOnce()]);
+
+    // De tweede aanroep zag het al geroteerde token, nooit hetzelfde refresh-token als de eerste.
+    assert.equal(seenRefreshTokens.length, 2);
+    assert.equal(seenRefreshTokens[0], tokens.refreshToken);
+    assert.equal(seenRefreshTokens[1], "refresh-1");
+  });
+});
+
+test("withLockedSession kan de sessie verwijderen en draait terug bij een fout", async () => {
+  await withCommittedSession(async (pool, sessionId) => {
+    await assert.rejects(
+      withLockedSession(pool, key, sessionId, async () => {
+        throw new Error("provider exploded");
+      }),
+    );
+    assert.ok(await findSession(pool, key, sessionId), "fout laat de sessie staan");
+
+    await withLockedSession(pool, key, sessionId, async () => ({ result: null, change: { kind: "delete" } }));
+    assert.equal(await findSession(pool, key, sessionId), null);
+  });
+});
+
+test("withLockedSession geeft null voor onbekende, misvormde of verlopen sessies", async () => {
+  await withCommittedSession(
+    async (pool, sessionId) => {
+      for (const id of [sessionId, generateSessionId(), "' or 1=1 --"]) {
+        const seen = await withLockedSession<LockedSession | null>(pool, key, id, async (session) => ({ result: session }));
+        assert.equal(seen, null);
+      }
+    },
+    { absoluteExpiresAt: new Date(Date.now() - HOUR) },
+  );
 });
 
 test("testdata is na de tests teruggedraaid", async () => {
