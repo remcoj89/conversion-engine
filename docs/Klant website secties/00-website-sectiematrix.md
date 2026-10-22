@@ -13,10 +13,10 @@ De bestaande Word-documenten in deze map bevatten de standaardblokken voor de ee
 | Homepage | `website-blokken-home-pagina.docx` | ✅ Beschikbaar | Standaardblokken voor de primaire website-ingang |
 | Salespage | `website-blokken-salespagina.docx` | ✅ Beschikbaar | Herbruikbare commerciële template |
 | Over mij | `website-blokken-over-mij-pagina-1.docx` | ✅ Beschikbaar | Vertrouwen, achtergrond en persoonlijke positionering |
-| Contact | Nog geen bronbestand | ⬜ Te specificeren | Contact, aanvraag en/of afspraak |
-| Blog | Nog geen bronbestand | ⬜ Te specificeren | Blogoverzicht en blogdetail-template |
-| Leadmagnet | Nog geen bronbestand | ⬜ Te specificeren | Quiz of 14-/30-daagse challenge |
-| Bedankt | Nog geen bronbestand | ⬜ Te specificeren | Bevestiging en passende vervolgstap |
+| Contact | `website-blokken-contactpagina.md` | ✅ Beschikbaar | Conversiegericht contact, aanvraag en/of afspraak |
+| Blog | `website-blokken-blog.md` | ✅ Beschikbaar | Blogoverzicht en blogdetail-template |
+| Leadmagnet | `website-blokken-leadmagnetpagina.md` | ✅ Beschikbaar | Quiz of 14-/30-daagse challenge |
+| Bedankt | `website-blokken-bedankpagina-upsell.md` | ✅ Beschikbaar | Bevestiging, levering en één logische upsell |
 
 ## 2. Template-regels
 
@@ -24,7 +24,11 @@ De bestaande Word-documenten in deze map bevatten de standaardblokken voor de ee
 - Een klantwebsite configureert bestaande blokken; standaardimplementatie betekent geen vrij ontwerp zonder scopebesluit.
 - De salespage is herbruikbaar en krijgt klant-specifieke contentvelden.
 - De over-mij-pagina blijft een afzonderlijke template en wordt niet automatisch als contactpagina gebruikt.
-- Contact, blog, leadmagnet en bedankt krijgen een eigen specificatie voordat Claude Code ze implementeert.
+- Blog krijgt nog een eigen specificatie voordat Claude Code deze implementeert.
+- Contact, leadmagnet en bedankt/upsell hebben nu elk een eigen specificatie.
+- De blog heeft nu een eigen specificatie.
+
+Het document `website-globale-elementen.md` bevat de gedeelde header-, navigatie-, CTA-, footer-, formulier-, privacy- en SEO-regels voor alle pagina's.
 - Nieuwe blokken worden eerst als standaard of optionele variant goedgekeurd voordat ze in de templatebibliotheek komen.
 
 ## 3. Pagina-overzicht voor de standaardwebsite
@@ -55,7 +59,9 @@ De over-mij-pagina wordt gebruikt voor vertrouwen, achtergrond en persoonlijke p
 
 ### Contact
 
-Nog te specificeren als eigen template. Minimaal te bepalen:
+Bron: `website-blokken-contactpagina.md`
+
+De contactpagina is een eigen conversietemplate. De specificatie bepaalt minimaal:
 
 - contactdoel en primaire CTA;
 - formulier versus afspraaklink;
@@ -66,7 +72,9 @@ Nog te specificeren als eigen template. Minimaal te bepalen:
 
 ### Blog
 
-Nog te specificeren als:
+Bron: `website-blokken-blog.md`
+
+De blog ondersteunt:
 
 - blogoverzicht;
 - blogdetailpagina;
@@ -78,7 +86,9 @@ Doorlopende blogproductie valt niet automatisch binnen de website-delivery-scope
 
 ### Leadmagnet
 
-Nog te specificeren als herbruikbare template voor maximaal één actieve leadmagnet per website:
+Bron: `website-blokken-leadmagnetpagina.md`
+
+De leadmagnetpagina is een herbruikbare template voor maximaal één actieve leadmagnet per website:
 
 - **Trainingsdoel-check** als quizvariant;
 - **14-daagse challenge** als aanbevolen pilotvariant;
@@ -88,7 +98,9 @@ De challenge wordt in Fase 1 handmatig of via een eenvoudige gecontroleerde e-ma
 
 ### Bedankt
 
-Nog te specificeren als bevestigingspagina na een geldige aanvraag, contactinzending of leadmagnetactie. De pagina moet minimaal:
+Bron: `website-blokken-bedankpagina-upsell.md`
+
+De bedankt-/upsellpagina is de bevestigingspagina na een geldige aanvraag, contactinzending of leadmagnetactie. De pagina moet minimaal:
 
 - bevestigen wat er is ontvangen;
 - aangeven wat de bezoeker nu kan verwachten;
@@ -113,21 +125,18 @@ De globale onderdelen mogen niet per klant opnieuw worden uitgevonden; alleen co
 
 ## 5. Volgende specificatiestappen
 
-1. De blokken uit de drie bronbestanden vertalen naar een gecontroleerde implementatiematrix.
-2. De contactpagina als afzonderlijk document uitwerken.
-3. De blogtemplate definiëren.
-4. De leadmagnet- en challengeflow definiëren.
-5. De bedankt- en formulierstatussen definiëren.
-6. De globale header, navigatie en footer vastleggen.
-7. Daarna pas de demo-template bouwen.
+1. De blokken uit alle beschikbare bronbestanden vertalen naar een gecontroleerde implementatiematrix.
+2. De formulierstatussen en gedeelde CTA-regels consolideren.
+3. De demo-template bouwen.
 
 ## 6. Definition of Done voor de sectiematrix
 
 De sectiematrix is klaar wanneer:
 
-- de drie bestaande bronbestanden als standaard zijn geregistreerd;
+- alle beschikbare bronbestanden als standaard zijn geregistreerd;
 - contact niet meer wordt verward met over-mij;
 - alle zeven paginatypen een duidelijke status hebben;
-- ontbrekende templates afzonderlijk zijn benoemd;
+- alle zeven paginaspecificaties beschikbaar zijn;
+- globale elementen afzonderlijk zijn vastgelegd;
 - globale onderdelen zijn afgebakend;
 - Claude Code op basis hiervan een implementatieopdracht kan krijgen zonder nieuwe scopebeslissingen.
