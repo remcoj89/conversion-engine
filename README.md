@@ -53,6 +53,22 @@ ZITADEL beheert identiteit en authenticatie. De eigen PostgreSQL-database blijft
 - Testdatabase en migrations voor zowel development als test.
 - Lint, typecheck, tests en builds ingericht voor dashboard en API.
 
+## Security foundation — 22 oktober 2026
+
+De eerste interne beveiligingsgrens van de Fastify API is geïmplementeerd als voorbereiding op ZITADEL-authenticatie.
+
+- `GET /health` blijft publiek beschikbaar.
+- `GET /v1/dashboard/today` valt achter een auth-hook en geeft zonder geldige identity geen dashboarddata terug.
+- De auth-hook gebruikt een adaptergrens; de huidige serverconfiguratie is bewust fail-closed en authenticeert nog geen requests.
+- Een geauthenticeerde identity wordt via de lokale user en actieve membership vertaald naar een immutable `RequestContext` met tenant en rol.
+- Tenantkeuze gebeurt uitsluitend via `x-tenant-id` en wordt server-side gecontroleerd tegen actieve memberships. Body- en querywaarden worden niet gebruikt.
+- De rolcontrole gebruikt een deny-by-default permission map; momenteel is alleen `dashboard:read` geïmplementeerd.
+- De HTTP-laag is onafhankelijk van Drizzle door dependency injection van de membership resolver.
+- Onbevoegde requests geven geen tenant- of identity-informatie terug; foutuitkomsten zijn beperkt tot `401`, `400` of `403`.
+- De API-testset bevat HTTP-tests voor authenticatie, tenantkeuze, roltoegang en fail-closed gedrag. De database-testset controleert de echte membership resolver.
+
+Deze stap bevat nog geen ZITADEL-SDK, JWT-validatie, loginflow, MFA, PostgreSQL-RLS of wijziging aan de Next.js BFF. De resolver gebruikt daarom tijdelijk één geconfigureerde issuer en koppelt op `auth_provider_user_id`/OIDC-subject. Voor de eerste echte gebruiker moet issuer-opslag en de samengestelde uniqueness-regel nog worden besloten en gemigreerd. De server gebruikt tot die tijd een deny-all adapter; lokaal blijft alleen de healthcheck bruikbaar.
+
 ## Authenticatiebesluit — 21 oktober 2026
 
 Better Auth is vergeleken met SuperTokens, ZITADEL, Keycloak, Ory Kratos, Auth.js en managed providers. We hebben gekozen voor **ZITADEL** vanwege de combinatie van multi-tenancy, MFA, SSO, OIDC en de mogelijkheid om met een gratis cloudomgeving te starten.
@@ -93,12 +109,18 @@ De API gebruikt lokaal standaard poort `4000`. Databasegegevens staan in `apps/a
 
 ## Volgende stap
 
-De volgende ontwikkelstap is een kleine ZITADEL-proof-of-concept:
+De interne beveiligingsgrens staat nu als testbare basis. De volgende ontwikkelstap is eerst het afronden van de integratiegrenzen vóór de ZITADEL-proof-of-concept:
 
-1. Een development-project aanmaken in ZITADEL.
-2. OIDC-configuratie vastleggen zonder applicatiecode te wijzigen.
-3. Vaststellen hoe de ZITADEL-gebruiker wordt gekoppeld aan onze bestaande `users`- en `memberships`-tabellen.
-4. Daarna pas de eerste login-flow implementeren.
+1. De Fastify error handler begrenzen zodat interne foutdetails niet naar clients lekken.
+2. De Next.js BFF laten onderscheiden tussen `401`, `403`, `400` en API-/netwerkfouten, en later het auth-token doorgeven.
+3. Vastleggen hoe de gekozen tenant in het dashboard wordt beheerd.
+4. Daarna een kleine ZITADEL-proof-of-concept uitvoeren:
+   - een development-project aanmaken in ZITADEL;
+   - OIDC-configuratie vastleggen zonder applicatiecode te wijzigen;
+   - issuer, audience en MFA/AAL-beleid vaststellen;
+   - vaststellen hoe de ZITADEL-gebruiker wordt gekoppeld aan onze bestaande `users`- en `memberships`-tabellen.
+
+De eerste login-flow implementeren we pas nadat deze keuzes zijn vastgelegd.
 
 Elke stap blijft klein, testbaar en gericht op de bestaande architectuur. Er worden geen extra abstractielagen of services toegevoegd zonder concrete noodzaak.
 

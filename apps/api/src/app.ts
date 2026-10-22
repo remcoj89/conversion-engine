@@ -1,46 +1,24 @@
 import Fastify, { type FastifyServerOptions } from "fastify";
+import { createAuthHook, type AuthHookDependencies } from "./auth/authHook.js";
+import { registerDashboardRoutes } from "./routes/dashboard.js";
 
-// Vaste fixture tot er een databron is; null betekent "nog niet beschikbaar", nooit 0.
-const todayFixture = {
-  actionRequired: [
-    {
-      id: "leads-needing-attention",
-      label: "Leads die aandacht vragen",
-      value: null,
-      status: "unavailable",
-      source: "CRM",
-    },
-    {
-      id: "open-tasks",
-      label: "Open taken",
-      value: null,
-      status: "unavailable",
-      source: "CRM",
-    },
-    {
-      id: "confirmed-appointments",
-      label: "Bevestigde afspraken",
-      value: null,
-      status: "unavailable",
-      source: "Boekingsprovider",
-    },
-  ],
-  directFollowUp: {
-    status: "empty",
-    message:
-      "Zodra de Conversion Engine API is gekoppeld, verschijnen hier de aanvragen die opvolging nodig hebben.",
-  },
-} as const;
+export type AppDependencies = AuthHookDependencies;
 
-export function buildApp(options: FastifyServerOptions = { logger: true }) {
+export function buildApp(
+  dependencies: AppDependencies,
+  options: FastifyServerOptions = { logger: true },
+) {
   const app = Fastify(options);
 
+  // Public routes live on the root instance.
   app.get("/health", async () => {
     return { status: "ok", service: "conversion-engine-api" };
   });
 
-  app.get("/v1/dashboard/today", async () => {
-    return todayFixture;
+  // Everything registered in this encapsulated scope requires an auth context.
+  app.register(async (protectedApp) => {
+    protectedApp.addHook("onRequest", createAuthHook(dependencies));
+    registerDashboardRoutes(protectedApp);
   });
 
   return app;

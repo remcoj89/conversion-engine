@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/app.test.ts",
+    "test": "tsx --test src/app.test.ts src/auth.test.ts",
     "db:test": "node --env-file=.env --import tsx --test src/db.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"

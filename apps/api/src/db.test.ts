@@ -4,6 +4,9 @@ import test from "node:test";
 import { eq } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { PoolClient } from "pg";
+import { buildApp } from "./app.js";
+import { findActiveMemberships } from "./auth/membershipResolver.js";
+import type { ExternalIdentity } from "./auth/types.js";
 import { createDb } from "./db.js";
 import * as schema from "./db/schema.js";
 
@@ -217,6 +220,149 @@ test("memberships: toegestane rollen en statussen werken, andere worden geweiger
         [tenant.id, user.id],
       ),
     );
+  });
+});
+
+const TEST_ISSUER = "https://issuer.test";
+const identityFor = (subject: string): ExternalIdentity => ({ issuer: TEST_ISSUER, subject });
+
+// Maakt een user aan en geeft zijn identity terug.
+async function createUser(tx: Tx) {
+  const [user] = await tx.insert(schema.users).values({ authProviderUserId: uniqueId("auth") }).returning();
+  assert.ok(user);
+  return { user, identity: identityFor(user.authProviderUserId) };
+}
+
+async function createTenant(tx: Tx, status = "active") {
+  const [tenant] = await tx.insert(schema.tenants).values({ name: uniqueId("tenant"), status }).returning();
+  assert.ok(tenant);
+  return tenant;
+}
+
+test("findActiveMemberships: onbekende user geeft geen memberships", async () => {
+  await withRollback(async (tx) => {
+    // Een bestaande tenant met membership mag niet lekken naar een onbekend subject.
+    const { user } = await createUser(tx);
+    const tenant = await createTenant(tx);
+    await tx.insert(schema.memberships).values({ tenantId: tenant.id, userId: user.id, role: "owner" });
+
+    assert.deepEqual(await findActiveMemberships(tx, identityFor(uniqueId("unknown"))), []);
+  });
+});
+
+test("findActiveMemberships: user zonder membership geeft een lege lijst", async () => {
+  await withRollback(async (tx) => {
+    const { identity } = await createUser(tx);
+    await createTenant(tx);
+
+    assert.deepEqual(await findActiveMemberships(tx, identity), []);
+  });
+});
+
+test("findActiveMemberships: actieve owner en team_member worden gevonden", async () => {
+  await withRollback(async (tx) => {
+    for (const role of ["owner", "team_member"] as const) {
+      const { user, identity } = await createUser(tx);
+      const tenant = await createTenant(tx);
+      await tx.insert(schema.memberships).values({ tenantId: tenant.id, userId: user.id, role });
+
+      assert.deepEqual(await findActiveMemberships(tx, identity), [
+        { tenantId: tenant.id, userId: user.id, role, status: "active" },
+      ]);
+    }
+  });
+});
+
+test("findActiveMemberships: disabled en invited memberships worden niet gevonden", async () => {
+  await withRollback(async (tx) => {
+    for (const status of ["disabled", "invited"] as const) {
+      const { user, identity } = await createUser(tx);
+      const tenant = await createTenant(tx);
+      await tx.insert(schema.memberships).values({ tenantId: tenant.id, userId: user.id, role: "owner", status });
+
+      assert.deepEqual(await findActiveMemberships(tx, identity), [], `status ${status}`);
+    }
+  });
+});
+
+test("findActiveMemberships: membership in inactieve tenant wordt niet gevonden", async () => {
+  await withRollback(async (tx) => {
+    const { user, identity } = await createUser(tx);
+    const tenant = await createTenant(tx, "suspended");
+    await tx.insert(schema.memberships).values({ tenantId: tenant.id, userId: user.id, role: "owner" });
+
+    assert.deepEqual(await findActiveMemberships(tx, identity), []);
+  });
+});
+
+test("findActiveMemberships: user met memberships in twee actieve tenants", async () => {
+  await withRollback(async (tx) => {
+    const { user, identity } = await createUser(tx);
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    // Een membership van een andere user in tenant A mag niet meekomen.
+    const { user: other } = await createUser(tx);
+    await tx.insert(schema.memberships).values([
+      { tenantId: tenantA.id, userId: user.id, role: "owner" },
+      { tenantId: tenantB.id, userId: user.id, role: "team_member" },
+      { tenantId: tenantA.id, userId: other.id, role: "team_member" },
+    ]);
+
+    const byTenant = (a: { tenantId: string }, b: { tenantId: string }) => a.tenantId.localeCompare(b.tenantId);
+    assert.deepEqual(
+      (await findActiveMemberships(tx, identity)).sort(byTenant),
+      [
+        { tenantId: tenantA.id, userId: user.id, role: "owner", status: "active" },
+        { tenantId: tenantB.id, userId: user.id, role: "team_member", status: "active" },
+      ].sort(byTenant),
+    );
+  });
+});
+
+test("HTTP met echte resolver: actieve owner krijgt 200, disabled membership 403", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const active = await createUser(tx);
+    const disabled = await createUser(tx);
+    await tx.insert(schema.memberships).values([
+      { tenantId: tenant.id, userId: active.user.id, role: "owner" },
+      { tenantId: tenant.id, userId: disabled.user.id, role: "owner", status: "disabled" },
+    ]);
+
+    // Test-only adapter: subject uit een testheader.
+    const app = buildApp(
+      {
+        authAdapter: {
+          authenticate: async (request) => {
+            const subject = request.headers["x-test-identity"];
+            return typeof subject === "string"
+              ? { status: "authenticated", identity: identityFor(subject) }
+              : { status: "anonymous" };
+          },
+        },
+        membershipResolver: (identity) => findActiveMemberships(tx, identity),
+      },
+      { logger: false },
+    );
+
+    try {
+      const ok = await app.inject({
+        method: "GET",
+        url: "/v1/dashboard/today",
+        headers: { "x-test-identity": active.identity.subject, "x-tenant-id": tenant.id },
+      });
+      assert.equal(ok.statusCode, 200);
+
+      const forbidden = await app.inject({
+        method: "GET",
+        url: "/v1/dashboard/today",
+        headers: { "x-test-identity": disabled.identity.subject, "x-tenant-id": tenant.id },
+      });
+      assert.equal(forbidden.statusCode, 403);
+      assert.deepEqual(forbidden.json(), { error: "forbidden" });
+    } finally {
+      await app.close();
+    }
   });
 });
 
