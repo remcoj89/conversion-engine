@@ -1,5 +1,5 @@
 # Westend Digital — Productbeschrijving & ontwikkelplan Conversion Engine
-**Versie:** 1.2 — 21 oktober 2026 (PWA-dashboard toegevoegd)  
+**Versie:** 1.3 — 22 oktober 2026 (post-MVP websitekwaliteit en Playwright toegevoegd)
 **Status:** Technologieneutraal functioneel en architecturaal ontwerp  
 **Uitgangspunt:** clean-slate nieuwbouw, selectief hergebruik van bestaande bewezen onderdelen  
 **Belangrijke afspraak:** stack, frameworks, hosting, deploymentprovider en leveranciers worden **na** dit ontwerp vastgesteld.
@@ -138,6 +138,22 @@ Een template bevat: pipelinefasen, leadvelden, AI-intentsubtypes/kennisinstructi
 - Templateversies worden opgeslagen; updates migreren bestaande tenants niet stilzwijgend.
 **Acceptatie:** twee tenants met verschillende templates gebruiken dezelfde kernmodules en behouden volledig gescheiden data.
 
+### M12. Websitekwaliteit & conversietesten (post-MVP)
+**Doel:** klantwebsites herhaalbaar testen op werking, conversie, toegankelijkheid en technische kwaliteit.
+- Een herbruikbare browser-testlaag met Playwright en configureerbare testprofielen per klantwebsite.
+- **Basiscontrole:** homepage, navigatie, belangrijkste CTA's, responsive gedrag, 404-pagina en kritieke console-errors.
+- **Conversiecontrole:** formulieren, verplichte velden, foutmeldingen, succesmelding, dubbele verzending, bedankpagina en de primaire lead funnel.
+- **Trackingcontrole:** UTM-doorgifte, analytics-events, advertentieconversies, formulier-events en bedankpagina-events.
+- **Integratiecontrole:** CRM-ingest, e-mailnotificaties, afspraakmodules, webhooks en andere expliciet geconfigureerde koppelingen.
+- **Toegankelijkheidscontrole:** toetsenbordbediening, focusvolgorde, labels, foutmeldingen en basiscontroles op semantiek en contrast.
+- **Visuele regressie:** screenshots van afgesproken kernpagina's en states op mobiel, tablet en desktop.
+- **Technische controle:** statuscodes, redirects, canonical/meta-informatie, structured data, sitemap, robots.txt en deployment-smoke-tests.
+- **PWA-controle waar relevant:** service worker, offline shell, cachegrenzen en updategedrag.
+- Resultaat per test: pass/fail, timestamp, testprofiel, foutcontext, screenshot/trace waar relevant en een tenantgebonden historiek.
+- Productiechecks gebruiken alleen veilige, gemarkeerde testpaden; waar mogelijk draaien volledige formulier- en integratietests tegen staging.
+- Testdata bevat geen echte persoonsgegevens, betalingen of onbeheerde productie-e-mails. Testdomeinen en externe endpoints zijn expliciet geallowlist.
+**Acceptatie:** een website kan met één herhaalbaar profiel worden gecontroleerd; kritieke fouten zijn reproduceerbaar met bewijs; testverkeer vervuilt geen klant-KPI's en een klant kan alleen eigen testresultaten zien.
+
 ## 5. Minimaal datamodel — conceptueel, stackvrij
 **Tenant** 1—N **User**, **Contact**, **Lead**, **Deal**, **Task**, **AutomationRun**, **Form**, **Campaign**, **ConsentEvent**.  
 **Contact** 1—N **Lead**; **Contact** 1—N **Deal**; **Deal** N—1 **PipelineStage**.  
@@ -225,6 +241,15 @@ Gevoelige tenantdata, CRM-data en autorisatiebeslissingen worden niet onbeperkt 
 **Werk:** vijf betalende pilotklanten, onboarding-runbook, feedback, supportregistratie, securityreview, operationele kostmeting.
 **Klaar als:** systemen aantoonbaar stabiel zijn, pilotgebruik wordt gemeten, kosten in kaart zijn gebracht en scopekeuzes voor versie 2 onderbouwd zijn.
 
+### Post-MVP-workstream — Website Quality Engine
+**Werk:** een veilige Playwright-runner, testprofielen per klantwebsite, browserflows, formulier- en conversietests, trackingvalidatie, integratiechecks, toegankelijkheidschecks, visuele regressie, technische SEO-smoke-tests, bewijsopslag, incidentstatus en historische resultaten.
+- Start met een klein basisprofiel voor homepage, navigatie, primaire CTA, responsive gedrag en het belangrijkste formulier.
+- Voeg conversie-, tracking-, integratie-, accessibility- en visual-regressieprofielen afzonderlijk toe.
+- Gebruik staging als standaard voor muterende tests; productie alleen met testmarkers, allowlists, rate limits en geïsoleerde verwerking.
+- Bescherm de runner tegen willekeurige URL's, ongecontroleerde redirects, SSRF, secrets in traces en opslag van persoonsgegevens.
+- Integreer resultaten pas na een bewezen losse runner met M8 Monitoring & betrouwbaarheid en M9 Analytics & rapportages.
+**Klaar als:** een nieuwe klantwebsite via configuratie aan een testprofiel kan worden gekoppeld, de kritieke conversieroute aantoonbaar wordt getest en een fout met reproduceerbaar bewijs als incident zichtbaar wordt zonder productie-KPI's te vervuilen.
+
 ### Fase 4 — Growth Engine (buiten MVP)
 **Werk:** read-only audits, prioritering, SEO/GEO-contentbriefs, bron/factcheck, wijzigingsvoorstel, staging/preview, tests, autorisatie, gecontroleerde uitrol, meetcyclus en rollback. A/B-testing uitsluitend waar voldoende volume en consistente toewijzing aanwezig zijn; anders kwalitatieve en observationele optimalisatie.
 **Klaar als:** elke uitgevoerde wijziging een hypothese, data, risico-indeling, goedkeuring indien nodig, testresultaat en traceerbare uitkomst heeft.
@@ -243,6 +268,18 @@ Campagneplanning, advertentiespecialist, spend-registratie, betrouwbare attribut
 - **Rapportage:** ontbrekende events, onbekende omzet, refund/correcties, attributieconflicten.
 - **UX:** kerngebruiker kan nieuwe lead behandelen zonder uitleg; mobiele bediening van taken/pipeline.
 - **PWA:** manifest, installatie, service worker, cachegrenzen, updategedrag en gedrag bij tijdelijk netwerkverlies.
+
+### Browser- en klantwebsite-tests (post-MVP)
+- **Smoke:** homepage, kritieke routes, navigatie, CTA's, 404 en console-errors.
+- **Conversie:** formulieren, validatie, succes- en foutstaten, deduplicatie en primaire funnel.
+- **Responsive:** mobiel, tablet en desktop in de ondersteunde browsers.
+- **Tracking:** UTM's, analytics-events, advertentieconversies en bedankpagina's.
+- **Integraties:** CRM, e-mail, afspraken, webhooks en expliciet geconfigureerde externe diensten.
+- **Toegankelijkheid:** keyboard flow, focus, labels, foutmeldingen en basissemantiek.
+- **Visueel:** vastgelegde screenshots en vergelijking van kernpagina's en belangrijke states.
+- **Technisch:** statuscodes, redirects, metadata, structured data, sitemap, robots.txt en deployment-smoke-tests.
+- **PWA:** service worker, offline shell, caching van alleen toegestane assets en updategedrag.
+- **Veiligheid:** staging/testmarkers als standaard, geen echte persoonsgegevens of betalingen, allowlisted domeinen en geen secrets in traces of screenshots.
 
 ## 10. Non-functionele kwaliteitseisen (vaststellen als acceptatie-SLO's)
 - Veilige authenticatie en rolgebaseerde autorisatie op elke tenantgebonden actie.
@@ -270,7 +307,7 @@ De precieze leveranciers en stack zijn uitdrukkelijk nog open.
 
 **Should indien voldoende capaciteit:** eenvoudige quiz/calculator als leadmagnet, reviewtrigger, extra e-mailtemplate, selfservice-export, tweede brancheconfig.
 
-**Later:** AI Growth, A/B-engine, complete campagne-attributie, uitgebreide workflow-builder, multi-channel inbox, geavanceerde marketingplatformintegraties, native ads, AI lead-score voorspellingen.
+**Later:** AI Growth, A/B-engine, complete campagne-attributie, uitgebreide workflow-builder, multi-channel inbox, geavanceerde marketingplatformintegraties, native ads, AI lead-score voorspellingen en de Website Quality Engine met Playwright.
 
 ## 13. Werkpakketindeling voor Codex (regie) en Claude Code (bouw)
 Elke bouwopdracht krijgt: doel, gebruikersscenario, input/output, datacontract, security/privacycheck, foutpaden, tests en acceptatiecriteria.
@@ -286,6 +323,7 @@ Elke bouwopdracht krijgt: doel, gebruikersscenario, input/output, datacontract, 
 - WP7: Synthetische formuliermonitoring.
 - WP8: Analytics/rapportage.
 - WP9: Branchetemplate-configuratie en end-to-end pilot.
+- WP10 (post-MVP): Playwright Website Quality Engine met testprofielen, bewijs, incidenten en veilige productie-/staginggrenzen.
 
 **Gate na ieder werkpakket:** tests groen, relevante docs aangepast, geen extra ongevraagde functionaliteit, securitycheck en demo van de gebruikersflow.
 
@@ -311,3 +349,5 @@ Elke bouwopdracht krijgt: doel, gebruikersscenario, input/output, datacontract, 
 - Dashboard toont transparante KPI's met herkomst/ontbrekende data.
 - Tenantdata blijft geïsoleerd en toestemming/afmelding wordt gerespecteerd.
 - Werkelijke implementatie-, gebruiks- en supportkosten zijn gemeten en vastgelegd.
+
+De Playwright Website Quality Engine is bewust geen MVP-acceptatiecriterium. De MVP bevat wel beperkte formuliermonitoring en testisolatie; de bredere klantwebsite-testlaag volgt pas na MVP-validatie.

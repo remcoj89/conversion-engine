@@ -52,6 +52,10 @@ ZITADEL beheert identiteit en authenticatie. De eigen PostgreSQL-database blijft
 - Index op `memberships.user_id`.
 - Testdatabase en migrations voor zowel development als test.
 - Lint, typecheck, tests en builds ingericht voor dashboard en API.
+- Dashboard-sessiefundament met configuratievalidatie, opaque sessie-ID's, SHA-256-hashing en AES-256-GCM-encryptie.
+- Veilige `__Host-ce_session`- en OIDC-transactie-cookiepolicy vastgelegd en getest.
+- Dashboard-tests ingericht met `tsx` en `node:test`.
+- High-severity dependencyproblemen opgelost; de productie-audit rapporteert geen kwetsbaarheden.
 
 ## Security foundation — 22 oktober 2026
 
@@ -68,6 +72,21 @@ De eerste interne beveiligingsgrens van de Fastify API is geïmplementeerd als v
 - De API-testset bevat HTTP-tests voor authenticatie, tenantkeuze, roltoegang en fail-closed gedrag. De database-testset controleert de echte membership resolver.
 
 Deze stap bevat nog geen ZITADEL-SDK, JWT-validatie, loginflow, MFA, PostgreSQL-RLS of wijziging aan de Next.js BFF. De resolver gebruikt daarom tijdelijk één geconfigureerde issuer en koppelt op `auth_provider_user_id`/OIDC-subject. Voor de eerste echte gebruiker moet issuer-opslag en de samengestelde uniqueness-regel nog worden besloten en gemigreerd. De server gebruikt tot die tijd een deny-all adapter; lokaal blijft alleen de healthcheck bruikbaar.
+
+De BFF geeft inmiddels de relevante API-statussen door: `401` voor authenticatie, `403` voor toegang, `400` voor tenantkeuze en `502`/`503` voor API- of netwerkproblemen. De browser-`Authorization`-header wordt op dit moment nog tijdelijk doorgestuurd; de sessiegrens hieronder vervangt dat gedrag.
+
+## Auth-transport foundation — 22 oktober 2026
+
+De eerste bouwstenen voor server-side sessies zijn toegevoegd, zonder routes, database-opslag of OIDC-flow te activeren.
+
+- Een sessie-ID bestaat uit 32 random bytes en wordt alleen als SHA-256-hash opgeslagen zodra de sessiestore wordt gebouwd.
+- Gevoelige sessiewaarden kunnen worden versleuteld met AES-256-GCM via `node:crypto`.
+- `SESSION_ENCRYPTION_KEY` wordt fail-closed gevalideerd als een base64-gecodeerde sleutel van exact 32 bytes.
+- De sessiecookie gebruikt de `__Host-`-prefix, `HttpOnly`, `Secure`, `SameSite=Lax` en `Path=/`.
+- De OIDC-transactiecookie heeft dezelfde beveiligingsattributen en een maximale levensduur van tien minuten.
+- Encryptie, manipulatie, verkeerde sleutels, cookie-attributen en configuratiefouten zijn getest.
+
+Deze foundation bevat bewust nog geen sessietabel, sessiestore, login, refresh, logout of ZITADEL-integratie.
 
 ## Authenticatiebesluit — 21 oktober 2026
 
@@ -107,20 +126,25 @@ npm run api:db:test
 
 De API gebruikt lokaal standaard poort `4000`. Databasegegevens staan in `apps/api/.env` en mogen nooit worden gecommit. Gebruik `apps/api/.env.example` als template wanneer die beschikbaar is.
 
-## Volgende stap
+## Volgende stap: Slice 2 — sessiegrens in de BFF
 
-De interne beveiligingsgrens staat nu als testbare basis. De volgende ontwikkelstap is eerst het afronden van de integratiegrenzen vóór de ZITADEL-proof-of-concept:
+De interne API-beveiligingsgrens en de eerste sessieprimitives staan nu als testbare basis. De volgende kleine stap is het server-side sessiecontract daadwerkelijk aansluiten op de Next.js BFF.
 
-1. De Fastify error handler begrenzen zodat interne foutdetails niet naar clients lekken.
-2. De Next.js BFF laten onderscheiden tussen `401`, `403`, `400` en API-/netwerkfouten, en later het auth-token doorgeven.
-3. Vastleggen hoe de gekozen tenant in het dashboard wordt beheerd.
-4. Daarna een kleine ZITADEL-proof-of-concept uitvoeren:
-   - een development-project aanmaken in ZITADEL;
-   - OIDC-configuratie vastleggen zonder applicatiecode te wijzigen;
-   - issuer, audience en MFA/AAL-beleid vaststellen;
-   - vaststellen hoe de ZITADEL-gebruiker wordt gekoppeld aan onze bestaande `users`- en `memberships`-tabellen.
+1. Voeg één migratie toe voor `bff_sessions` in de bestaande migratiebron. De tabel bevat alleen de noodzakelijke sessiemetadata en versleutelde tokenvelden: `id_hash`, identity-subject, access- en refresh-token, expiratievelden, `last_seen_at` en timestamps.
+2. Voeg `apps/dashboard/lib/session/store.ts` toe met kleine ruwe PostgreSQL-queries voor aanmaken, ophalen, verwijderen en bijwerken van sessies.
+3. Laat `/api/dashboard/today` de `__Host-ce_session`-cookie lezen en het access token server-side als `Authorization: Bearer ...` naar de API sturen.
+4. Negeer de `Authorization`-header uit de browser volledig zodra de sessieflow actief is.
+5. Voeg database- en route-tests toe voor ontbrekende, onbekende en verlopen sessies. De bestaande API-statusmapping en `no-store`-headers blijven behouden.
 
-De eerste login-flow implementeren we pas nadat deze keuzes zijn vastgelegd.
+Acceptatiecriteria:
+
+- Zonder geldige sessie geeft de BFF `401` en wordt de sessiecookie gewist.
+- Een browser-token kan geen sessie overrulen.
+- De access- en refresh-tokens worden nooit naar de browser, response-body of logs geschreven.
+- Sessies kunnen in deze slice alleen via tests worden aangemaakt; login en OIDC blijven uitgesteld.
+- De bestaande dashboard-, API- en database-tests blijven groen.
+
+Nog bewust niet in Slice 2: login/callback, token refresh, logout, CSRF, tenant-URL's, ZITADEL JWT-validatie en MFA/AAL-handhaving. Die volgen in afzonderlijke slices.
 
 Elke stap blijft klein, testbaar en gericht op de bestaande architectuur. Er worden geen extra abstractielagen of services toegevoegd zonder concrete noodzaak.
 

@@ -1,23 +1,34 @@
 import { buildApp } from "./app.js";
-import type { AuthAdapter, MembershipResolver } from "./auth/types.js";
+import { readAuthConfig, type AuthConfig } from "./auth/authConfig.js";
+import { findActiveMemberships } from "./auth/membershipResolver.js";
+import { createDiscoveredKeySet } from "./auth/oidcDiscovery.js";
+import { createZitadelAdapter } from "./auth/zitadelAdapter.js";
+import { createDb } from "./db.js";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4000;
 
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
 
-// Fail-closed until the ZITADEL adapter exists: no request is ever authenticated, so
-// protected routes always return 401. Deliberately no bypass, header or env switch.
-const denyAllAuthAdapter: AuthAdapter = {
-  authenticate: async () => ({ status: "anonymous" }),
-};
-
-// Never reached while every request is anonymous; the Drizzle resolver is wired in with ZITADEL.
-const noMembershipsResolver: MembershipResolver = async () => [];
+// DATABASE_URL, ZITADEL_ISSUER and API_AUDIENCE are required; there is no fallback or bypass.
+let authConfig: AuthConfig;
+let db: ReturnType<typeof createDb>["db"];
+try {
+  authConfig = readAuthConfig();
+  ({ db } = createDb());
+} catch (error) {
+  // Config errors name the missing variable, never its value.
+  console.error("Configuratie ongeldig:", error instanceof Error ? error.message : "unknown");
+  process.exit(1);
+}
 
 const app = buildApp({
-  authAdapter: denyAllAuthAdapter,
-  membershipResolver: noMembershipsResolver,
+  authAdapter: createZitadelAdapter({
+    issuer: authConfig.issuer,
+    audience: authConfig.audience,
+    keys: createDiscoveredKeySet(authConfig.issuer),
+  }),
+  membershipResolver: (identity) => findActiveMemberships(db, identity),
 });
 
 try {

@@ -19,29 +19,52 @@ const key = randomBytes(32);
 const otherKey = randomBytes(32);
 const validOrigin = "https://app.example.com";
 const validKey = key.toString("base64");
+const validDatabaseUrl = "postgres://user:secret-password@127.0.0.1:5432/conversion_engine";
+const validEnv = {
+  APP_ORIGIN: validOrigin,
+  SESSION_ENCRYPTION_KEY: validKey,
+  SESSION_DATABASE_URL: validDatabaseUrl,
+};
 
-test("readSessionConfig reads a valid origin and 32-byte base64 key", () => {
-  const config = readSessionConfig({ APP_ORIGIN: validOrigin, SESSION_ENCRYPTION_KEY: validKey });
+test("readSessionConfig reads a valid origin, 32-byte base64 key and database URL", () => {
+  const config = readSessionConfig(validEnv);
 
   assert.equal(config.appOrigin, validOrigin);
   assert.deepEqual(config.encryptionKey, key);
+  assert.equal(config.databaseUrl, validDatabaseUrl);
   assert.equal(Object.isFrozen(config), true);
 });
 
 test("readSessionConfig rejects missing or invalid configuration", () => {
-  assert.throws(() => readSessionConfig({ SESSION_ENCRYPTION_KEY: validKey }), /APP_ORIGIN is required/);
-  assert.throws(() => readSessionConfig({ APP_ORIGIN: validOrigin }), /SESSION_ENCRYPTION_KEY is required/);
+  assert.throws(() => readSessionConfig({ ...validEnv, APP_ORIGIN: undefined }), /APP_ORIGIN is required/);
   assert.throws(
-    () => readSessionConfig({ APP_ORIGIN: validOrigin, SESSION_ENCRYPTION_KEY: randomBytes(31).toString("base64") }),
+    () => readSessionConfig({ ...validEnv, SESSION_ENCRYPTION_KEY: undefined }),
+    /SESSION_ENCRYPTION_KEY is required/,
+  );
+  assert.throws(
+    () => readSessionConfig({ ...validEnv, SESSION_ENCRYPTION_KEY: randomBytes(31).toString("base64") }),
     /must decode to 32 bytes/,
   );
+  assert.throws(() => readSessionConfig({ ...validEnv, APP_ORIGIN: "not-a-url" }), /must be a valid URL/);
   assert.throws(
-    () => readSessionConfig({ APP_ORIGIN: "not-a-url", SESSION_ENCRYPTION_KEY: validKey }),
-    /must be a valid URL/,
+    () => readSessionConfig({ ...validEnv, APP_ORIGIN: `${validOrigin}/dashboard` }),
+    /without a path/,
+  );
+});
+
+test("readSessionConfig rejects a missing or invalid session database URL without leaking it", () => {
+  assert.throws(
+    () => readSessionConfig({ ...validEnv, SESSION_DATABASE_URL: undefined }),
+    /SESSION_DATABASE_URL is required/,
+  );
+  assert.throws(() => readSessionConfig({ ...validEnv, SESSION_DATABASE_URL: "" }), /SESSION_DATABASE_URL is required/);
+  assert.throws(
+    () => readSessionConfig({ ...validEnv, SESSION_DATABASE_URL: "not a url" }),
+    /SESSION_DATABASE_URL must be a valid URL/,
   );
   assert.throws(
-    () => readSessionConfig({ APP_ORIGIN: `${validOrigin}/dashboard`, SESSION_ENCRYPTION_KEY: validKey }),
-    /without a path/,
+    () => readSessionConfig({ ...validEnv, SESSION_DATABASE_URL: "mysql://user:secret-password@host/db" }),
+    (error: Error) => /PostgreSQL URL/.test(error.message) && !error.message.includes("secret-password"),
   );
 });
 

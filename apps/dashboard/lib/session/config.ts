@@ -3,6 +3,7 @@ const SESSION_KEY_BYTES = 32;
 export type SessionConfig = Readonly<{
   appOrigin: string;
   encryptionKey: Buffer;
+  databaseUrl: string;
 }>;
 
 export type SessionEnv = Readonly<Record<string, string | undefined>>;
@@ -10,8 +11,29 @@ export type SessionEnv = Readonly<Record<string, string | undefined>>;
 export function readSessionConfig(env: SessionEnv = process.env): SessionConfig {
   const appOrigin = readAppOrigin(env.APP_ORIGIN);
   const encryptionKey = readEncryptionKey(env.SESSION_ENCRYPTION_KEY);
+  const databaseUrl = readDatabaseUrl(env.SESSION_DATABASE_URL);
 
-  return Object.freeze({ appOrigin, encryptionKey });
+  return Object.freeze({ appOrigin, encryptionKey, databaseUrl });
+}
+
+// Error messages never include the URL itself, because it contains credentials.
+function readDatabaseUrl(value: string | undefined): string {
+  if (!value) {
+    throw new Error("SESSION_DATABASE_URL is required");
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("SESSION_DATABASE_URL must be a valid URL");
+  }
+
+  if (!["postgres:", "postgresql:"].includes(url.protocol)) {
+    throw new Error("SESSION_DATABASE_URL must be a PostgreSQL URL");
+  }
+
+  return value;
 }
 
 function readAppOrigin(value: string | undefined): string {

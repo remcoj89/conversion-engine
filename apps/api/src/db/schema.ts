@@ -53,3 +53,30 @@ export const memberships = pgTable(
     ),
   ],
 );
+
+// Server-side BFF sessions. Only the SHA-256 hash of the session ID and encrypted tokens are stored.
+export const bffSessions = pgTable(
+  "bff_sessions",
+  {
+    idHash: text("id_hash").primaryKey(),
+    subject: text("subject").notNull(),
+    accessTokenEnc: text("access_token_enc").notNull(),
+    refreshTokenEnc: text("refresh_token_enc").notNull(),
+    idTokenEnc: text("id_token_enc"),
+    accessExpiresAt: timestamp("access_expires_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    absoluteExpiresAt: timestamp("absolute_expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("bff_sessions_id_hash_check", sql`${table.idHash} ~ '^[0-9a-f]{64}$'`),
+    // Encrypted values use the "v1.<iv>.<tag>.<ciphertext>" format from the dashboard crypto module.
+    check("bff_sessions_access_token_enc_check", sql`${table.accessTokenEnc} like 'v1.%'`),
+    check("bff_sessions_refresh_token_enc_check", sql`${table.refreshTokenEnc} like 'v1.%'`),
+    check(
+      "bff_sessions_id_token_enc_check",
+      sql`${table.idTokenEnc} is null or ${table.idTokenEnc} like 'v1.%'`,
+    ),
+  ],
+);
