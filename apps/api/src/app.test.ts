@@ -2,8 +2,9 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
-import { buildApp } from "./app.js";
+import { buildApp, type AppDependencies } from "./app.js";
 import type { AuthAdapter, Membership, MembershipResolver } from "./auth/types.js";
+import { apiErrorHandler } from "./errors.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
 
 const todayContract = {
@@ -173,14 +174,62 @@ test("GET /v1/dashboard/today: Team Member krijgt dashboard:read", async (t) => 
   assert.deepEqual(response.json(), todayContract);
 });
 
-test("dashboardroute zonder auth-hook geeft geen fixturedata terug", async (t) => {
-  // Simuleert een vergeten auth-hook: de echte route op een kale instance.
+test("dashboardroute zonder auth-hook geeft geen fixturedata of interne melding terug", async (t) => {
+  // Simuleert een vergeten auth-hook: de echte route op een kale instance met de echte error handler.
   const app = Fastify({ logger: false });
+  app.setErrorHandler(apiErrorHandler);
   registerDashboardRoutes(app);
   t.after(() => app.close());
 
   const response = await app.inject({ method: "GET", url: "/v1/dashboard/today" });
 
   assert.equal(response.statusCode, 500);
-  assert.doesNotMatch(response.body, /actionRequired|Leads die aandacht vragen/);
+  assert.deepEqual(response.json(), { error: "internal_error" });
+  assert.doesNotMatch(response.body, /actionRequired|Leads die aandacht vragen|Auth context missing/);
 });
+
+// Gevoelige waarden in de foutmelding, zoals een DrizzleQueryError die query-params bevat.
+const SECRET_SUBJECT = "secret-subject-123";
+const SECRET_TOKEN = "secret-access-token";
+const sensitiveError = () =>
+  new Error(`Failed query params: ${SECRET_SUBJECT}, ${tenantA}, Bearer ${SECRET_TOKEN}`, {
+    cause: { code: "57P01" },
+  });
+
+// Bouwt de app met een eigen dependency en vangt de logregels op.
+function setupWithLogs(t: TestContext, dependencies: Partial<AppDependencies>) {
+  const logs: string[] = [];
+  const app = buildApp(
+    { authAdapter: testAuthAdapter, membershipResolver: testMembershipResolver, ...dependencies },
+    { logger: { level: "info", stream: { write: (line: string) => logs.push(line) } } },
+  );
+  t.after(() => app.close());
+  return { app, logs };
+}
+
+for (const [name, dependencies] of [
+  ["authAdapter", { authAdapter: { authenticate: async () => { throw sensitiveError(); } } }],
+  ["membershipResolver", { membershipResolver: async () => { throw sensitiveError(); } }],
+] as const satisfies readonly (readonly [string, Partial<AppDependencies>])[]) {
+  test(`${name} die een exception gooit geeft 500 internal_error zonder interne details`, async (t) => {
+    const { app, logs } = setupWithLogs(t, dependencies);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/dashboard/today",
+      headers: { [TEST_IDENTITY_HEADER]: SECRET_SUBJECT, authorization: `Bearer ${SECRET_TOKEN}`, "x-tenant-id": tenantA },
+    });
+
+    assert.equal(response.statusCode, 500);
+    assert.deepEqual(response.json(), { error: "internal_error" });
+    assert.doesNotMatch(response.body, /Failed query|secret|57P01/);
+
+    // De serverlog bevat de fout, maar geen melding, subject, token of tenant-ID.
+    const log = logs.join("");
+    assert.match(log, /"msg":"unhandled error"/);
+    assert.match(log, /"causeCode":"57P01"/);
+    for (const secret of ["Failed query", SECRET_SUBJECT, SECRET_TOKEN, tenantA]) {
+      assert.ok(!log.includes(secret), `log bevat ${secret}`);
+    }
+  });
+}
