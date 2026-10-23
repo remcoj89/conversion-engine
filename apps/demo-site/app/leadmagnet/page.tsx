@@ -9,7 +9,7 @@ import { pageMetadata } from "../../lib/seo";
 
 export const metadata: Metadata = pageMetadata(pageSeo.leadmagnet);
 
-// Leadmagnetpagina: website-blokken-leadmagnetpagina.md, variant Trainingsdoel-check.
+// Leadmagnetpagina: website-blokken-leadmagnetpagina.md, quizvariant Ritme-check.
 export default function LeadmagnetPage() {
   return (
     <>

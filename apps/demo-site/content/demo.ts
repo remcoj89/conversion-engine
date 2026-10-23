@@ -16,14 +16,15 @@ import type {
 // Globale elementen (GE-01 t/m GE-08)
 // ---------------------------------------------------------------------------
 
-const primaryCta: Cta = { label: "Plan mijn kennismaking", href: "/contact#afspraak" };
-const leadmagnetCta: Cta = { label: "Start de Trainingsdoel-check", href: "/leadmagnet#check" };
-const offerCta: Cta = { label: "Bekijk het coachingtraject", href: "/sales" };
+const primaryCta: Cta = { label: "Plan mijn ritmegesprek", href: "/contact#afspraak" };
+const leadmagnetCta: Cta = { label: "Doe de Ritme-check", href: "/leadmagnet#check" };
+const offerCta: Cta = { label: "Bekijk Ritme dat Blijft", href: "/sales" };
 
 export const site = {
-  name: "Fitcoach Demo",
-  coach: "Noor",
-  tagline: "Persoonlijke begeleiding voor drukke mensen die structureel willen trainen.",
+  name: "Studio Ritme",
+  mark: "S",
+  coach: "Mara",
+  tagline: "Training die meebeweegt met je leven.",
   demoNotice: "Demowebsite met een fictieve coach. Formulieren versturen en bewaren niets.",
   primaryCta,
   leadmagnetCta,
@@ -36,41 +37,41 @@ export const site = {
     { label: "Contact", href: "/contact" },
   ] satisfies readonly Cta[],
   footer: {
-    positioning: "Fictieve personal trainer voor de Conversion Engine-demo.",
+    positioning: "Fictieve trainingsstudio voor de Conversion Engine-demo.",
     contactLabel: "Liever eerst even kennismaken?",
     legal: [{ label: "Privacy (demo)", href: "/privacy" }] satisfies readonly Cta[],
-    copyright: "Fitcoach Demo — voorbeeldcontent, geen echte onderneming.",
+    copyright: "Studio Ritme — voorbeeldcontent, geen echte onderneming.",
   },
 } as const;
 
 export const pageSeo = {
   home: {
-    title: "Structureel trainen naast een druk leven",
-    description: "Demo: persoonlijke trainingsbegeleiding van een fictieve coach, met een haalbaar plan dat past in je week.",
+    title: "Train op een manier die in je leven past",
+    description: "Demo: persoonlijke trainingsbegeleiding van een fictieve coach met een ritme dat meebeweegt met je week.",
     path: "/",
   },
   sales: {
-    title: "Coachingtraject Sterk in je Week",
+    title: "Coachingtraject Ritme dat Blijft",
     description: "Demo-salespage: twaalf weken persoonlijke begeleiding met een trainingsplan dat past bij jouw agenda.",
     path: "/sales",
   },
   about: {
-    title: "Over Noor",
-    description: "Demo: waarom coach Noor (fictief) werkt met mensen die sporten willen laten passen in een vol leven.",
+    title: "Over Mara",
+    description: "Demo: waarom coach Mara (fictief) werkt met mensen die trainen willen laten passen in een vol leven.",
     path: "/over-mij",
   },
   contact: {
-    title: "Plan een vrijblijvende kennismaking",
+    title: "Plan een vrijblijvend ritmegesprek",
     description: "Demo-contactpagina: bespreek vrijblijvend welke trainingsaanpak bij jouw week past.",
     path: "/contact",
   },
   blog: {
-    title: "Blog over haalbaar trainen",
+    title: "Blog over trainen met ritme",
     description: "Demo-blog met voorbeeldartikelen over trainen met weinig tijd, opbouwen en volhouden.",
     path: "/blog",
   },
   leadmagnet: {
-    title: "Trainingsdoel-check",
+    title: "Ritme-check",
     description: "Demo: beantwoord vijf korte vragen en ontdek welk trainingsritme bij jouw doel en week past.",
     path: "/leadmagnet",
   },
@@ -89,26 +90,26 @@ export const pageSeo = {
 // Voorbeeldreviews: nadrukkelijk als voorbeeld gemarkeerd, te vervangen door echte en controleerbare reviews.
 export const testimonials: readonly Testimonial[] = [
   {
-    quote: "Voor het eerst had ik een schema dat echt in mijn week paste. Daardoor bleef ik het ook doen.",
+    quote: "Ik hoefde mijn leven niet om te gooien. Het ritme paste er gewoon tussen.",
     name: "Voorbeeldklant A",
     context: "Coachingtraject, fictief",
     isExample: true,
   },
   {
-    quote: "Fijn dat we eerst keken naar wat haalbaar was, in plaats van meteen vijf keer per week.",
+    quote: "We begonnen klein en maakten het daarna stap voor stap sterker.",
     name: "Voorbeeldklant B",
     context: "Kennismaking, fictief",
     isExample: true,
   },
   {
-    quote: "De wekelijkse check-in hield me scherp, zonder dat het voelde als moeten.",
+    quote: "De check-in gaf me houvast zonder dat trainen nog een extra taak voelde.",
     name: "Voorbeeldklant C",
     context: "Coachingtraject, fictief",
     isExample: true,
   },
 ];
 
-export const trustNote = "Voorbeeldreviews voor de demo. Een klantwebsite toont hier alleen echte, controleerbare ervaringen.";
+export const trustNote = "Voorbeeldreviews voor deze demo. Een klantwebsite toont hier alleen echte, controleerbare ervaringen.";
 
 // ---------------------------------------------------------------------------
 // Homepage — website-blokken-home-pagina.docx, blok 1 t/m 7
@@ -116,61 +117,61 @@ export const trustNote = "Voorbeeldreviews voor de demo. Een klantwebsite toont 
 
 export const home = {
   hero: {
-    eyebrow: "Personal training & coaching",
-    title: "Sterker en fitter worden, in een week die al vol zit",
-    text: "Je wilt graag fit zijn, maar tussen werk, gezin en afspraken sneeuwt trainen telkens onder. Je begint vol goede moed en na drie weken ben je het ritme weer kwijt.",
+    eyebrow: "Personal training zonder alles-of-niets",
+    title: "Maak ruimte voor trainen, ook als je week al vol zit",
+    text: "Je wilt je sterk en energiek voelen, maar tussen werk, gezin en afspraken verdwijnt trainen steeds naar de achtergrond. Je start opnieuw en raakt het ritme weer kwijt.",
     cta: primaryCta,
     secondary: offerCta,
   },
   recognition: {
-    intro: { eyebrow: "Herken je dit?", title: "Je weet wat je zou moeten doen. Het lukt alleen niet om het vol te houden." },
+    intro: { eyebrow: "Herken je dit?", title: "Je weet best wat je zou kunnen doen. Alleen: je week werkt niet mee." },
     paragraphs: [
-      "Je hebt al eens een abonnement genomen, een app gedownload of een schema van internet geprobeerd. Elke keer gaat het even goed, tot een drukke week alles weer omgooit.",
-      "Ondertussen wil je je gewoon weer sterk en energiek voelen. Niet voor een strandfoto, maar om lekker in je vel te zitten en de dingen te kunnen doen die je belangrijk vindt.",
-      "Misschien geloof je inmiddels dat structureel trainen voor jou gewoon niet weggelegd is. Dat is niet zo: het plan moet alleen bij jouw week passen, niet andersom.",
+      "Je hebt al eens een abonnement genomen, een app gedownload of een schema opgeslagen. Het werkt zolang je agenda meewerkt — en die doet dat niet elke week.",
+      "Je wilt vooral weer vertrouwen voelen in je lijf en energie overhouden voor de mensen en plannen die belangrijk voor je zijn.",
+      "Structureel trainen is niet voorbehouden aan mensen met zeeën van tijd. Je hebt een ritme nodig dat rekening houdt met je echte week.",
     ],
   },
   offer: {
     intro: {
       eyebrow: "Dit is wat ik doe",
-      title: "Coachingtraject Sterk in je Week",
+      title: "Coachingtraject Ritme dat Blijft",
       text: "In twaalf weken bouwen we samen een trainingsritme op dat past bij jouw agenda, met een persoonlijk plan en wekelijkse begeleiding.",
     },
     points: [
-      "Persoonlijk trainingsplan op basis van jouw week",
-      "Wekelijkse check-in om bij te sturen",
-      "Trainen in de gym, thuis of buiten",
+      "Een persoonlijk trainingsplan voor jouw echte week",
+      "Wekelijkse check-in met ruimte om bij te sturen",
+      "Training in de gym, thuis of buiten — wat past",
     ],
     cta: offerCta,
   },
   about: {
-    intro: { eyebrow: "Over mij", title: "Hoi, ik ben Noor" },
-    text: "Ik ben (fictief) personal trainer en help drukke mensen om trainen een vast onderdeel van hun week te maken. Geen extreme programma's, wel een plan dat je volhoudt.",
+    intro: { eyebrow: "Over mij", title: "Hoi, ik ben Mara" },
+    text: "Ik ben Mara, fictief personal trainer, en help drukke mensen om trainen een vast onderdeel van hun week te maken. Geen extreme programma's, wel een plan dat met je meebeweegt.",
     cta: { label: "Lees mijn verhaal", href: "/over-mij" } satisfies Cta,
   },
   approach: {
     intro: {
       eyebrow: "Mijn werkwijze",
-      title: "Waarom deze aanpak anders werkt",
-      text: "De meeste schema's gaan uit van een ideale week. Ik begin bij jouw echte week.",
+      title: "Een ritme dat niet instort bij de eerste drukke week",
+      text: "De meeste schema's beginnen bij een ideaalplaatje. Ik begin bij de week die je daadwerkelijk hebt.",
     },
     cards: [
-      { title: "Eerst je week, dan het schema", text: "We kijken eerst hoeveel tijd en energie je realistisch hebt. Pas daarna maken we het plan." },
-      { title: "Klein beginnen, slim opbouwen", text: "Liever twee trainingen die je volhoudt dan vijf die na een maand sneuvelen." },
-      { title: "Bijsturen hoort erbij", text: "Een drukke week is geen mislukking. We passen het plan aan zodat je in beweging blijft." },
+      { title: "Eerst je week, dan je plan", text: "We kijken eerst hoeveel tijd en energie je realistisch hebt. Pas daarna maken we je trainingsplan." },
+      { title: "Klein beginnen, stevig opbouwen", text: "Liever twee trainingen die blijven staan dan vijf die je na een maand loslaat." },
+      { title: "Ruimte voor de werkelijkheid", text: "Een drukke week is informatie, geen mislukking. We passen aan zonder de draad kwijt te raken." },
     ] satisfies readonly Card[],
   },
   firstStep: {
     intro: {
       eyebrow: "Je eerste stap",
-      title: "Ontdek welk trainingsritme bij jou past",
-      text: "Doe de gratis Trainingsdoel-check: vijf korte vragen en je ziet direct welk ritme past bij jouw doel en week. Een e-mailadres is niet nodig.",
+      title: "Ontdek welk ritme jouw week aankan",
+      text: "Doe de gratis Ritme-check: vijf korte vragen en je ziet direct welk ritme past bij jouw doel en week. Een e-mailadres is niet nodig.",
     },
     cta: leadmagnetCta,
   },
   socials: {
     intro: { eyebrow: "Volg mee", title: "Korte tips en trainingsideeën" },
-    handle: "@fitcoach.demo",
+    handle: "@studio.ritme.demo",
     note: "Voorbeeld van een socialblok. Een klantwebsite linkt hier alleen naar een account dat actief wordt bijgehouden.",
     posts: ["Tip: plan je training als een afspraak", "3 oefeningen voor thuis", "Zo pak je de draad weer op"],
   },
@@ -185,27 +186,27 @@ export const home = {
 export const sales = {
   hero: {
     eyebrow: "Coachingtraject van 12 weken",
-    title: "Sterk in je Week",
+    title: "Ritme dat Blijft",
     promise: "Een trainingsritme dat past bij jouw agenda, met persoonlijke begeleiding om het vol te houden.",
     cta: primaryCta,
   },
   problem: {
-    intro: { eyebrow: "Het probleem", title: "Het ligt niet aan je motivatie" },
+    intro: { eyebrow: "Het probleem", title: "Je motivatie is niet het hele verhaal" },
     paragraphs: [
-      "Je begint enthousiast, maar een drukke werkweek, een ziek kind of een avond overwerken gooit je planning om. Daarna is het lastig om weer op te starten.",
-      "Standaardschema's gaan uit van een week waarin alles meezit. Die week bestaat zelden. Dus voelt het alsof jij faalt, terwijl het plan gewoon niet bij je leven paste.",
+      "Je begint enthousiast, maar een drukke werkweek, een ziek kind of een avond overwerken gooit je planning om. Daarna voelt opnieuw beginnen zwaarder dan het zou moeten.",
+      "Standaardschema's gaan uit van een week waarin alles meezit. Die week bestaat zelden. Het probleem zit dan niet in jou, maar in het plan.",
     ],
   },
   solution: {
     intro: {
       eyebrow: "De oplossing",
       title: "Een plan dat meebeweegt met jouw week",
-      text: "In Sterk in je Week maken we een plan voor jouw echte week en sturen we elke week bij. Zo bouw je een ritme op dat ook in drukke periodes overeind blijft.",
+      text: "In Ritme dat Blijft maken we een plan voor jouw echte week en sturen we elke week bij. Zo bouw je een ritme op dat ook in drukke periodes overeind blijft.",
     },
     cta: primaryCta,
   },
   outcomes: {
-    intro: { eyebrow: "Wat je krijgt", title: "Waar we samen naartoe werken" },
+    intro: { eyebrow: "Wat je krijgt", title: "Wat er in twaalf weken kan ontstaan" },
     items: [
       "Een vast trainingsritme dat in je agenda past",
       "Inzicht in welke trainingen voor jouw doel het meest opleveren",
@@ -254,8 +255,8 @@ export const sales = {
     cta: primaryCta,
   },
   intro: {
-    intro: { eyebrow: "Even voorstellen", title: "Ik ben Noor, en ik weet hoe een volle week voelt" },
-    text: "Als (fictieve) personal trainer zag ik steeds hetzelfde: mensen met goede voornemens die vastliepen op een plan dat niet bij hun leven paste. Daarom begin ik altijd bij jouw week.",
+    intro: { eyebrow: "Even voorstellen", title: "Ik ben Mara, en ik weet hoe een volle week voelt" },
+    text: "Als (fictieve) personal trainer zag ik steeds hetzelfde: mensen met goede voornemens die vastliepen op een plan dat niet bij hun leven paste. Daarom begin ik bij jouw week, niet bij een ideaalrooster.",
     cta: { label: "Lees meer over mij", href: "/over-mij" } satisfies Cta,
   },
   fit: {
@@ -273,7 +274,7 @@ export const sales = {
     cta: primaryCta,
   },
   whyNow: {
-    intro: { eyebrow: "Waarom nu?", title: "Over drie maanden is je week niet ineens leger" },
+    intro: { eyebrow: "Waarom nu?", title: "Je agenda wordt niet vanzelf leger" },
     text: "Wachten op een rustigere periode voelt logisch, maar die komt zelden. Het ritme dat je nu opbouwt, helpt je juist door de drukke weken heen.",
   },
   faq: [
@@ -283,7 +284,7 @@ export const sales = {
     { question: "Hoe zit het met blessures of klachten?", answer: "Ik geef geen medisch advies. Bij klachten overleg je eerst met een arts of fysiotherapeut." },
   ] satisfies readonly Faq[],
   finalCta: {
-    title: "Benieuwd of Sterk in je Week bij jou past?",
+    title: "Benieuwd of Ritme dat Blijft bij jou past?",
     text: "Plan een vrijblijvende kennismaking. We bespreken je week, je doel en of dit traject daarbij past.",
     cta: primaryCta,
   },
@@ -296,8 +297,8 @@ export const sales = {
 export const about = {
   hero: {
     eyebrow: "Over mij",
-    title: "Je wilt je sterk voelen in je eigen leven. Dat is precies waarom ik coach.",
-    text: "Niet om records te breken, maar om energie te hebben voor alles wat je belangrijk vindt.",
+    title: "Je wilt ruimte voelen in je eigen leven. Daarom coach ik op ritme.",
+    text: "Niet om records te verzamelen, maar om energie over te houden voor alles wat je belangrijk vindt.",
   },
   fit: {
     intro: { eyebrow: "Samenwerken", title: "Ik werk graag met mensen die…" },
@@ -311,7 +312,7 @@ export const about = {
   story: {
     intro: { eyebrow: "Mijn verhaal", title: "Van alles-of-niets naar een ritme dat blijft" },
     paragraphs: [
-      "Noor is een fictieve coach, maar haar verhaal laat zien wat hier normaal staat: waarom de coach doet wat ze doet.",
+      "Mara is een fictieve coach, maar haar verhaal laat zien wat hier normaal staat: waarom de coach doet wat ze doet.",
       "Jarenlang trainde ik volgens het principe alles of niets. In drukke periodes werd het dus vaak niets. Pas toen ik mijn trainingen ging plannen rond mijn echte week, hield ik het vol.",
       "Die les gebruik ik nu bij iedereen die ik begeleid: we bouwen een plan voor jouw week, niet voor een ideale week.",
     ],
@@ -327,7 +328,7 @@ export const about = {
   product: {
     intro: {
       eyebrow: "Mijn belangrijkste aanbod",
-      title: "Sterk in je Week",
+      title: "Ritme dat Blijft",
       text: "Twaalf weken persoonlijke begeleiding om een trainingsritme op te bouwen dat past bij jouw agenda.",
     },
     cta: offerCta,
@@ -336,7 +337,7 @@ export const about = {
     intro: {
       eyebrow: "Volgende stap",
       title: "Nog even rondkijken?",
-      text: "Lees op de blog hoe ik naar trainen met weinig tijd kijk, of ontdek met de Trainingsdoel-check welk ritme bij jou past.",
+      text: "Lees op de blog hoe ik naar trainen met weinig tijd kijk, of ontdek met de Ritme-check welk ritme bij jou past.",
     },
     cta: { label: "Lees de blog", href: "/blog" } satisfies Cta,
   },
@@ -349,7 +350,7 @@ export const about = {
 export const contact = {
   hero: {
     eyebrow: "Kennismaken",
-    title: "Benieuwd welke aanpak bij jouw week past?",
+    title: "Benieuwd welk trainingsritme bij jouw week past?",
     text: "Bespreek vrijblijvend je doel en je agenda. Daarna weet je welke volgende stap logisch is, ook als dat geen traject bij mij is.",
     cta: { label: primaryCta.label, href: "#afspraak" } satisfies Cta,
   },
@@ -362,23 +363,23 @@ export const contact = {
     ] satisfies readonly Card[],
   },
   appointment: {
-    title: "Plan direct een kennismaking",
+    title: "Plan direct een ritmegesprek",
     text: "Kies een moment dat jou uitkomt. Het gesprek duurt ongeveer 20 minuten en is online.",
     cta: primaryCta.label,
     demoResult: "Demo: hier opent in de klantversie de afspraakmodule van de coach. Er is niets geboekt.",
   },
   form: {
     title: "Liever eerst een vraag stellen?",
-    text: "Laat een kort bericht achter. Noor reageert binnen twee werkdagen (fictieve termijn).",
+    text: "Laat een kort bericht achter. Mara reageert binnen twee werkdagen (fictieve termijn).",
     reasons: ["Kennismaking aanvragen", "Vraag over het coachingtraject", "Andere vraag"],
     submitLabel: "Verstuur mijn vraag",
   },
-  responder: "Je bericht wordt gelezen en beantwoord door Noor zelf (fictief).",
+  responder: "Je bericht wordt gelezen en beantwoord door Mara zelf (fictief).",
   steps: {
     intro: { title: "Wat gebeurt er daarna?" },
     items: [
       { title: "Je plant een gesprek of stuurt je vraag", text: "Dat kost je een paar minuten." },
-      { title: "Noor neemt contact op", text: "Binnen twee werkdagen (fictieve termijn)." },
+      { title: "Mara neemt contact op", text: "Binnen twee werkdagen (fictieve termijn)." },
       { title: "We bespreken je doel en je week", text: "Eerlijk en zonder verkooppraatje." },
       { title: "Je krijgt een passend advies", text: "Ook als dat een andere route is dan een traject." },
     ] satisfies readonly Card[],
@@ -403,7 +404,7 @@ export const contact = {
 
 export const quiz: QuizConfig = {
   version: "2026-10-demo-1",
-  name: "Trainingsdoel-check",
+  name: "Ritme-check",
   profiles: [
     {
       id: "rustig-opbouwen",
@@ -486,17 +487,17 @@ export const quiz: QuizConfig = {
 
 export const leadmagnet = {
   hero: {
-    eyebrow: "Gratis Trainingsdoel-check",
-    title: "Ontdek welk trainingsritme het beste bij jouw doel past",
+    eyebrow: "Gratis Ritme-check",
+    title: "Ontdek welk trainingsritme jouw week aankan",
     promise: "Vijf korte vragen, direct een persoonlijk resultaatprofiel en een eerste haalbare actie.",
     text: "Geen e-mailadres nodig om je resultaat te zien. Duurt ongeveer twee minuten.",
     cta: leadmagnetCta,
   },
   recognition: {
-    intro: { eyebrow: "Herkenbaar?", title: "Zoveel adviezen, en toch weet je niet wat bij jóu past" },
+    intro: { eyebrow: "Herkenbaar?", title: "Zoveel adviezen, en toch weet je niet wat bij jouw week past" },
     paragraphs: [
       "Drie keer per week? Elke dag tienduizend stappen? Alleen krachttraining? Algemene adviezen houden geen rekening met jouw doel en jouw week.",
-      "De Trainingsdoel-check maakt in twee minuten duidelijk welk ritme realistisch is voor jou, en wat je eerste stap is.",
+      "De Ritme-check maakt in twee minuten duidelijk welk ritme realistisch is voor jou, en wat je eerste stap is.",
     ],
   },
   benefits: {
@@ -546,7 +547,7 @@ export const leadmagnet = {
     { question: "Kan ik daarna persoonlijke begeleiding krijgen?", answer: "Ja, na de check kun je vrijblijvend een kennismaking plannen." },
   ] satisfies readonly Faq[],
   finalCta: {
-    title: "Klaar om te ontdekken wat bij je past?",
+    title: "Klaar om te ontdekken wat bij je week past?",
     text: "Vijf vragen, twee minuten, direct resultaat.",
     cta: leadmagnetCta,
   },
@@ -560,7 +561,7 @@ export const leadmagnet = {
 export const upsell: Upsell = {
   type: "kennismaking",
   transition: "Wil je dit niet alleen proberen? Krijg persoonlijke begeleiding bij jouw volgende stap.",
-  title: "Vrijblijvende kennismaking",
+  title: "Vrijblijvend ritmegesprek",
   outcome: "Samen vertalen we je resultaat naar een plan dat past bij jouw week.",
   forWho: "Voor iedereen die na de check wil weten hoe het verder kan, met of zonder begeleiding.",
   included: ["Bespreking van je resultaatprofiel", "Advies over een haalbaar weekritme", "Eerlijk antwoord of begeleiding past"],
@@ -573,7 +574,7 @@ export const upsell: Upsell = {
 export const thankYou = {
   leadmagnet: {
     eyebrow: "Gelukt",
-    title: "Je Trainingsdoel-check is goed ontvangen",
+    title: "Je Ritme-check is goed ontvangen",
     text: "Hieronder vind je nog een keer je resultaat en je eerste stap.",
     delivery: "In de echte versie ontvang je binnen enkele minuten een e-mail met je samenvatting. In deze demo wordt geen e-mail verstuurd.",
     deliveryWithoutSummary: "Je hebt geen samenvatting per e-mail aangevraagd. Je resultaat staat hieronder; bewaar het gerust.",
@@ -583,10 +584,10 @@ export const thankYou = {
     eyebrow: "Gelukt",
     title: "Je vraag is goed ontvangen",
     text: "Bedankt voor je bericht.",
-    delivery: "Noor reageert binnen twee werkdagen (fictieve termijn). In deze demo is niets verstuurd.",
+    delivery: "Mara reageert binnen twee werkdagen (fictieve termijn). In deze demo is niets verstuurd.",
     nextStep: {
       title: "Alvast ontdekken welk ritme bij je past?",
-      text: "Doe intussen de Trainingsdoel-check en neem je resultaat mee naar het gesprek.",
+      text: "Doe intussen de Ritme-check en neem je resultaat mee naar het gesprek.",
       cta: leadmagnetCta,
     },
   },
@@ -598,7 +599,7 @@ export const privacy = {
   title: "Privacy (demo)",
   paragraphs: [
     "Dit is een demowebsite met fictieve content. Formulieren op deze website versturen geen gegevens naar een server of externe dienst en slaan niets op.",
-    "Het resultaat van de Trainingsdoel-check wordt alleen tijdelijk in je eigen browser bewaard (sessionStorage), zodat de bedankpagina het kan tonen. Sluit je het tabblad, dan is het weg.",
+    "Het resultaat van de Ritme-check wordt alleen tijdelijk in je eigen browser bewaard (sessionStorage), zodat de bedankpagina het kan tonen. Sluit je het tabblad, dan is het weg.",
     "Een klantwebsite vervangt deze tekst door de eigen privacyverklaring.",
   ],
 } as const;
@@ -611,16 +612,16 @@ export const privacy = {
 export const blogPage = {
   hero: {
     eyebrow: "Blog",
-    title: "Haalbaar trainen naast een vol leven",
+    title: "Trainen met ritme naast een vol leven",
     text: "Praktische artikelen voor drukke mensen die structureel willen trainen. Fictieve voorbeeldcontent voor de demo.",
   },
   listTitle: "Alle artikelen",
   readLabel: "Lees artikel",
   authorBio: {
-    name: "Noor",
+    name: "Mara",
     role: "Personal trainer (fictief)",
-    bio: "Noor helpt drukke mensen om trainen een vast onderdeel van hun week te maken.",
-    link: { label: "Meer over Noor", href: "/over-mij" } satisfies Cta,
+    bio: "Mara helpt drukke mensen om trainen een vast onderdeel van hun week te maken.",
+    link: { label: "Meer over Mara", href: "/over-mij" } satisfies Cta,
   },
   relatedTitle: "Lees ook",
 } as const;
@@ -635,7 +636,7 @@ export const blogPosts: readonly BlogPost[] = [
     seoTitle: "Hoe vaak trainen met weinig tijd?",
     seoDescription: "Voorbeeldartikel: zo bepaal je een trainingsfrequentie die past in een drukke week.",
     topic: "Planning",
-    author: "Noor",
+    author: "Mara",
     publishedAt: "2026-09-08",
     updatedAt: "2026-10-01",
     readingMinutes: 4,
@@ -654,7 +655,7 @@ export const blogPosts: readonly BlogPost[] = [
     ],
     inlineCta: {
       title: "Welk ritme past bij jou?",
-      text: "Doe de Trainingsdoel-check en zie direct welk weekritme realistisch is voor jouw doel.",
+      text: "Doe de Ritme-check en zie direct welk weekritme realistisch is voor jouw doel.",
       cta: leadmagnetCta,
     },
     conclusion: "Begin met een ritme dat je volhoudt en bouw van daaruit op. Consistentie wint het van intensiteit.",
@@ -669,7 +670,7 @@ export const blogPosts: readonly BlogPost[] = [
     seoTitle: "Consistentie boven motivatie",
     seoDescription: "Voorbeeldartikel: waarom een vast ritme meer oplevert dan wachten op motivatie.",
     topic: "Mindset",
-    author: "Noor",
+    author: "Mara",
     publishedAt: "2026-08-25",
     readingMinutes: 3,
     imageAlt: "Abstracte illustratie van een doorlopende lijn",
@@ -698,7 +699,7 @@ export const blogPosts: readonly BlogPost[] = [
     seoTitle: "Rustig weer beginnen met trainen",
     seoDescription: "Voorbeeldartikel: tips om na een pauze rustig en haalbaar weer te starten met trainen.",
     topic: "Opbouwen",
-    author: "Noor",
+    author: "Mara",
     publishedAt: "2026-08-11",
     readingMinutes: 3,
     imageAlt: "Abstracte illustratie van een opgaande lijn",
@@ -711,7 +712,7 @@ export const blogPosts: readonly BlogPost[] = [
     ],
     inlineCta: {
       title: "Weten waar je kunt beginnen?",
-      text: "De Trainingsdoel-check geeft je een passend startritme en een eerste stap.",
+      text: "De Ritme-check geeft je een passend startritme en een eerste stap.",
       cta: leadmagnetCta,
     },
     conclusion: "Rustig weer beginnen is geen stap terug, maar de snelste weg naar een ritme dat blijft.",

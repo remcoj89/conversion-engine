@@ -1,6 +1,6 @@
 # Demo-site — implementatierecord
 
-**Datum:** 22 oktober 2026
+**Datum:** 22 oktober 2026 (bijgewerkt 23 oktober 2026)
 **Status:** gebouwd, getest en visueel gecontroleerd
 **Locatie:** `apps/demo-site`
 **Doel:** zelfstandige demowebsite voor de Conversion Engine
@@ -30,7 +30,7 @@ De demo bevat deze routes:
 - `/contact` — conversiegerichte contactpagina;
 - `/blog` — blogoverzicht;
 - `/blog/[slug]` — blogdetailpagina met drie voorbeeldartikelen;
-- `/leadmagnet` — Trainingsdoel-check;
+- `/leadmagnet` — Ritme-check;
 - `/bedankt` — bevestiging en kennismakings-upsell;
 - `/privacy` — demo-privacyinformatie;
 - 404-pagina.
@@ -146,9 +146,26 @@ Gecontroleerd gedrag:
 - marketingopt-in staat standaard uit;
 - bedankpagina toont bevestiging vóór upsell.
 
-## 9. Bekend aandachtspunt
+## 9. Visuele verfijning — 23 oktober 2026
 
-De kaarten onder `Lees ook` zijn links uitgelijnd binnen het driekolomsraster. Dit is visueel klein en bewust niet meer aangepast vóór de vergelijking met de tweede Codex-run.
+De demo-site is visueel verfijnd en opnieuw gecontroleerd op desktop (1440 px) en mobiel (390 px): homepage, salespage, contactpagina, over-mij, leadmagnetflow, beide bedankpagina's, blog en mobiele navigatie.
+
+Opgelost:
+
+- **CTA-contrast:** de primaire CTA-kleur is `#c24e2c` (4,75:1 met witte tekst), de hover-state `#a63f24` (6,25:1). Stapnummers gebruiken dezelfde kleur.
+- **Rasteruitlijning:** blog- en reviewrasters met twee items tonen twee kolommen in plaats van een lege derde kolom. Bij drie items blijven drie kolommen staan. Dit lost ook het eerdere aandachtspunt bij `Lees ook` op.
+- **Blogkaart-meta:** het onderwerp staat op een eigen regel, datum en leestijd breken niet meer af. Titels en tekst staan in alle kaarten op dezelfde hoogte.
+- **Inspringing:** `home.firstStep.intro.text` in `content/demo.ts` is gecorrigeerd.
+
+Geen horizontale overflow op de gecontroleerde pagina's.
+
+Geslaagd na deze wijzigingen:
+
+- `npm --workspace demo-site run typecheck`;
+- `npm --workspace demo-site run lint`;
+- `npm --workspace demo-site run test` — 19/19;
+- `npm --workspace demo-site run build`;
+- `git diff --check`.
 
 ## 10. Niet uitgevoerd
 

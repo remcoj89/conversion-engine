@@ -11,7 +11,7 @@ export function SiteHeader() {
       <div className="container site-header__bar">
         <Link href="/" className="brand">
           <span className="brand__mark" aria-hidden="true">
-            F
+            {site.mark}
           </span>
           {site.name}
         </Link>

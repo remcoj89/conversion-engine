@@ -16,7 +16,7 @@ type Props = Readonly<{ quiz: QuizConfig; form: FormCopy }>;
 
 const emptySummary: SummaryValues = { firstName: "", email: "", consent: false, marketing: false };
 
-// Leadmagnet: Trainingsdoel-check (LM-06) met optionele samenvatting (LM-08).
+// Leadmagnet: Ritme-check (LM-06) met optionele samenvatting (LM-08).
 // Het resultaat is direct zichtbaar zonder e-mailadres; er wordt niets verstuurd of opgeslagen buiten deze browser.
 export function QuizLeadmagnet({ quiz, form }: Props) {
   const router = useRouter();

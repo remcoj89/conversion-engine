@@ -17,13 +17,13 @@ export default function OpengraphImage() {
           flexDirection: "column",
           justifyContent: "center",
           padding: 80,
-          background: "#1f5c4a",
+          background: "#29243b",
           color: "#ffffff",
         }}
       >
         <div style={{ fontSize: 36, opacity: 0.85 }}>{site.name}</div>
         <div style={{ fontSize: 64, fontWeight: 700, marginTop: 24, lineHeight: 1.1 }}>{site.tagline}</div>
-        <div style={{ fontSize: 28, marginTop: 40, color: "#f6c9a8" }}>Demowebsite · fictieve content</div>
+        <div style={{ fontSize: 28, marginTop: 40, color: "#f5c36a" }}>Demowebsite · fictieve content</div>
       </div>
     ),
     size,
