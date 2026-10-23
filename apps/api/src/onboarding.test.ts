@@ -6,6 +6,7 @@ import type { AuthAdapter, Membership } from "./auth/types.js";
 import type { OnboardingDraft, SaveDraftInput, SaveDraftResult } from "./onboarding/onboardingRepository.js";
 import type { OnboardingStore } from "./routes/onboarding.js";
 import { fieldById, onboardingSchema } from "../../../packages/onboarding-contract/src/index.ts";
+import { completeAnswers } from "../../../packages/onboarding-contract/src/testFixtures.ts";
 
 // ---------- Testopzet ----------
 
@@ -43,25 +44,29 @@ function memoryStore() {
       calls.push({ method: "findCurrent", tenantId });
       return drafts.get(tenantId) ?? null;
     },
-    saveDraft: async (input): Promise<SaveDraftResult> => {
-      calls.push({ method: "saveDraft", tenantId: input.tenantId, input });
-      const current = drafts.get(input.tenantId);
-      const currentVersion = current?.version ?? 0;
-      if (input.baseVersion !== currentVersion) return { status: "conflict", currentVersion };
-      const draft: OnboardingDraft = {
-        projectId: current?.projectId ?? randomUUID(),
-        status: "draft",
-        version: currentVersion + 1,
-        schemaId: input.schemaId,
-        schemaVersion: input.schemaVersion,
-        answers: input.answers,
-        projectBrief: input.projectBrief,
-        updatedAt: new Date("2026-10-23T12:00:00Z"),
-      };
-      drafts.set(input.tenantId, draft);
-      return { status: "saved", draft };
-    },
+    saveDraft: async (input) => save("saveDraft", input, "draft"),
+    submit: async (input) => save("submit", input, "submitted"),
   };
+  // Zelfde regels als de repository: eerst status (alleen draft), dan versiecontrole.
+  function save(method: string, input: SaveDraftInput, target: "draft" | "submitted"): SaveDraftResult {
+    calls.push({ method, tenantId: input.tenantId, input });
+    const current = drafts.get(input.tenantId);
+    if (current && current.status !== "draft") return { status: "not_editable" };
+    const currentVersion = current?.version ?? 0;
+    if (input.baseVersion !== currentVersion) return { status: "conflict", currentVersion };
+    const draft: OnboardingDraft = {
+      projectId: current?.projectId ?? randomUUID(),
+      status: target,
+      version: currentVersion + 1,
+      schemaId: input.schemaId,
+      schemaVersion: input.schemaVersion,
+      answers: input.answers,
+      projectBrief: input.projectBrief,
+      updatedAt: new Date("2026-10-23T12:00:00Z"),
+    };
+    drafts.set(input.tenantId, draft);
+    return { status: "saved", draft };
+  }
   return { store, calls, drafts };
 }
 
@@ -339,6 +344,9 @@ test("een storefout geeft 500 zonder interne details", async (t) => {
     saveDraft: async () => {
       throw new Error(`Failed query params: ${tenantA}`);
     },
+    submit: async () => {
+      throw new Error(`Failed query params: ${tenantA}`);
+    },
   };
   const app = setup(t, failing);
   for (const method of ["GET", "PUT"] as const) {
@@ -347,4 +355,143 @@ test("een storefout geeft 500 zonder interne details", async (t) => {
     assert.deepEqual(response.json(), { error: "internal_error" });
     assert.ok(!response.body.includes(tenantA));
   }
+});
+
+// ---------- Indienen ----------
+
+const SUBMIT_URL = "/v1/onboarding/current/submit";
+
+test("submit: complete onboarding wordt ingediend; GET toont daarna status submitted", async (t) => {
+  const { store, calls, drafts } = memoryStore();
+  const app = setup(t, store);
+  await app.inject({ method: "PUT", url: URL_, headers: as("owner"), payload: body({ company_name: "Concept" }) });
+
+  const response = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body(completeAnswers(), 1) });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.deepEqual(response.json(), { status: "submitted", version: 2, updated_at: "2026-10-23T12:00:00.000Z" });
+
+  const submitCall = calls.find((call) => call.method === "submit")!;
+  assert.equal(submitCall.tenantId, tenantA);
+  assert.equal(submitCall.input?.userId, "user-owner");
+  const brief = drafts.get(tenantA)!.projectBrief as { status: string; submitted_for_review: boolean; review: { required_fields_missing: unknown[] } };
+  assert.equal(brief.status, "ready_for_westend_review");
+  assert.equal(brief.submitted_for_review, true);
+  assert.deepEqual(brief.review.required_fields_missing, []);
+
+  const current = await app.inject({ method: "GET", url: URL_, headers: as("owner") });
+  assert.equal(current.json().status, "submitted");
+  assert.equal(current.json().version, 2);
+});
+
+test("submit: incomplete onboarding geeft 400 met veldinformatie en blijft draft", async (t) => {
+  const { store, calls } = memoryStore();
+  const app = setup(t, store);
+  await app.inject({ method: "PUT", url: URL_, headers: as("owner"), payload: body({ company_name: "Concept" }) });
+  const answers: Record<string, unknown> = { ...completeAnswers() };
+  delete answers.contact_email;
+  answers.company_name = "A";
+
+  const response = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body(answers, 1) });
+  assert.equal(response.statusCode, 400);
+  const json = response.json();
+  assert.equal(json.error, "incomplete_answers");
+  assert.deepEqual(
+    json.missing.map((item: { field_id: string }) => item.field_id).sort(),
+    ["company_name", "contact_email"],
+  );
+  const contact = json.missing.find((item: { field_id: string }) => item.field_id === "contact_email");
+  assert.equal(contact.questionnaire, "Q4");
+  assert.equal(contact.message, "Dit veld is verplicht.");
+  assert.equal(typeof contact.step, "number");
+
+  assert.ok(!calls.some((call) => call.method === "submit"));
+  const current = await app.inject({ method: "GET", url: URL_, headers: as("owner") });
+  assert.equal(current.json().status, "draft");
+  assert.equal(current.json().version, 1);
+});
+
+test("submit: ongeldige antwoorden, extra body-velden en een ander schema worden geweigerd", async (t) => {
+  const { store, calls } = memoryStore();
+  const app = setup(t, store);
+  const cases: [unknown, number, string][] = [
+    [body({ ...completeAnswers(), niet_bestaand: "x" }), 400, "invalid_answers"],
+    [body({ ...completeAnswers(), brand_status: "rebranding" }), 400, "invalid_answers"],
+    [{ ...body(completeAnswers()), tenant_id: tenantB }, 400, "invalid_body"],
+    [body(completeAnswers(), 0, { schema_version: "0.0.1-oud" }), 409, "schema_mismatch"],
+  ];
+  for (const [payload, status, error] of cases) {
+    const response = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: payload as object });
+    assert.equal(response.statusCode, status, error);
+    assert.equal(response.json().error, error);
+  }
+  assert.deepEqual(calls, []);
+});
+
+test("submit: verborgen conditionele waarden worden niet opgeslagen", async (t) => {
+  const { store, drafts } = memoryStore();
+  const app = setup(t, store);
+  const answers = { ...completeAnswers(), domain_status: "new", domain_name: "verborgen.nl" };
+  const response = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body(answers) });
+  assert.equal(response.statusCode, 200);
+  assert.equal(drafts.get(tenantA)!.answers.domain_name, undefined);
+  assert.ok(!JSON.stringify(drafts.get(tenantA)!.projectBrief).includes("verborgen.nl"));
+});
+
+test("submit: verouderde base_version geeft 409 en wijzigt niets", async (t) => {
+  const { store } = memoryStore();
+  const app = setup(t, store);
+  await app.inject({ method: "PUT", url: URL_, headers: as("owner"), payload: body({ company_name: "Eerste" }) });
+  await app.inject({ method: "PUT", url: URL_, headers: as("owner"), payload: body({ company_name: "Tweede" }, 1) });
+
+  const response = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body(completeAnswers(), 1) });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(response.json(), { error: "version_conflict", current_version: 2 });
+  const current = await app.inject({ method: "GET", url: URL_, headers: as("owner") });
+  assert.deepEqual([current.json().status, current.json().version, current.json().answers.company_name], ["draft", 2, "Tweede"]);
+});
+
+test("submit: tweede indiening en een PUT na indiening geven 409 not_editable", async (t) => {
+  const app = setup(t);
+  const first = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body(completeAnswers()) });
+  assert.equal(first.statusCode, 200);
+
+  const second = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body(completeAnswers(), 1) });
+  assert.equal(second.statusCode, 409);
+  assert.deepEqual(second.json(), { error: "not_editable" });
+
+  const put = await app.inject({ method: "PUT", url: URL_, headers: as("owner"), payload: body({ company_name: "Wijziging" }, 1) });
+  assert.equal(put.statusCode, 409);
+  assert.deepEqual(put.json(), { error: "not_editable" });
+
+  const current = await app.inject({ method: "GET", url: URL_, headers: as("owner") });
+  assert.equal(current.json().status, "submitted");
+  assert.equal(current.json().version, 1);
+});
+
+test("submit: zonder credentials 401, Team Member 403, en geen storeaanroep", async (t) => {
+  const { store, calls } = memoryStore();
+  const app = setup(t, store);
+  const anonymous = await app.inject({ method: "POST", url: SUBMIT_URL, payload: body(completeAnswers()) });
+  assert.equal(anonymous.statusCode, 401);
+  const member = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("team-member"), payload: body(completeAnswers()) });
+  assert.equal(member.statusCode, 403);
+  assert.deepEqual(member.json(), { error: "forbidden" });
+  assert.deepEqual(calls, []);
+});
+
+test("submit: tenantisolatie, ook met een aangepaste tenant-ID", async (t) => {
+  const { store, drafts, calls } = memoryStore();
+  const app = setup(t, store);
+  await app.inject({ method: "PUT", url: URL_, headers: as("owner-b"), payload: body({ company_name: "Concept B" }) });
+
+  const forged = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner", { "x-tenant-id": tenantB }), payload: body(completeAnswers(), 1) });
+  assert.equal(forged.statusCode, 403);
+  assert.equal(drafts.get(tenantB)!.status, "draft");
+
+  const ownA = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body(completeAnswers()) });
+  assert.equal(ownA.statusCode, 200);
+  assert.equal(drafts.get(tenantA)!.status, "submitted");
+  assert.equal(drafts.get(tenantB)!.status, "draft", "B blijft ongewijzigd");
+  assert.deepEqual(calls.filter((call) => call.method === "submit").map((call) => call.tenantId), [tenantA]);
 });

@@ -3,11 +3,16 @@
 import { useMemo, type Dispatch, type RefObject } from "react";
 import { buildProjectBrief, onboardingSchema, phaseProgress, steps, type ReviewFlag } from "../../../../packages/onboarding-contract/src/index";
 import type { FlowAction, FlowState } from "../../lib/onboarding/flow";
+import type { SubmitState } from "./use-draft-sync";
 
 type Props = Readonly<{
   state: FlowState;
   dispatch: Dispatch<FlowAction>;
   headingRef: RefObject<HTMLHeadingElement | null>;
+  submit: SubmitState;
+  // Opslag geladen en geen conflict of blokkade.
+  canSubmitNow: boolean;
+  onSubmit: () => void;
 }>;
 
 const severityLabels: Record<ReviewFlag["severity"], string> = {
@@ -22,12 +27,14 @@ const statusLabels = {
   ready_for_westend_review: "Klaar voor review door Westend",
 } as const;
 
-// Eindcontrole: status per vragenlijst, ontbrekende velden, reviewflags, Project Brief-preview en demo-indiening.
-export default function ReviewPanel({ state, dispatch, headingRef }: Props) {
+// Eindcontrole: status per vragenlijst, ontbrekende velden, reviewflags, Project Brief-preview en officiële indiening.
+export default function ReviewPanel({ state, dispatch, headingRef, submit, canSubmitNow, onSubmit }: Props) {
   const brief = useMemo(() => buildProjectBrief(state.answers, { reviewStatus: state.reviewStatus }), [state.answers, state.reviewStatus]);
   const missing = brief.review.required_fields_missing;
   const flags = brief.review.flags;
-  const submitted = state.reviewStatus === "submitted_demo";
+  const submitted = state.reviewStatus === "submitted";
+  const submitting = submit.kind === "submitting";
+  const submitMessage = submitStatusMessage(submit, submitted, missing.length, canSubmitNow);
 
   return (
     <div className="review-stack">
@@ -123,19 +130,24 @@ export default function ReviewPanel({ state, dispatch, headingRef }: Props) {
           <button
             type="button"
             className="button button-primary"
-            disabled={missing.length > 0 || submitted}
+            disabled={missing.length > 0 || submitted || submitting || !canSubmitNow}
             aria-describedby="submit-status"
-            onClick={() => dispatch({ type: "submit" })}
+            onClick={onSubmit}
           >
-            {submitted ? "Ingediend (demo) ✓" : "Ter review indienen"}
+            {submitted ? "Ingediend ✓" : submitting ? "Bezig met indienen…" : "Ter review indienen"}
           </button>
         </div>
-        <div id="submit-status" role="status" className={submitted ? "notice notice-success" : "onboarding-note"}>
-          {submitted
-            ? "Ingediend als demo (status submitted_demo). Er is niets naar Westend verstuurd; een wijziging zet de status terug naar concept."
-            : missing.length > 0
-              ? "Indienen kan zodra alle zichtbare verplichte vragen geldig zijn ingevuld."
-              : "Indienen is in deze versie alleen een demo-status; er wordt niets verstuurd."}
+        <div
+          id="submit-status"
+          role={submitMessage.tone === "warning" ? "alert" : "status"}
+          className={submitMessage.tone === "note" ? "onboarding-note" : `notice notice-${submitMessage.tone}`}
+        >
+          {submitMessage.text}
+          {submit.kind === "incomplete" && submit.missing.length > 0 && (
+            <button type="button" className="button button-secondary button-small" onClick={() => dispatch({ type: "goToFirstMissing" })}>
+              Naar het eerste ontbrekende veld
+            </button>
+          )}
         </div>
       </section>
 
@@ -157,7 +169,7 @@ export default function ReviewPanel({ state, dispatch, headingRef }: Props) {
           </div>
           <div>
             <dt>Indiening</dt>
-            <dd>{submitted ? <code>submitted_demo</code> : "Concept"}</dd>
+            <dd>{submitted ? <code>submitted</code> : "Concept"}</dd>
           </div>
           <div>
             <dt>Antwoorden met bron</dt>
@@ -218,4 +230,37 @@ export default function ReviewPanel({ state, dispatch, headingRef }: Props) {
       </section>
     </div>
   );
+}
+
+type SubmitMessage = Readonly<{ tone: "note" | "success" | "warning"; text: string }>;
+
+function submitStatusMessage(submit: SubmitState, submitted: boolean, missingCount: number, canSubmitNow: boolean): SubmitMessage {
+  if (submitted) {
+    return {
+      tone: "success",
+      text: "Je onboarding is ingediend. Westend controleert je antwoorden; wijzigen is niet meer mogelijk zonder dat Westend de intake heropent.",
+    };
+  }
+  switch (submit.kind) {
+    case "submitting":
+      return { tone: "note", text: "Bezig met indienen… je laatste wijzigingen worden meegestuurd." };
+    case "incomplete":
+      return {
+        tone: "warning",
+        text: `Niet ingediend: ${submit.missing.length === 1 ? "één verplicht antwoord ontbreekt" : `${submit.missing.length} verplichte antwoorden ontbreken`} of ${submit.missing.length === 1 ? "is" : "zijn"} ongeldig. Je antwoorden zijn bewaard als concept.`,
+      };
+    case "invalid":
+      return { tone: "warning", text: `Niet ingediend: ${submit.count === 1 ? "één antwoord is" : `${submit.count} antwoorden zijn`} ongeldig of te lang.` };
+    case "conflict":
+      return { tone: "warning", text: "Niet ingediend: er is elders een nieuwere versie opgeslagen. Kies bovenaan welke versie je wilt houden en dien daarna opnieuw in." };
+    case "not_editable":
+      return { tone: "warning", text: "Deze onboarding is al ingediend en kan niet opnieuw worden ingediend." };
+    case "error":
+      return { tone: "warning", text: "Indienen is niet gelukt. Je antwoorden staan nog hier; probeer het opnieuw." };
+    default:
+      if (!canSubmitNow) return { tone: "note", text: "Indienen kan zodra je ingelogd bent en je concept is opgeslagen." };
+      return missingCount > 0
+        ? { tone: "note", text: "Indienen kan zodra alle zichtbare verplichte vragen geldig zijn ingevuld." }
+        : { tone: "note", text: "Na indienen worden je antwoorden vergrendeld en beoordeelt Westend de intake." };
+  }
 }

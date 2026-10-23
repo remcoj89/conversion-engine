@@ -14,8 +14,13 @@ const PHASE_COUNT = onboardingSchema.phases.length;
 // (via de BFF); bestanden blijven metadata, er wordt niets geüpload. Geen localStorage.
 export default function OnboardingFlow() {
   const [state, dispatch] = useReducer(flowReducer, initialFlowState);
-  const hydrate = useCallback((answers: FlowState["answers"]) => dispatch({ type: "hydrate", answers }), []);
-  const sync = useDraftSync(state.answers, hydrate);
+  const hydrate = useCallback(
+    (answers: FlowState["answers"], reviewStatus: FlowState["reviewStatus"]) => dispatch({ type: "hydrate", answers, reviewStatus }),
+    [],
+  );
+  const markSubmitted = useCallback(() => dispatch({ type: "submitted" }), []);
+  const sync = useDraftSync(state.answers, hydrate, markSubmitted);
+  const readOnly = state.reviewStatus === "submitted";
   const headingRef = useRef<HTMLHeadingElement>(null);
   const isFirstRender = useRef(true);
   const { current: currentStep, mode } = state;
@@ -122,7 +127,7 @@ export default function OnboardingFlow() {
                 </span>
                 <span className="phase-text">
                   <span className="phase-title">Controle & Project Brief</span>
-                  <span className="phase-meta">{state.reviewStatus === "submitted_demo" ? "Ingediend (demo)" : "Eindcontrole en output"}</span>
+                  <span className="phase-meta">{readOnly ? "Ingediend" : "Eindcontrole en output"}</span>
                 </span>
               </button>
             </li>
@@ -136,7 +141,14 @@ export default function OnboardingFlow() {
               <p>Je opgeslagen antwoorden worden geladen…</p>
             </div>
           ) : inReview ? (
-            <ReviewPanel state={state} dispatch={dispatch} headingRef={headingRef} />
+            <ReviewPanel
+              state={state}
+              dispatch={dispatch}
+              headingRef={headingRef}
+              submit={sync.submit}
+              canSubmitNow={sync.phase === "ready" && sync.save.kind !== "conflict" && sync.save.kind !== "blocked"}
+              onSubmit={() => void sync.submitNow()}
+            />
           ) : (
             <form
               className="card onboarding-card"
@@ -189,7 +201,15 @@ export default function OnboardingFlow() {
                 </div>
               )}
 
-              <div className="onboarding-fields">
+              {readOnly && (
+                <div className="notice notice-success" role="status">
+                  Deze onboarding is ingediend. Je kunt je antwoorden nog bekijken, maar niet meer wijzigen.
+                </div>
+              )}
+
+              {/* Na indienen alleen-lezen: een uitgeschakelde fieldset blokkeert alle velden tegelijk. */}
+              <fieldset className="onboarding-fields" disabled={readOnly}>
+                <legend className="visually-hidden">{step.section.title}</legend>
                 {visibleFields(state.current, state.answers).map((field) => (
                   <OnboardingField
                     key={field.id}
@@ -201,7 +221,7 @@ export default function OnboardingFlow() {
                     onError={(error) => dispatch({ type: "fieldError", fieldId: field.id, error })}
                   />
                 ))}
-              </div>
+              </fieldset>
 
               <div className="onboarding-actions">
                 <button type="button" className="button button-secondary" disabled={state.current === 0} onClick={() => go({ type: "previous" })}>

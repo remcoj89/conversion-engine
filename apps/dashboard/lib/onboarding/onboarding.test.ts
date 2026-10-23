@@ -21,52 +21,11 @@ import {
   fieldById,
   onboardingSchema,
   steps,
-  type FieldDefinition,
 } from "../../../../packages/onboarding-contract/src/index";
+import { completeAnswers } from "../../../../packages/onboarding-contract/src/testFixtures";
 import { flowReducer, initialFlowState, type FlowAction, type FlowState } from "./flow";
 
 // ---------- Hulpfuncties ----------
-
-// Een geldige waarde voor elk veldtype, binnen de grenzen van het schema.
-function validValue(field: FieldDefinition): AnswerValue | undefined {
-  switch (field.type) {
-    case "text":
-    case "textarea": {
-      const length = Math.min(Math.max(field.min ?? 3, 3), field.max ?? 100);
-      return "x".repeat(length);
-    }
-    case "email":
-      return "info@voorbeeld.nl";
-    case "url":
-      return "https://voorbeeld.nl";
-    case "domain":
-      return "voorbeeld.nl";
-    case "number":
-      return String(field.min ?? 1);
-    case "money":
-      return "149,00";
-    case "single_choice":
-      return field.choices![0]!.value;
-    case "multi_choice":
-      return field.choices!
-        .filter((choice) => !field.exclusive?.includes(choice.value))
-        .slice(0, Math.max(field.min_items ?? 1, 1))
-        .map((choice) => choice.value);
-    case "repeater":
-    case "file":
-      return undefined;
-  }
-}
-
-// Alle velden geldig ingevuld; verborgen velden worden daarna door clearHidden verwijderd.
-function completeAnswers(): Answers {
-  const answers: Record<string, AnswerValue> = {};
-  for (const field of allFields) {
-    const value = validValue(field);
-    if (value !== undefined) answers[field.id] = value;
-  }
-  return clearHidden(answers);
-}
 
 const run = (actions: readonly FlowAction[], state: FlowState = initialFlowState) => actions.reduce(flowReducer, state);
 const docsSchemaPath = fileURLToPath(
@@ -288,10 +247,11 @@ test("brief: status is incomplete_draft of ready_for_westend_review, nooit goedg
   assert.equal(empty.review.required_fields_missing.length, 70 - 8);
   assert.deepEqual(empty.client_supplied, {});
 
-  const complete = buildProjectBrief(completeAnswers(), { reviewStatus: "submitted_demo" });
+  const complete = buildProjectBrief(completeAnswers(), { reviewStatus: "submitted" });
   assert.equal(complete.status, "ready_for_westend_review");
   assert.deepEqual(complete.review.required_fields_missing, []);
-  assert.equal(complete.submitted_for_review_demo, true);
+  assert.equal(complete.submitted_for_review, true);
+  assert.equal(buildProjectBrief(completeAnswers(), { reviewStatus: "draft" }).submitted_for_review, false);
 });
 
 test("reviewflags: worden alleen afgeleid uit zichtbare antwoorden", () => {
@@ -356,19 +316,33 @@ test("eindcontrole: naar het eerste ontbrekende veld toont de fouten van dat sch
   assert.equal(missingFields(state.answers).length, 1);
 });
 
-test("indienen: ongeldige intake kan niet worden ingediend", () => {
-  const state = run([{ type: "review" }, { type: "submit" }]);
+test("indienen: een onvolledige intake is lokaal niet indienbaar", () => {
+  const state = run([{ type: "review" }]);
   assert.equal(state.reviewStatus, "draft");
   assert.equal(canSubmit(state.answers), false);
   assert.equal(phaseProgress(0, state.answers).complete, false);
+  assert.equal(canSubmit(completeAnswers()), true);
 });
 
-test("indienen: geldige intake krijgt submitted_demo; een latere wijziging zet hem terug op draft", () => {
-  let state = run([{ type: "review" }, { type: "submit" }], { ...initialFlowState, answers: completeAnswers() });
-  assert.equal(state.reviewStatus, "submitted_demo");
+test("indienen: pas na de serverbevestiging is de status submitted; daarna zijn wijzigingen geblokkeerd", () => {
+  let state: FlowState = { ...initialFlowState, answers: completeAnswers() };
+  state = flowReducer(state, { type: "review" });
+  assert.equal(state.reviewStatus, "draft", "naar de eindcontrole gaan dient niets in");
+  state = flowReducer(state, { type: "submitted" });
+  assert.equal(state.reviewStatus, "submitted");
   assert.equal(stepErrors(0, state.answers).company_name, undefined);
-  state = flowReducer(state, { type: "answer", fieldId: "company_name", value: "Nieuwe naam BV" });
-  assert.equal(state.reviewStatus, "draft");
+
+  const after = flowReducer(state, { type: "answer", fieldId: "company_name", value: "Nieuwe naam BV" });
+  assert.equal(after, state, "alleen-lezen: het antwoord wordt genegeerd");
+  // Navigeren en bekijken kan nog wel.
+  assert.equal(flowReducer(state, { type: "goToPhase", phaseIndex: 1 }).current, 5);
+});
+
+test("na refresh: een ingediende onboarding wordt als submitted en alleen-lezen geladen", () => {
+  const hydrated = flowReducer(initialFlowState, { type: "hydrate", answers: completeAnswers(), reviewStatus: "submitted" });
+  assert.equal(hydrated.reviewStatus, "submitted");
+  assert.deepEqual(hydrated.answers, completeAnswers());
+  assert.equal(flowReducer(hydrated, { type: "answer", fieldId: "company_name", value: "Wijziging" }), hydrated);
 });
 
 test("hervatten: hydrate laadt opgeslagen antwoorden, wist verborgen waarden en behoudt de positie", () => {
@@ -376,6 +350,7 @@ test("hervatten: hydrate laadt opgeslagen antwoorden, wist verborgen waarden en 
   const hydrated = flowReducer(state, {
     type: "hydrate",
     answers: { company_name: "Opgeslagen BV", domain_status: "new", domain_name: "verborgen.nl" },
+    reviewStatus: "draft",
   });
   assert.equal(hydrated.current, 5);
   assert.deepEqual(hydrated.answers, { company_name: "Opgeslagen BV", domain_status: "new" });

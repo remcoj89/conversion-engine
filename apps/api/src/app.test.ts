@@ -97,6 +97,9 @@ const unusedOnboardingStore: OnboardingStore = {
   saveDraft: async () => {
     throw new Error("not used in these tests");
   },
+  submit: async () => {
+    throw new Error("not used in these tests");
+  },
 };
 
 // Geeft de creator plus de aanroepen; de "opgeslagen" lead krijgt altijd status new, zoals de database.

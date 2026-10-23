@@ -28,6 +28,9 @@ export type SaveDraftInput = Readonly<{
   projectBrief: Record<string, unknown>;
 }>;
 
+// Concept opslaan houdt het project op "draft"; indienen zet het in dezelfde transactie op "submitted".
+export type SaveTarget = "draft" | "submitted";
+
 export type SaveDraftResult =
   | Readonly<{ status: "saved"; draft: OnboardingDraft }>
   | Readonly<{ status: "conflict"; currentVersion: number }>
@@ -63,11 +66,29 @@ export async function findCurrentOnboarding(db: Db, tenantId: string): Promise<O
 // Slaat een nieuwe versie op, alleen als baseVersion nog de laatste versie is (optimistic concurrency).
 // Het project wordt bij de eerste opslag aangemaakt. Alles gebeurt in één transactie met een rijlock.
 export async function saveOnboardingDraft(db: Db, input: SaveDraftInput): Promise<SaveDraftResult> {
-  return db.transaction((tx) => saveOnboardingDraftInTransaction(tx, input));
+  return db.transaction((tx) => saveOnboardingVersionInTransaction(tx, input, "draft"));
 }
 
-// Zelfde logica binnen een al geopende transactie (de aanroeper beheert begin/commit, bijv. in tests).
-export async function saveOnboardingDraftInTransaction(tx: Pick<Db, "select" | "insert" | "update">, input: SaveDraftInput): Promise<SaveDraftResult> {
+// Indienen: zelfde lock- en versieregels, plus statusovergang draft → submitted in dezelfde transactie.
+// Faalt een stap, dan rolt de hele transactie terug: geen nieuwe versie en geen statuswijziging.
+export async function submitOnboarding(db: Db, input: SaveDraftInput): Promise<SaveDraftResult> {
+  return db.transaction((tx) => saveOnboardingVersionInTransaction(tx, input, "submitted"));
+}
+
+// Concept opslaan binnen een al geopende transactie (de aanroeper beheert begin/commit, bijv. in tests).
+export function saveOnboardingDraftInTransaction(tx: Tx, input: SaveDraftInput): Promise<SaveDraftResult> {
+  return saveOnboardingVersionInTransaction(tx, input, "draft");
+}
+
+// Indienen binnen een al geopende transactie.
+export function submitOnboardingInTransaction(tx: Tx, input: SaveDraftInput): Promise<SaveDraftResult> {
+  return saveOnboardingVersionInTransaction(tx, input, "submitted");
+}
+
+type Tx = Pick<Db, "select" | "insert" | "update">;
+
+// Alleen een project met status "draft" (of nog geen project) kan een nieuwe versie krijgen.
+async function saveOnboardingVersionInTransaction(tx: Tx, input: SaveDraftInput, target: SaveTarget): Promise<SaveDraftResult> {
   const [project] = await tx
     .select()
     .from(schema.onboardingProjects)
@@ -85,7 +106,7 @@ export async function saveOnboardingDraftInTransaction(tx: Pick<Db, "select" | "
     // Bij een gelijktijdige eerste opslag wint één transactie; de unieke index laat de andere niets invoegen.
     const [created] = await tx
       .insert(schema.onboardingProjects)
-      .values({ tenantId: input.tenantId, status: "draft", currentVersion: 1 })
+      .values({ tenantId: input.tenantId, status: target, currentVersion: 1 })
       .onConflictDoNothing()
       .returning();
     if (!created) return { status: "conflict", currentVersion: 1 };
@@ -95,7 +116,7 @@ export async function saveOnboardingDraftInTransaction(tx: Pick<Db, "select" | "
     if (project.currentVersion !== input.baseVersion) return { status: "conflict", currentVersion: project.currentVersion };
     const [updated] = await tx
       .update(schema.onboardingProjects)
-      .set({ currentVersion: sql`${schema.onboardingProjects.currentVersion} + 1`, updatedAt: sql`now()` })
+      .set({ currentVersion: sql`${schema.onboardingProjects.currentVersion} + 1`, status: target, updatedAt: sql`now()` })
       .where(and(eq(schema.onboardingProjects.id, project.id), eq(schema.onboardingProjects.tenantId, input.tenantId)))
       .returning();
     if (!updated) throw new Error("Onboarding project update returned no row");

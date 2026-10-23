@@ -369,6 +369,9 @@ function httpSetup(memberships: readonly Membership[] = []) {
         saveDraft: async () => {
           throw new Error("not used in these tests");
         },
+        submit: async () => {
+          throw new Error("not used in these tests");
+        },
       },
     },
     { logger: { level: "trace", stream: { write: (line: string) => logs.push(line) } } },
@@ -436,6 +439,9 @@ test("HTTP met ZITADEL-adapter: JWKS-fout geeft 500 internal_error zonder tokend
       onboardingStore: {
         findCurrent: async () => null,
         saveDraft: async () => {
+          throw new Error("not used in these tests");
+        },
+        submit: async () => {
           throw new Error("not used in these tests");
         },
       },

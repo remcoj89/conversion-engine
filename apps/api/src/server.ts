@@ -5,7 +5,7 @@ import { createDiscoveredKeySet } from "./auth/oidcDiscovery.js";
 import { createZitadelAdapter } from "./auth/zitadelAdapter.js";
 import { createDb } from "./db.js";
 import { createLead } from "./leads/leadRepository.js";
-import { findCurrentOnboarding, saveOnboardingDraft } from "./onboarding/onboardingRepository.js";
+import { findCurrentOnboarding, saveOnboardingDraft, submitOnboarding } from "./onboarding/onboardingRepository.js";
 import { findTenant } from "./tenants/tenantLoader.js";
 
 const HOST = "127.0.0.1";
@@ -37,6 +37,7 @@ const app = buildApp({
   onboardingStore: {
     findCurrent: (tenantId) => findCurrentOnboarding(db, tenantId),
     saveDraft: (input) => saveOnboardingDraft(db, input),
+    submit: (input) => submitOnboarding(db, input),
   },
 });
 

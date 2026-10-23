@@ -17,9 +17,9 @@ export type ForwardedError = Readonly<{ status: number; error: string; fields?: 
 
 export type ApiProxyRoute = Readonly<{
   apiPath: string;
-  method: "GET" | "PUT";
+  method: "GET" | "PUT" | "POST";
   forwardedErrors: readonly ForwardedError[];
-  // Alleen bij PUT: maximale grootte van de JSON-body die naar de API gaat.
+  // Alleen bij PUT/POST: maximale grootte van de JSON-body die naar de API gaat.
   maxBodyBytes?: number;
 }>;
 
@@ -51,7 +51,7 @@ export function createApiProxy(
 
       // De body één keer lezen, zodat dezelfde inhoud na een refresh opnieuw kan worden verstuurd.
       let body: string | undefined;
-      if (route.method === "PUT") {
+      if (route.method !== "GET") {
         body = await request.text();
         if (new TextEncoder().encode(body).byteLength > (route.maxBodyBytes ?? 0)) {
           return reply({ error: "payload_too_large" }, 413);

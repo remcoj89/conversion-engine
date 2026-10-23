@@ -155,3 +155,39 @@ test("BFF onboarding: tokens en sessie-ID komen nooit in de response", async () 
     assert.ok(!text.includes(secret));
   }
 });
+
+test("BFF onboarding POST: indienen gaat met sessietoken en dezelfde body naar het submit-endpoint", async () => {
+  const { POST, calls } = setup(() => Response.json({ status: "submitted", version: 2, updated_at: "2026-10-23T12:00:00.000Z" }));
+  const response = await POST(new NextRequest("https://app.test/api/onboarding", { method: "POST", headers: { ...session, authorization: "Bearer browser-token" }, body: draftBody }));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "submitted", version: 2, updated_at: "2026-10-23T12:00:00.000Z" });
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(calls[0]!.url, `${API_BASE_URL}/v1/onboarding/current/submit`);
+  assert.equal(calls[0]!.method, "POST");
+  assert.equal(calls[0]!.body, draftBody);
+  assert.equal(calls[0]!.headers.get("authorization"), `Bearer ${ACCESS_TOKEN}`);
+});
+
+test("BFF onboarding POST: submitstatussen 400/403/409 gaan door, zonder sessie 401", async () => {
+  const missing = [{ field_id: "contact_email", questionnaire: "Q4", step: 18, message: "Dit veld is verplicht." }];
+  const cases: [() => Response, number, unknown][] = [
+    [() => Response.json({ error: "incomplete_answers", missing, debug: "x" }, { status: 400 }), 400, { error: "incomplete_answers", missing }],
+    [() => Response.json({ error: "invalid_answers", issues: [{ field_id: "x", code: "unknown_field" }] }, { status: 400 }), 400, { error: "invalid_answers", issues: [{ field_id: "x", code: "unknown_field" }] }],
+    [() => Response.json({ error: "version_conflict", current_version: 4 }, { status: 409 }), 409, { error: "version_conflict", current_version: 4 }],
+    [() => Response.json({ error: "not_editable" }, { status: 409 }), 409, { error: "not_editable" }],
+    [() => Response.json({ error: "schema_mismatch", schema_id: "S", schema_version: "1" }, { status: 409 }), 409, { error: "schema_mismatch", schema_id: "S", schema_version: "1" }],
+    [() => Response.json({ error: "forbidden" }, { status: 403 }), 403, { error: "forbidden" }],
+  ];
+  for (const [apiResponse, status, expected] of cases) {
+    const { POST } = setup(apiResponse);
+    const response = await POST(new NextRequest("https://app.test/api/onboarding", { method: "POST", headers: session, body: draftBody }));
+    assert.equal(response.status, status, JSON.stringify(expected));
+    assert.deepEqual(await response.json(), expected);
+  }
+
+  const { POST, calls } = setup();
+  const anonymous = await POST(new NextRequest("https://app.test/api/onboarding", { method: "POST", body: draftBody }));
+  assert.equal(anonymous.status, 401);
+  assert.equal(calls.length, 0);
+});

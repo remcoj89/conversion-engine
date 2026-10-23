@@ -2,7 +2,7 @@
 
 **Laatst bijgewerkt:** 23 oktober 2026
 **Status:** Fase 5, technische implementatie met kleine verticale slices
-**Laatste gepushte technische commit:** `a521755 docs: sync onboarding demo schema`
+**Laatste gepushte technische commit:** `ca0d5a8 feat: persist onboarding drafts`
 
 Dit document is een compacte startcontext voor nieuwe Codex- en Claude-sessies. Het vervangt de leidende bron- en architectuurdocumenten niet.
 
@@ -47,11 +47,13 @@ Conversion Engine is een multi-tenant SaaS-dashboard voor leadopvolging, website
 - Migratie `0005` toegepast op de lokale developmentdatabase; `websites` bevat 0 rijen.
 - Onboarding-draftopslag met migratie `0006`: versieerbare antwoorden en server-side gegenereerde Project Brief.
 - `GET/PUT /v1/onboarding/current` achter ZITADEL-auth; alleen een Owner met `onboarding:manage` heeft toegang.
+- Officieel indienen via `POST /v1/onboarding/current/submit`: volledige server-side validatie, transactionele statusovergang `draft` → `submitted`; daarna weigert de API wijzigingen (`409 not_editable`).
 - Next.js BFF-route `/api/onboarding` met server-side sessie, token refresh en 409-conflictafhandeling.
 - Dashboard-onboarding hervat server-side drafts na refresh en slaat wijzigingen automatisch op; uploads zijn voorlopig metadata-only.
+- Het dashboard dient de onboarding in via de BFF (`POST /api/onboarding`), wacht daarbij een lopende autosave af, en toont een ingediende onboarding na refresh alleen-lezen.
 - Zelfstandige demo-site in `apps/demo-site`, visueel gecontroleerd op desktop en mobiel.
 
-De laatste gecontroleerde backendstatus had groene API-typecheck, lint, 88 API-tests en 44 database-tests. De dashboardtests stonden op 124; dashboard- en API-builds waren groen. Migratie `0006` is lokaal toegepast; 7 migraties zijn geregistreerd. De onboarding-backendslice is technisch getest en de handmatige ZITADEL-smoketest is geslaagd: login, conceptopslag, refresh en opnieuw inloggen behouden de ingevulde antwoorden.
+De laatste gecontroleerde status na de submit-slice: groene API-typecheck, lint, 96 API-tests en 51 database-tests; 127 dashboardtests; dashboard- en API-builds groen. Er is geen nieuwe migratie nodig (de status `submitted` bestond al in `0006`); 7 migraties zijn geregistreerd. De handmatige ZITADEL-smoketest voor conceptopslag en de handmatige submit-smoketest met een echte sessie zijn geslaagd: indienen werkt en de onboarding wordt daarna alleen-lezen.
 
 ## Belangrijk onderscheid: twee intakeflows
 
@@ -82,7 +84,7 @@ De bijbehorende schema- en contractspecificaties staan in dezelfde map. De demo 
 
 De backendfundering voor identiteit, tenantisolatie, leads en website-resolutie is aanwezig. De dashboard-frontend bevat de volledige onboardingflow: Q1–Q4, 20 onderdelen, schema-gedreven validatie, conditionele velden, optionele assetmetadata en de eindcontrole met Project Brief-preview. De flow is via `/api/onboarding` gekoppeld aan server-side draftopslag.
 
-Antwoorden worden per tenant en project versieerbaar opgeslagen. Bij refresh wordt een bestaand concept hervat; gelijktijdige wijzigingen leiden tot een expliciete 409-conflictkeuze. De vier uploadvelden bewaren voorlopig alleen metadata: echte uploads, scanning en private opslag zijn nog niet gebouwd. Indienen, Westend-review, audit-events, prefill en productiehandoff blijven volgende slices. De handmatige ZITADEL-smoketest is geslaagd; de slice is klaar voor gecontroleerde acceptatie en commit.
+Antwoorden worden per tenant en project versieerbaar opgeslagen. Bij refresh wordt een bestaand concept hervat; gelijktijdige wijzigingen leiden tot een expliciete 409-conflictkeuze. De vier uploadvelden bewaren voorlopig alleen metadata: echte uploads, scanning en private opslag zijn nog niet gebouwd. Officieel indienen is aanwezig: de status `submitted` wordt server-side afgedwongen en een ingediende onboarding is niet meer automatisch wijzigbaar. De handmatige submit-smoketest met een echte ZITADEL-sessie is geslaagd. Westend-review, audit-events, prefill en productiehandoff blijven volgende slices.
 
 De handmatige bouw en verzending van koude outreach-demo’s blijven buiten de Conversion Engine. De backend- en databasefundering wordt niet opnieuw gebouwd voor de demo-opbouw.
 
@@ -101,7 +103,7 @@ De handmatige bouw en verzending van koude outreach-demo’s blijven buiten de C
 
 - Productie-MFA/AAL-handhaving.
 - PostgreSQL-RLS en tenantveilige samengestelde relaties.
-- Onboarding audit-events, formeel indienen, reviewworkflow en Project Brief-goedkeuring.
+- Onboarding audit-events, reviewworkflow en Project Brief-goedkeuring.
 - Veilige uploads, scanning en private opslag.
 - Publieke lead-ingest met anti-spam, rate limiting, outbox en idempotency.
 - CRM-contacten, pipeline, taken en verdere leadopvolging.

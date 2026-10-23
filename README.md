@@ -60,6 +60,7 @@ ZITADEL beheert identiteit en authenticatie. De eigen PostgreSQL-database blijft
 - JWT-validatie van ZITADEL-access tokens in de Fastify API.
 - Gecombineerde Q1–Q4-onboarding met 123 schema-velden, een gedeelde contractlaag en server-side Project Brief-generatie.
 - Server-side onboardingconcepten met versiebeheer via migratie `0006`; `GET/PUT /v1/onboarding/current`.
+- Officieel indienen via `POST /v1/onboarding/current/submit`; status `submitted` wordt server-side afgedwongen.
 - `/api/onboarding` in de Next.js BFF met server-side sessie, token refresh en conflictcontrole; alleen een Owner heeft `onboarding:manage`.
 - Dashboard-onboarding hervat concepten na refresh en slaat antwoorden automatisch op; bestanden zijn voorlopig metadata-only.
 - Zelfstandige demowebsite in `apps/demo-site`; zie [het implementatierecord](docs/demo-site-implementation-record-v1.0.md).
@@ -81,7 +82,7 @@ De beveiligingsgrens van de Fastify API, bijgewerkt naar de huidige code (23 okt
 
 Nog niet aanwezig: MFA/AAL-handhaving en PostgreSQL-RLS. De resolver gaat uit van één geconfigureerde issuer en koppelt op `auth_provider_user_id`/OIDC-subject; issuer-opslag en de samengestelde uniqueness-regel zijn nog niet besloten.
 
-Voor onboarding zijn echte uploads/private opslag, formeel indienen, reviewworkflow, audit-events, prefill en productiehandoff nog niet aanwezig. De huidige draftopslag is lokaal gebouwd en getest. De handmatige smoketest met een echte ZITADEL-sessie is geslaagd: login, conceptopslag, refresh en opnieuw inloggen behouden de ingevulde antwoorden.
+Voor onboarding zijn echte uploads/private opslag, reviewworkflow, audit-events, prefill en productiehandoff nog niet aanwezig; draftopslag en officieel indienen zijn er wel. De huidige draftopslag is lokaal gebouwd en getest. De handmatige smoketest met een echte ZITADEL-sessie is geslaagd: login, conceptopslag, refresh en opnieuw inloggen behouden de ingevulde antwoorden.
 
 Websites kunnen server-side worden geregistreerd met een opaque publieke key; een resolver koppelt een actieve key aan precies één actieve tenant. Voor leads staan nog open: de publieke formulier-endpoint, anti-spam, rate limiting, outbox, externe verwerking en idempotency/duplicate prevention.
 
@@ -113,6 +114,19 @@ De dashboard-onboarding is gekoppeld aan server-side conceptopslag.
 - Uploadvelden slaan voorlopig alleen metadata op. Bestandsbytes, private object storage, scanning, submit, review en audit-events vallen buiten deze slice.
 
 De technische checks zijn groen en de handmatige controle met een echte ZITADEL-login is geslaagd. Deze slice is klaar voor acceptatie en commit.
+
+## Onboarding indienen — 23 oktober 2026
+
+Een ingelogde Owner kan de volledige onboarding officieel indienen; conceptopslag blijft werken zoals hierboven.
+
+- `POST /v1/onboarding/current/submit` gebruikt dezelfde auth-hook, tenantcontext en `onboarding:manage`-permission als de draftroutes, en hetzelfde strikte body-contract (`answers`, `base_version`, `schema_id`, `schema_version`).
+- De API controleert opnieuw schema, antwoordtypes en toegestane waarden, en daarnaast alle zichtbare verplichte velden. Ontbrekende of ongeldige antwoorden geven `400 incomplete_answers` met per veld de bronvragenlijst, het onderdeel en de melding. Verborgen conditionele waarden worden niet opgeslagen.
+- Indienen gebeurt in één transactie met dezelfde rijlock en optimistic concurrency als de draftopslag: nieuwe immutable versie, server-side Project Brief en statusovergang `draft` → `submitted`. Een fout laat geen gedeeltelijke wijziging achter.
+- Foutpaden: `401` zonder sessie, `403` zonder Owner/permission, `409 version_conflict`, `409 not_editable` (al ingediend) en `409 schema_mismatch`.
+- Na indienen weigert de API elke verdere `PUT` of submit met `409 not_editable`.
+- De BFF proxyt `POST /api/onboarding` met hetzelfde sessie- en tokenpatroon. Het dashboard wacht een lopende autosave af, stuurt de laatste antwoorden mee in de submit, toont de indienstatus en maakt de vragen daarna alleen-lezen; na een refresh laadt de status `submitted` opnieuw.
+
+De handmatige submit-smoketest met een echte ZITADEL-sessie is geslaagd: de onboarding is ingediend en daarna alleen-lezen. Echte uploads, de reviewworkflow, audit-events, prefill en de productiehandoff blijven buiten scope.
 
 ## Authenticatiebesluit — 21 oktober 2026
 

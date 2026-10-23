@@ -11,6 +11,7 @@ type Props = Readonly<{
 }>;
 
 const timeFormat = new Intl.DateTimeFormat("nl-NL", { hour: "2-digit", minute: "2-digit" });
+const submittedFormat = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
 
 // Eenvoudige opslagstatus onder de voortgangsbalk. Conflicten en blokkades krijgen een duidelijke melding met keuze.
 export default function SaveStatus({ phase, save, onRetry, onKeepMine, onLoadServer }: Props) {
@@ -58,8 +59,24 @@ export default function SaveStatus({ phase, save, onRetry, onKeepMine, onLoadSer
         <p>
           {save.reason === "schema_mismatch"
             ? "De vragenlijst is bijgewerkt. Ververs de pagina om verder te gaan; niet-opgeslagen wijzigingen gaan daarbij verloren."
-            : "Deze onboarding is al ingediend en kan hier niet meer worden gewijzigd."}
+            : "Deze onboarding is al ingediend en kan niet meer worden gewijzigd."}
         </p>
+        {save.reason === "not_editable" && (
+          <button type="button" className="button button-secondary button-small" onClick={onLoadServer}>
+            Status vernieuwen
+          </button>
+        )}
+      </div>
+    );
+  }
+  if (save.kind === "submitted") {
+    return (
+      <div className="save-status save-status-submitted" role="status" aria-live="polite">
+        <span className="save-dot save-dot-saved" aria-hidden="true" />
+        <span>
+          <strong>Ingediend</strong>
+          {save.at ? ` op ${submittedFormat.format(save.at)}` : ""} · je antwoorden zijn vergrendeld voor review door Westend.
+        </span>
       </div>
     );
   }

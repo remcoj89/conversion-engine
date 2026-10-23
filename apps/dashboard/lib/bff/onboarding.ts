@@ -9,16 +9,19 @@ const forwardedErrors: readonly ForwardedError[] = [
   { status: 400, error: "invalid_tenant" },
   { status: 400, error: "invalid_body" },
   { status: 400, error: "invalid_answers", fields: ["issues"] },
+  { status: 400, error: "incomplete_answers", fields: ["missing"] },
   { status: 409, error: "version_conflict", fields: ["current_version"] },
   { status: 409, error: "schema_mismatch", fields: ["schema_id", "schema_version"] },
   { status: 409, error: "not_editable" },
   { status: 413, error: "payload_too_large" },
 ];
 
-// GET/PUT /api/onboarding → GET/PUT /v1/onboarding/current, met hetzelfde sessie- en tokenpatroon als today.
+// GET/PUT /api/onboarding → GET/PUT /v1/onboarding/current en POST /api/onboarding → POST /v1/onboarding/current/submit,
+// met hetzelfde sessie- en tokenpatroon als today.
 export function createOnboardingHandlers(dependencies: ApiProxyDependencies) {
   return {
     GET: createApiProxy(dependencies, { apiPath: "/v1/onboarding/current", method: "GET", forwardedErrors }),
     PUT: createApiProxy(dependencies, { apiPath: "/v1/onboarding/current", method: "PUT", forwardedErrors, maxBodyBytes: MAX_BODY_BYTES }),
+    POST: createApiProxy(dependencies, { apiPath: "/v1/onboarding/current/submit", method: "POST", forwardedErrors, maxBodyBytes: MAX_BODY_BYTES }),
   };
 }

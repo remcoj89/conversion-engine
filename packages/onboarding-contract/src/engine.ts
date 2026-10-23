@@ -17,7 +17,8 @@ export type RepeaterItem = Readonly<Record<string, string>>;
 export type AnswerValue = string | readonly string[] | readonly RepeaterItem[] | readonly FileMeta[];
 export type Answers = Readonly<Record<string, AnswerValue>>;
 
-export type ReviewStatus = "draft" | "submitted_demo";
+// Status van de indiening door de klant; goedkeuring is altijd een aparte, menselijke Westend-stap.
+export type ReviewStatus = "draft" | "submitted";
 
 export function isEmpty(value: AnswerValue | undefined): boolean {
   if (value === undefined) return true;
@@ -307,7 +308,7 @@ export type ProjectBrief = Readonly<{
   source_schema_versions: readonly Readonly<{ id: string; version: string }>[];
   generated_at: string;
   status: "incomplete_draft" | "ready_for_westend_review";
-  submitted_for_review_demo: boolean;
+  submitted_for_review: boolean;
   client_supplied: Readonly<Record<string, unknown>>;
   provenance: readonly Provenance[];
   review: Readonly<{
@@ -384,7 +385,7 @@ export function buildProjectBrief(
     generated_at: now.toISOString(),
     // Nooit automatisch goedgekeurd: hoogstens klaar voor menselijke review door Westend.
     status: missing.length > 0 ? "incomplete_draft" : "ready_for_westend_review",
-    submitted_for_review_demo: reviewStatus === "submitted_demo",
+    submitted_for_review: reviewStatus === "submitted",
     client_supplied: clientSupplied,
     provenance,
     review: {

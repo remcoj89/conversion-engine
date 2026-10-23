@@ -1,6 +1,5 @@
 // Navigatie en status van de onboardingflow als pure reducer. Opslag op de server staat in app/onboarding/use-draft-sync.ts.
 import {
-  canSubmit,
   clearHidden,
   isEmpty,
   missingFields,
@@ -24,8 +23,8 @@ export type FlowState = Readonly<{
 }>;
 
 export type FlowAction =
-  // Antwoorden uit een opgeslagen concept; navigatie blijft waar die is.
-  | Readonly<{ type: "hydrate"; answers: Answers }>
+  // Antwoorden en status van de server; navigatie blijft waar die is.
+  | Readonly<{ type: "hydrate"; answers: Answers; reviewStatus: ReviewStatus }>
   | Readonly<{ type: "answer"; fieldId: string; value: AnswerValue }>
   | Readonly<{ type: "blur"; fieldId: string }>
   | Readonly<{ type: "fieldError"; fieldId: string; error: string }>
@@ -35,7 +34,8 @@ export type FlowAction =
   | Readonly<{ type: "goToPhase"; phaseIndex: number }>
   | Readonly<{ type: "review" }>
   | Readonly<{ type: "goToFirstMissing" }>
-  | Readonly<{ type: "submit" }>;
+  // Alleen na een geslaagde server-indiening.
+  | Readonly<{ type: "submitted" }>;
 
 export const initialFlowState: FlowState = {
   answers: {},
@@ -56,14 +56,14 @@ function withoutKey(record: Readonly<Record<string, string>>, key: string): Reco
 export function flowReducer(state: FlowState, action: FlowAction): FlowState {
   switch (action.type) {
     case "hydrate":
-      return { ...state, answers: clearHidden(action.answers), errors: {}, reviewStatus: "draft" };
+      return { ...state, answers: clearHidden(action.answers), errors: {}, reviewStatus: action.reviewStatus };
     case "answer":
-      // Elke wijziging maakt een eerdere demo-indiening ongedaan: de klant moet opnieuw indienen.
+      // Na indienen is de onboarding alleen-lezen; de server weigert wijzigingen ook (409 not_editable).
+      if (state.reviewStatus === "submitted") return state;
       return {
         ...state,
         answers: setAnswer(state.answers, action.fieldId, action.value),
         errors: withoutKey(state.errors, action.fieldId),
-        reviewStatus: "draft",
       };
     case "blur": {
       // Bij het verlaten van een ingevuld veld direct controleren; lege velden pas bij "Volgende".
@@ -95,7 +95,7 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       if (!first) return state;
       return { ...state, mode: "form", current: first.step, errors: stepErrors(first.step, state.answers) };
     }
-    case "submit":
-      return canSubmit(state.answers) ? { ...state, reviewStatus: "submitted_demo" } : state;
+    case "submitted":
+      return { ...state, reviewStatus: "submitted", errors: {} };
   }
 }

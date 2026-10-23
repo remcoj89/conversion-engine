@@ -11,8 +11,9 @@ import { createDb } from "./db.js";
 import * as schema from "./db/schema.js";
 import { createLead, findLead, InvalidLeadTenantError, type NewLead } from "./leads/leadRepository.js";
 import { findTenant } from "./tenants/tenantLoader.js";
-import { findCurrentOnboarding, saveOnboardingDraftInTransaction } from "./onboarding/onboardingRepository.js";
+import { findCurrentOnboarding, saveOnboardingDraftInTransaction, submitOnboardingInTransaction } from "./onboarding/onboardingRepository.js";
 import type { OnboardingStore } from "./routes/onboarding.js";
+import { completeAnswers } from "../../../packages/onboarding-contract/src/testFixtures.ts";
 import { findActiveWebsiteContext } from "./websites/websiteResolver.js";
 import { generateWebsitePublicKey, WEBSITE_PUBLIC_KEY_PATTERN } from "./websites/websitePublicKey.js";
 
@@ -117,6 +118,7 @@ const uniqueId = (prefix: string) => `${prefix}-${randomUUID()}`;
 const onboardingStoreFor = (tx: Tx): OnboardingStore => ({
   findCurrent: (tenantId) => findCurrentOnboarding(tx, tenantId),
   saveDraft: (input) => saveOnboardingDraftInTransaction(tx, input),
+  submit: (input) => submitOnboardingInTransaction(tx, input),
 });
 
 test("users: user kan worden aangemaakt", async () => {
@@ -859,6 +861,152 @@ test("HTTP onboarding met echte repository: Owner bewaart en hervat, Team Member
 
       const forbidden = await app.inject({ method: "GET", url: "/v1/onboarding/current", headers: { "x-test-identity": member.identity.subject } });
       assert.equal(forbidden.statusCode, 403);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+const projectRow = async (tx: Tx, tenantId: string) => {
+  const [row] = await tx.select().from(schema.onboardingProjects).where(eq(schema.onboardingProjects.tenantId, tenantId));
+  return row;
+};
+const versionCount = async (tx: Tx, tenantId: string) =>
+  (await tx.select().from(schema.onboardingVersions).where(eq(schema.onboardingVersions.tenantId, tenantId))).length;
+
+test("onboarding submit: concept wordt ingediend als nieuwe versie met status submitted", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createUser(tx);
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0, { company_name: "Concept" }));
+
+    const result = await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 1, { company_name: "Definitief" }));
+    assert.equal(result.status, "saved");
+    assert.equal(result.status === "saved" && result.draft.status, "submitted");
+    assert.equal(result.status === "saved" && result.draft.version, 2);
+
+    const current = await findCurrentOnboarding(tx, tenant.id);
+    assert.equal(current?.status, "submitted");
+    assert.deepEqual(current?.answers, { company_name: "Definitief" });
+    assert.equal(await versionCount(tx, tenant.id), 2);
+  });
+});
+
+test("onboarding submit: zonder bestaand concept wordt het project direct als submitted aangemaakt", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createUser(tx);
+    const result = await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 0, { company_name: "Direct" }));
+    assert.equal(result.status === "saved" && result.draft.version, 1);
+    assert.equal((await projectRow(tx, tenant.id))?.status, "submitted");
+  });
+});
+
+test("onboarding submit: verouderde base_version geeft conflict zonder wijziging", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createUser(tx);
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0));
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 1));
+
+    assert.deepEqual(await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 1)), { status: "conflict", currentVersion: 2 });
+    const project = await projectRow(tx, tenant.id);
+    assert.deepEqual([project?.status, project?.currentVersion], ["draft", 2]);
+    assert.equal(await versionCount(tx, tenant.id), 2);
+  });
+});
+
+test("onboarding submit: na indienen kunnen submit en conceptopslag niets meer wijzigen", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createUser(tx);
+    await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 0, { company_name: "Ingediend" }));
+
+    assert.deepEqual(await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 1)), { status: "not_editable" });
+    assert.deepEqual(await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 1, { company_name: "Later" })), {
+      status: "not_editable",
+    });
+    assert.equal(await versionCount(tx, tenant.id), 1);
+    assert.deepEqual((await findCurrentOnboarding(tx, tenant.id))?.answers, { company_name: "Ingediend" });
+  });
+});
+
+test("onboarding submit: een fout halverwege laat geen gedeeltelijke wijziging achter", async () => {
+  await withRollback(async (tx, client) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createUser(tx);
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0, { company_name: "Concept" }));
+
+    // De versie-insert faalt (onbekende gebruiker); de savepoint speelt de rol van de transactie in submitOnboarding.
+    await client.query("savepoint submit_attempt");
+    await assert.rejects(submitOnboardingInTransaction(tx, draftInput(tenant.id, randomUUID(), 1)));
+    await client.query("rollback to savepoint submit_attempt");
+
+    const project = await projectRow(tx, tenant.id);
+    assert.deepEqual([project?.status, project?.currentVersion], ["draft", 1]);
+    assert.equal(await versionCount(tx, tenant.id), 1);
+  });
+});
+
+test("onboarding submit: indienen bij tenant A laat tenant B ongemoeid", async () => {
+  await withRollback(async (tx) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    const { user } = await createUser(tx);
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenantB.id, user.id, 0, { company_name: "B" }));
+    await submitOnboardingInTransaction(tx, draftInput(tenantA.id, user.id, 0, { company_name: "A" }));
+
+    assert.equal((await projectRow(tx, tenantA.id))?.status, "submitted");
+    assert.equal((await projectRow(tx, tenantB.id))?.status, "draft");
+  });
+});
+
+test("HTTP submit met echte repository: Owner dient in, daarna is PUT geblokkeerd; Team Member krijgt 403", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const owner = await createUser(tx);
+    const member = await createUser(tx);
+    await tx.insert(schema.memberships).values([
+      { tenantId: tenant.id, userId: owner.user.id, role: "owner" },
+      { tenantId: tenant.id, userId: member.user.id, role: "team_member" },
+    ]);
+    const app = buildApp(
+      {
+        authAdapter: {
+          authenticate: async (request) => {
+            const subject = request.headers["x-test-identity"];
+            return typeof subject === "string" ? { status: "authenticated", identity: identityFor(subject) } : { status: "anonymous" };
+          },
+        },
+        membershipResolver: (identity) => findActiveMemberships(tx, identity),
+        tenantLoader: (tenantId) => findTenant(tx, tenantId),
+        leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
+        onboardingStore: onboardingStoreFor(tx),
+      },
+      { logger: false },
+    );
+    const payload = (baseVersion: number, answers: Record<string, unknown>) => ({
+      schema_id: "WESTEND_ONBOARDING",
+      schema_version: "0.1.0-design",
+      base_version: baseVersion,
+      answers,
+    });
+    const ownerHeaders = { "x-test-identity": owner.identity.subject };
+    try {
+      const forbidden = await app.inject({ method: "POST", url: "/v1/onboarding/current/submit", headers: { "x-test-identity": member.identity.subject }, payload: payload(0, completeAnswers()) });
+      assert.equal(forbidden.statusCode, 403);
+
+      const submitted = await app.inject({ method: "POST", url: "/v1/onboarding/current/submit", headers: ownerHeaders, payload: payload(0, completeAnswers()) });
+      assert.equal(submitted.statusCode, 200);
+      assert.equal(submitted.json().status, "submitted");
+
+      const get = await app.inject({ method: "GET", url: "/v1/onboarding/current", headers: ownerHeaders });
+      assert.equal(get.json().status, "submitted");
+      assert.equal(get.json().project_brief.submitted_for_review, true);
+
+      const put = await app.inject({ method: "PUT", url: "/v1/onboarding/current", headers: ownerHeaders, payload: payload(1, { company_name: "Later" }) });
+      assert.equal(put.statusCode, 409);
+      assert.deepEqual(put.json(), { error: "not_editable" });
     } finally {
       await app.close();
     }
