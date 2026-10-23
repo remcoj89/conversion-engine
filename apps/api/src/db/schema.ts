@@ -8,6 +8,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import { generateWebsitePublicKey, WEBSITE_PUBLIC_KEY_PATTERN } from "../websites/websitePublicKey.js";
 
 export const tenants = pgTable("tenants", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -51,6 +52,26 @@ export const memberships = pgTable(
       "memberships_status_check",
       sql`${table.status} in ('active', 'invited', 'disabled')`,
     ),
+  ],
+);
+
+// A registered public website of exactly one tenant. New websites start disabled until activated.
+export const websites = pgTable(
+  "websites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    publicKey: text("public_key").notNull().unique().$defaultFn(generateWebsitePublicKey),
+    status: text("status", { enum: ["active", "disabled"] }).notNull().default("disabled"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("websites_tenant_id_idx").on(table.tenantId),
+    check("websites_status_check", sql`${table.status} in ('active', 'disabled')`),
+    check("websites_public_key_check", sql`${table.publicKey} ~ ${sql.raw(`'${WEBSITE_PUBLIC_KEY_PATTERN}'`)}`),
   ],
 );
 

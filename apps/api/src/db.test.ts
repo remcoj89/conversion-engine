@@ -11,6 +11,8 @@ import { createDb } from "./db.js";
 import * as schema from "./db/schema.js";
 import { createLead, findLead, InvalidLeadTenantError, type NewLead } from "./leads/leadRepository.js";
 import { findTenant } from "./tenants/tenantLoader.js";
+import { findActiveWebsiteContext } from "./websites/websiteResolver.js";
+import { generateWebsitePublicKey, WEBSITE_PUBLIC_KEY_PATTERN } from "./websites/websitePublicKey.js";
 
 test("database connection reaches conversion_engine_test", async () => {
   const databaseUrl = process.env.DATABASE_TEST_URL;
@@ -547,16 +549,144 @@ test("HTTP POST /v1/leads met echte repository: lead komt bij de eigen tenant, n
   });
 });
 
+async function createWebsite(tx: Tx, tenantId: string, status: "active" | "disabled" = "active") {
+  const [website] = await tx.insert(schema.websites).values({ tenantId, status }).returning();
+  assert.ok(website);
+  return website;
+}
+
+test("websites: public key wordt gegenereerd, is opaque en bevat geen tenant-ID", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const first = await createWebsite(tx, tenant.id);
+    const second = await createWebsite(tx, tenant.id);
+
+    for (const website of [first, second]) {
+      assert.match(website.publicKey, new RegExp(WEBSITE_PUBLIC_KEY_PATTERN));
+      assert.ok(!website.publicKey.includes(tenant.id));
+      assert.ok(!website.publicKey.includes(tenant.id.replaceAll("-", "")));
+      assert.ok(!website.publicKey.includes(website.id));
+    }
+    assert.notEqual(first.publicKey, second.publicKey);
+  });
+});
+
+test("websites: nieuwe website staat standaard op disabled", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const [website] = await tx.insert(schema.websites).values({ tenantId: tenant.id }).returning();
+
+    assert.equal(website?.status, "disabled");
+    assert.equal(await findActiveWebsiteContext(tx, website?.publicKey), null);
+  });
+});
+
+test("findActiveWebsiteContext: actieve website geeft alleen website- en tenant-ID van de juiste tenant", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const website = await createWebsite(tx, tenant.id);
+
+    assert.deepEqual(await findActiveWebsiteContext(tx, website.publicKey), {
+      websiteId: website.id,
+      tenantId: tenant.id,
+    });
+  });
+});
+
+test("findActiveWebsiteContext: onbekende key geeft null", async () => {
+  await withRollback(async (tx) => {
+    await createWebsite(tx, (await createTenant(tx)).id);
+
+    assert.equal(await findActiveWebsiteContext(tx, generateWebsitePublicKey()), null);
+  });
+});
+
+test("findActiveWebsiteContext: disabled website geeft null", async () => {
+  await withRollback(async (tx) => {
+    const website = await createWebsite(tx, (await createTenant(tx)).id, "disabled");
+
+    assert.equal(await findActiveWebsiteContext(tx, website.publicKey), null);
+  });
+});
+
+test("findActiveWebsiteContext: website van een inactieve tenant geeft null", async () => {
+  await withRollback(async (tx) => {
+    const website = await createWebsite(tx, (await createTenant(tx, "suspended")).id);
+
+    assert.equal(await findActiveWebsiteContext(tx, website.publicKey), null);
+  });
+});
+
+test("findActiveWebsiteContext: lege of ongeldige key geeft null", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const website = await createWebsite(tx, tenant.id);
+
+    for (const key of ["", "   ", "abc", tenant.id, website.id, ` ${website.publicKey}`, `${website.publicKey}x`, website.publicKey.toUpperCase(), null, undefined, 123, {}]) {
+      assert.equal(await findActiveWebsiteContext(tx, key), null, String(key));
+    }
+  });
+});
+
+test("findActiveWebsiteContext: tenant A wordt nooit teruggegeven via een key van tenant B", async () => {
+  await withRollback(async (tx) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    const websiteA = await createWebsite(tx, tenantA.id);
+    const websiteB = await createWebsite(tx, tenantB.id);
+
+    assert.deepEqual(await findActiveWebsiteContext(tx, websiteA.publicKey), { websiteId: websiteA.id, tenantId: tenantA.id });
+    assert.deepEqual(await findActiveWebsiteContext(tx, websiteB.publicKey), { websiteId: websiteB.id, tenantId: tenantB.id });
+  });
+});
+
+test("websites: twee tenants kunnen niet dezelfde public key hebben", async () => {
+  await withRollback(async (tx, client) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    const websiteA = await createWebsite(tx, tenantA.id);
+
+    await expectPgError(client, "23505", () =>
+      tx.insert(schema.websites).values({ tenantId: tenantB.id, publicKey: websiteA.publicKey, status: "active" }),
+    );
+    assert.deepEqual(await findActiveWebsiteContext(tx, websiteA.publicKey), { websiteId: websiteA.id, tenantId: tenantA.id });
+  });
+});
+
+test("websites: database weigert een website zonder geldige tenant, met ongeldige key of status", async () => {
+  await withRollback(async (tx, client) => {
+    const tenant = await createTenant(tx);
+
+    await expectPgError(client, "23503", () => tx.insert(schema.websites).values({ tenantId: randomUUID() }));
+    // Ruwe SQL, omdat de TypeScript-types deze waarden al tegenhouden.
+    await expectPgError(client, "23502", () =>
+      client.query("insert into websites (public_key) values ($1)", [generateWebsitePublicKey()]),
+    );
+    for (const publicKey of [tenant.id, "site_kort", ""]) {
+      await expectPgError(client, "23514", () =>
+        client.query("insert into websites (tenant_id, public_key) values ($1, $2)", [tenant.id, publicKey]),
+      );
+    }
+    await expectPgError(client, "23514", () =>
+      client.query("insert into websites (tenant_id, public_key, status) values ($1, $2, 'deleted')", [
+        tenant.id,
+        generateWebsitePublicKey(),
+      ]),
+    );
+  });
+});
+
 test("testdata is na de tests teruggedraaid", async () => {
   const { pool } = createDb(process.env.DATABASE_TEST_URL);
   try {
-    const { rows } = await pool.query<{ tenants: number; users: number; memberships: number; leads: number }>(
+    const { rows } = await pool.query<{ tenants: number; users: number; memberships: number; leads: number; websites: number }>(
       `select (select count(*)::int from tenants) as tenants,
               (select count(*)::int from users) as users,
               (select count(*)::int from memberships) as memberships,
-              (select count(*)::int from leads) as leads`,
+              (select count(*)::int from leads) as leads,
+              (select count(*)::int from websites) as websites`,
     );
-    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0 });
+    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0, websites: 0 });
   } finally {
     await pool.end();
   }

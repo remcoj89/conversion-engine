@@ -74,9 +74,10 @@ pg-boss ondersteunt PostgreSQL-queues, retries, deadlines, scheduling en databas
 
 | Onderdeel | Eerste kandidaat | Alternatief / beslissing |
 |---|---|---|
-| API en lichte workers | Geharde Hostinger VPS + Docker Compose | Managed apphost als incidentbeheer of HA zwaarder weegt |
-| Database/Auth/Storage | Supabase EU-regio (productie + afzonderlijke staging) | Managed PostgreSQL + aparte beheerde auth/storage bij ongunstige PITR-TCO |
-| Klantwebsites | Cloudflare Pages (Astro static) | Netlify; vergelijk builds, sites/domeinen, bandbreedte en migratie |
+| API en lichte workers | **Besloten:** geharde Hostinger VPS + Docker Compose | Managed apphost als incidentbeheer of HA zwaarder weegt |
+| Database | **Besloten:** self-hosted PostgreSQL op Hostinger VPS in de EU | Managed PostgreSQL bij ongunstige recovery- of beheerkosten |
+| Authenticatie | **Besloten:** ZITADEL Cloud in de EU | Andere identityprovider alleen na expliciete herbeslissing |
+| Klantwebsites | **Besloten:** Cloudflare Pages voor Astro static | Netlify alleen als expliciete uitzondering of migratiekeuze |
 | CMS | Sanity | Eén codebase; project-per-klant heeft voorkeur bij toekomstige klanttoegang, mits licentie/TCO haalbaar |
 | E-mail | Resend | Alternatief alleen bij compliance, regio, deliverability of prijsproblemen |
 | Playwright/builds | Tijdelijke geïsoleerde runner buiten kritieke API-host | Afzonderlijke worker-VPS of managed container jobs |
@@ -120,7 +121,7 @@ Vóór commercialisatie daarnaast AVG-verwerkerscontracten, subverwerkers, datar
 
 ### 10. Te nemen besluit
 
-**A-09 voorstel:** goedkeuring van de *kernstack*: Astro + React + Node/Fastify + TypeScript + PostgreSQL/Drizzle + pg-boss + Sanity + Resend + Playwright + GitHub Actions/Docker. **Supabase, Cloudflare Pages en eigen VPS** worden als eerste providerkandidaten geselecteerd, niet onvoorwaardelijk als productieproviders goedgekeurd. Definitieve providerkeuze vereist geslaagde gates P1–P5 en doorgerekende kosten. De AI-provider wordt niet hard gecodeerd; per taak werken we met een gecontroleerde adapter.
+**A-09 besluit — bijgewerkt 23 oktober 2026:** goedkeuring van de *kernstack*: Astro + React + Node/Fastify + TypeScript + PostgreSQL/Drizzle + pg-boss + Sanity + Resend + Playwright + GitHub Actions/Docker. De Conversion Engine en klantdata draaien op de eigen Hostinger-VPS in de EU. Statische Astro-klantwebsites worden standaard via Cloudflare Pages gedeployed. De operationele gates P1–P5, recovery, privacy, kosten en deploymentisolatie blijven voorwaarden vóór productie met echte klantgegevens. De AI-provider wordt niet hard gecodeerd; per taak werken we met een gecontroleerde adapter.
 
 ### 11. Geraadpleegde officiële documentatie (18 oktober 2026)
 

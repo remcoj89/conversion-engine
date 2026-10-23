@@ -229,6 +229,8 @@ Gevoelige tenantdata, CRM-data en autorisatiebeslissingen worden niet onbeperkt 
 
 **Implementatiestatus — 23 oktober 2026 (aanvulling):** beveiligde lead-aanmaak is beschikbaar via `POST /v1/leads`. Alleen een ingelogde gebruiker met een actieve membership en de permission `leads:create` (Owner en Team Member) kan een lead aanmaken, uitsluitend binnen de eigen tenant uit de auth-context; een tenant-ID, status of ID in de request wordt geweigerd. De invoer wordt server-side gevalideerd en een nieuwe lead krijgt altijd status `new`. Nog open: publieke websiteformulieren, betrouwbare site-/domein-naar-tenant-resolutie, outbox en externe verwerking. Ook duplicate prevention staat nog open: DB-05 noemt maximaal één verwerking per idempotency-key, maar de herkomst en opslag van die sleutel zijn nog niet vastgelegd.
 
+**Implementatiestatus — 23 oktober 2026 (website-registratie):** websites kunnen server-side worden geregistreerd (tabel `websites`, migratie `0005`). Elke website hoort bij precies één tenant en heeft een opaque, willekeurige publieke key (`site_…`) die geen tenant-ID bevat; de key is een identifier, geen geheim. Een server-side resolver koppelt een key alleen aan een tenant als de website en de tenant actief zijn; domeinnaam, `Origin` of een tenant-ID uit de browser worden niet als bewijs gebruikt. Nog open: de publieke formulier-endpoint, anti-spam, rate limiting, outbox en idempotency.
+
 ### Fase 2B — Automatiseringen en afspraken
 **Werk:** AI-classificatie, één AI-antwoord, escalation policy, outbound email adapter, consent, Calendly adapter, stopregels, retry/idempotentie.
 **Klaar als:** echte en gesimuleerde happy-path en failure-path flows foutloos en zonder dubbele antwoorden verlopen.

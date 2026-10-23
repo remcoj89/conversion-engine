@@ -19,11 +19,13 @@
 | A-05 | Transactional outbox, betrouwbare jobs, aparte capaciteit/prioriteiten voor lead, productie, monitoring en intelligence | Goedgekeurd | pg-boss voorkeurskandidaat; retries, dubbele verwerking en queue-isolatie testen |
 | A-06 | Deterministische workflow-engine; AI maximaal één inhoudelijke reactie, policy-based opvolging; **prompt-injectieverdediging is P0** | Goedgekeurd | Adversarial tests, tool-/providerrechten en fail-closed gedrag |
 | A-07 | Centrale veilige integratielaag, scoped credentials, webhookvalidatie, privacyvriendelijke **reply-router** zonder mailboxread | Goedgekeurd | Inbound e-mailprovider en antwoordcorrelatie nog aantonen |
-| A-08 | Hybride model; eigen **Hostinger-VPS** voor centrale app; onafhankelijke webdeployments; geïsoleerde zware runners | Goedgekeurd, providerkeuze bijgewerkt | VPS-locatie/resources controleren; sandbox- en netwerkisolatie bewijzen |
-| A-09 | Astro, React/TS, Node/Fastify, PostgreSQL, Drizzle, Sanity, Playwright, Docker/CI; **Mistral-first** met geëvalueerde alternatieven; GA4/GSC/Clarity/DataForSEO blijven | Kernstack goedgekeurd | Providerselectie DB/identity/e-mail deels open; Sanity-projectmodel onderzoeken |
+| A-08 | Hybride model; eigen **Hostinger-VPS** in de EU voor centrale app en klantdata; onafhankelijke klantwebsites via **Cloudflare Pages**; geïsoleerde zware runners | Goedgekeurd, providerkeuze bijgewerkt | VPS-locatie/resources controleren; sandbox- en netwerkisolatie bewijzen |
+| A-09 | Astro, React/TS, Node/Fastify, PostgreSQL, Drizzle, Sanity, Playwright, Docker/CI; **Mistral-first** met geëvalueerde alternatieven; GA4/GSC/Clarity/DataForSEO blijven | Kernstack goedgekeurd | E-mailprovider, recovery/backups, VPS-resources en Sanity-projectmodel verder uitwerken |
 | A-10 | Per-tenant kostenregistratie, AI/e-mailbudgetalerts, supportmeting en schaalvergroting op echte belasting; Basis €249/mnd | Goedgekeurd | Kostenmodel indicatief, nog geen offerte of nettowinstbegroting |
 
 **Nadere beslissing na A-09:** voor start/pilot **zelfgehoste PostgreSQL in Docker op bestaande Hostinger-VPS**. Dure managed PostgreSQL wordt nu niet afgenomen; eventueel later migreren. Iedere nacht `pg_dump`/versleutelde offsite EU-backup, rotatie 7 dagen dagelijks / 4 weken / 6 maanden, alerting en maandelijkse restauratietest zijn goedgekeurd. Het voorlopige **RPO ≤ 1 uur / RTO ≤ 4 uur** blijft doel voor productie met echte klant-/financiële gegevens en vereist WAL/PITR en een bewezen herstelprocedure. Dagelijkse dumps alleen halen het RPO-doel niet.
+
+**Aanvullende beslissing — 23 oktober 2026:** statische klantwebsites worden standaard via **Cloudflare Pages** gedeployed vanuit Git. Cloudflare Pages verzorgt de onafhankelijke website-deployments, previews, custom domains en CDN-distributie. De Conversion Engine blijft de bron voor klant-, lead- en CRM-data; formulierdata wordt niet blijvend bij de websitehost opgeslagen. De exacte DNS-, formulier- en rollback-inrichting blijft onderdeel van de deploymentuitwerking.
 
 ## 2. Geconsolideerde doelarchitectuur
 
@@ -91,14 +93,14 @@ flowchart TD
 
 | Open punt | Voorgestelde beslistermijn | Besliskader |
 |---|---|---|
-| U-01 Exacte Hostinger-VPS-regio, cores/RAM/disk, vrije capaciteit | Start Fase 5 | EU-locatie, resourceheadroom, fysieke host en netwerkvoorzieningen |
+| U-01 Exacte Hostinger-VPS-locatie, cores/RAM/disk, vrije capaciteit | Start Fase 5 | EU-locatie bevestigen, resourceheadroom, fysieke host en netwerkvoorzieningen |
 | U-02 Authprovider (EU-first) en MFA-/accountrecoveryprotocol | Vóór eerste multi-user staging | TOTP/passkeys waar beschikbaar, recovery met hoog beschermingsniveau, operationele kosten |
 | U-03 Transactionele e-mail plus inkomende reply-router | Vóór AI-mailflow-test | Verified inbound webhook, replies per conversatie, bounce/delivery, EU-processing, reële kosten |
 | U-04 Backuprepository en WAL/PITR-inrichting | Vóór echte productiegegevens | Offsite EU, sleutelbeheer, immutability/retentie, restore mét objectopslag |
 | U-05 Private bijlagenopslag | Vóór eerste echte bijlage | EU-residency, per-tenant autorisatie, signed URLs, malwarecontrole en retentie |
 | U-06 Exacte worker/queue-implementatie en isolatie | Tijdens infrastructuur-PoC | pg-boss-kandidaat, één DB-outbox, retries, limieten, isolatie, voldoende capaciteit |
 | U-07 Sanity-project-/datasetmodel en kosten per klant | Vóór tweede pilotwebsite | Scheiding, editorrollen, schema-uitrol, licentie- en quota-impact |
-| U-08 Hosting van individuele Astro-sites en DNS/publicatie | Vóór eerste Gate B | Onafhankelijke deployment/rollback, TLS, eigen domein, privacy/dataregio |
+| U-08 Cloudflare Pages-deployment van individuele Astro-sites en DNS/publicatie | Vóór eerste Gate B | Git-integratie, onafhankelijke deployment/rollback, TLS, eigen domein, formulierkoppeling en privacy/dataregio |
 | U-09 AI-providerbeleid per taak | Vóór klant-AI activeren | Mistral-first; benchmark NL taal, kwaliteit, kosten, latentie, privacy, prompt-injection |
 | U-10 Privacy/compliance voor analytics, mail, AI en Clarity | Vóór eerste externe productie | Verwerkersafspraken, doorgiften, toestemming, DPIA-screening en dataminimalisatie |
 

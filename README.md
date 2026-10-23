@@ -77,7 +77,7 @@ De beveiligingsgrens van de Fastify API, bijgewerkt naar de huidige code (23 okt
 
 Nog niet aanwezig: MFA/AAL-handhaving en PostgreSQL-RLS. De resolver gaat uit van één geconfigureerde issuer en koppelt op `auth_provider_user_id`/OIDC-subject; issuer-opslag en de samengestelde uniqueness-regel zijn nog niet besloten.
 
-Voor leads staan nog open: publieke websiteformulieren, betrouwbare site-naar-tenant-resolutie, outbox, externe verwerking en idempotency/duplicate prevention.
+Websites kunnen server-side worden geregistreerd met een opaque publieke key; een resolver koppelt een actieve key aan precies één actieve tenant. Voor leads staan nog open: de publieke formulier-endpoint, anti-spam, rate limiting, outbox, externe verwerking en idempotency/duplicate prevention.
 
 De BFF geeft de relevante API-statussen door: `401` voor authenticatie, `403` voor toegang, `400` voor tenantkeuze en `502`/`503` voor API- of netwerkproblemen. Een `Authorization`-header uit de browser wordt niet doorgestuurd; de BFF gebruikt alleen de server-side sessie (zie [ZITADEL-login, sessies en token refresh](#zitadel-login-sessies-en-token-refresh--22-oktober-2026)).
 
@@ -98,7 +98,7 @@ Deze foundation bevatte bewust nog geen sessietabel, sessiestore, login, refresh
 
 Better Auth is vergeleken met SuperTokens, ZITADEL, Keycloak, Ory Kratos, Auth.js en managed providers. We hebben gekozen voor **ZITADEL** vanwege de combinatie van multi-tenancy, MFA, SSO, OIDC en de mogelijkheid om met een gratis cloudomgeving te starten.
 
-ZITADEL is inmiddels geïmplementeerd voor login, logout, server-side sessies en token refresh. De uiteindelijke keuze tussen cloud en self-hosting en de gewenste regio zijn nog niet vastgelegd.
+ZITADEL is inmiddels geïmplementeerd voor login, logout, server-side sessies en token refresh. Voor ZITADEL is de EU-cloudregio gekozen. De Conversion Engine, API en PostgreSQL-database worden self-managed gehost op een eigen Hostinger-VPS in de EU. Statische klantwebsites worden onafhankelijk gedeployed via Cloudflare Pages; klant- en CRM-data blijven in de Conversion Engine.
 
 ## Werken met het project
 
