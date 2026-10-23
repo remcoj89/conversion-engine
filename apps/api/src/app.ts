@@ -2,8 +2,9 @@ import Fastify, { type FastifyServerOptions } from "fastify";
 import { createAuthHook, type AuthHookDependencies } from "./auth/authHook.js";
 import { apiErrorHandler } from "./errors.js";
 import { registerDashboardRoutes, type DashboardRouteDependencies } from "./routes/dashboard.js";
+import { registerLeadRoutes, type LeadRouteDependencies } from "./routes/leads.js";
 
-export type AppDependencies = AuthHookDependencies & DashboardRouteDependencies;
+export type AppDependencies = AuthHookDependencies & DashboardRouteDependencies & LeadRouteDependencies;
 
 export function buildApp(
   dependencies: AppDependencies,
@@ -23,6 +24,7 @@ export function buildApp(
   app.register(async (protectedApp) => {
     protectedApp.addHook("onRequest", createAuthHook(dependencies));
     registerDashboardRoutes(protectedApp, dependencies);
+    registerLeadRoutes(protectedApp, dependencies);
   });
 
   return app;

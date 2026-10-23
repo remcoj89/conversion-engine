@@ -227,6 +227,8 @@ Gevoelige tenantdata, CRM-data en autorisatiebeslissingen worden niet onbeperkt 
 
 **Implementatiestatus — 23 oktober 2026:** het lead-datamodel is toegevoegd (tabel `leads`, migratie `0004`). Per lead worden naam, e-mail, optioneel telefoonnummer, bericht, bron, status (start als `new`) en aanmaak-/wijzigingstijd opgeslagen. Leads zijn altijd gekoppeld aan een bestaande tenant; opslaan zonder geldige tenant wordt geweigerd en ophalen gebeurt alleen op tenant én lead-ID. De koppeling met het contactformulier en de weergave in het dashboard staan nog open.
 
+**Implementatiestatus — 23 oktober 2026 (aanvulling):** beveiligde lead-aanmaak is beschikbaar via `POST /v1/leads`. Alleen een ingelogde gebruiker met een actieve membership en de permission `leads:create` (Owner en Team Member) kan een lead aanmaken, uitsluitend binnen de eigen tenant uit de auth-context; een tenant-ID, status of ID in de request wordt geweigerd. De invoer wordt server-side gevalideerd en een nieuwe lead krijgt altijd status `new`. Nog open: publieke websiteformulieren, betrouwbare site-/domein-naar-tenant-resolutie, outbox en externe verwerking. Ook duplicate prevention staat nog open: DB-05 noemt maximaal één verwerking per idempotency-key, maar de herkomst en opslag van die sleutel zijn nog niet vastgelegd.
+
 ### Fase 2B — Automatiseringen en afspraken
 **Werk:** AI-classificatie, één AI-antwoord, escalation policy, outbound email adapter, consent, Calendly adapter, stopregels, retry/idempotentie.
 **Klaar als:** echte en gesimuleerde happy-path en failure-path flows foutloos en zonder dubbele antwoorden verlopen.

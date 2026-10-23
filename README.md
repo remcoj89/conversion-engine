@@ -62,23 +62,24 @@ ZITADEL beheert identiteit en authenticatie. De eigen PostgreSQL-database blijft
 
 ## Security foundation — 22 oktober 2026
 
-De eerste interne beveiligingsgrens van de Fastify API is geïmplementeerd als voorbereiding op ZITADEL-authenticatie.
+De beveiligingsgrens van de Fastify API, bijgewerkt naar de huidige code (23 oktober 2026).
 
 - `GET /health` blijft publiek beschikbaar.
-- `GET /v1/dashboard/today` valt achter een auth-hook en geeft zonder geldige identity geen dashboarddata terug.
-- De auth-hook gebruikt een adaptergrens; de huidige serverconfiguratie is bewust fail-closed en authenticeert nog geen requests.
-- Een geauthenticeerde identity wordt via de lokale user en actieve membership vertaald naar een immutable `RequestContext` met tenant en rol.
-- Tenantkeuze gebeurt uitsluitend via `x-tenant-id` en wordt server-side gecontroleerd tegen actieve memberships. Body- en querywaarden worden niet gebruikt.
-- De rolcontrole gebruikt een deny-by-default permission map; momenteel is alleen `dashboard:read` geïmplementeerd.
-- De HTTP-laag is onafhankelijk van Drizzle door dependency injection van de membership resolver.
-- Onbevoegde requests geven geen tenant- of identity-informatie terug; foutuitkomsten zijn beperkt tot `401`, `400` of `403`.
-- De API-testset bevat HTTP-tests voor authenticatie, tenantkeuze, roltoegang en fail-closed gedrag. De database-testset controleert de echte membership resolver.
+- Alle andere routes staan achter een auth-hook. De API authenticeert requests via de ZITADEL-adapter: het `Bearer`-access token wordt als JWT gevalideerd (RS256, issuer en audience uit de configuratie, sleutels via OIDC-discovery). Zonder geldige configuratie start de API niet.
+- Een geauthenticeerde identity wordt via de lokale user en actieve membership in een actieve tenant vertaald naar een immutable `RequestContext` met tenant en rol.
+- Bij één actieve membership wordt de tenant automatisch gekozen. Bij meerdere actieve memberships kan de gebruiker de tenant kiezen via `x-tenant-id`; deze waarde wordt server-side gecontroleerd tegen actieve memberships. Tenantwaarden uit body en query worden niet gebruikt.
+- De rolcontrole gebruikt een deny-by-default permission map met `dashboard:read` en `leads:create`, beide voor Owner en Team Member.
+- `GET /v1/dashboard/today` toont alleen de tenant uit de auth-context.
+- `POST /v1/leads` is alleen beschikbaar voor geauthenticeerde gebruikers met een actieve membership en `leads:create`. De lead wordt opgeslagen bij de tenant uit de auth-context; tenant-ID, status, lead-ID, timestamps en onbekende velden in de requestbody worden geweigerd en een nieuwe lead krijgt altijd status `new`.
+- De HTTP-laag is onafhankelijk van Drizzle door dependency injection van de membership resolver, tenant-loader en lead-repository.
+- Foutresponses bevatten geen tenant-, identity- of databasedetails: `401`, `403` en `400` voor auth, toegang en ongeldige invoer, `413` voor een te grote body en een generieke `500 internal_error` bij interne fouten.
+- De API-testset bevat HTTP-tests voor authenticatie (inclusief de ZITADEL-adapter), tenantkeuze, roltoegang, tenantisolatie, leadvalidatie en fail-closed gedrag. De database-testset controleert de echte membership resolver, tenant-loader en lead-repository.
 
-Deze stap bevat nog geen ZITADEL-SDK, JWT-validatie, loginflow, MFA, PostgreSQL-RLS of wijziging aan de Next.js BFF. De resolver gebruikt daarom tijdelijk één geconfigureerde issuer en koppelt op `auth_provider_user_id`/OIDC-subject. Voor de eerste echte gebruiker moet issuer-opslag en de samengestelde uniqueness-regel nog worden besloten en gemigreerd. De server gebruikt tot die tijd een deny-all adapter; lokaal blijft alleen de healthcheck bruikbaar.
+Nog niet aanwezig: MFA/AAL-handhaving en PostgreSQL-RLS. De resolver gaat uit van één geconfigureerde issuer en koppelt op `auth_provider_user_id`/OIDC-subject; issuer-opslag en de samengestelde uniqueness-regel zijn nog niet besloten.
 
-_Bijgewerkt:_ de deny-all adapter is inmiddels vervangen door de ZITADEL-adapter; zie [ZITADEL-login, sessies en token refresh](#zitadel-login-sessies-en-token-refresh--22-oktober-2026).
+Voor leads staan nog open: publieke websiteformulieren, betrouwbare site-naar-tenant-resolutie, outbox, externe verwerking en idempotency/duplicate prevention.
 
-De BFF geeft inmiddels de relevante API-statussen door: `401` voor authenticatie, `403` voor toegang, `400` voor tenantkeuze en `502`/`503` voor API- of netwerkproblemen. Een `Authorization`-header uit de browser wordt niet meer doorgestuurd; de BFF gebruikt alleen de server-side sessie.
+De BFF geeft de relevante API-statussen door: `401` voor authenticatie, `403` voor toegang, `400` voor tenantkeuze en `502`/`503` voor API- of netwerkproblemen. Een `Authorization`-header uit de browser wordt niet doorgestuurd; de BFF gebruikt alleen de server-side sessie (zie [ZITADEL-login, sessies en token refresh](#zitadel-login-sessies-en-token-refresh--22-oktober-2026)).
 
 ## Auth-transport foundation — 22 oktober 2026
 

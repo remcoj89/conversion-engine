@@ -361,6 +361,9 @@ function httpSetup(memberships: readonly Membership[] = []) {
       authAdapter: zitadelAdapter,
       membershipResolver: async ({ subject }) => (subject === SUBJECT ? memberships : []),
       tenantLoader: async (id) => ({ id, name: "Testtenant", status: "active" }),
+      leadCreator: async () => {
+        throw new Error("not used in these tests");
+      },
     },
     { logger: { level: "trace", stream: { write: (line: string) => logs.push(line) } } },
   );
@@ -421,6 +424,9 @@ test("HTTP met ZITADEL-adapter: JWKS-fout geeft 500 internal_error zonder tokend
       }),
       membershipResolver: async () => [],
       tenantLoader: async () => null,
+      leadCreator: async () => {
+        throw new Error("not used in these tests");
+      },
     },
     { logger: { level: "trace", stream: { write: (line: string) => logs.push(line) } } },
   );

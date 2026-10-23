@@ -465,6 +465,7 @@ test("HTTP met echte resolver en loader: eigen tenant 200, andere tenant en disa
         },
         membershipResolver: (identity) => findActiveMemberships(tx, identity),
         tenantLoader: (tenantId) => findTenant(tx, tenantId),
+        leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
       },
       { logger: false },
     );
@@ -495,6 +496,51 @@ test("HTTP met echte resolver en loader: eigen tenant 200, andere tenant en disa
       });
       assert.equal(forbidden.statusCode, 403);
       assert.deepEqual(forbidden.json(), { error: "forbidden" });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+test("HTTP POST /v1/leads met echte repository: lead komt bij de eigen tenant, niet bij een andere", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const otherTenant = await createTenant(tx);
+    const owner = await createUser(tx);
+    await tx.insert(schema.memberships).values({ tenantId: tenant.id, userId: owner.user.id, role: "owner" });
+
+    const app = buildApp(
+      {
+        authAdapter: {
+          authenticate: async (request) => {
+            const subject = request.headers["x-test-identity"];
+            return typeof subject === "string"
+              ? { status: "authenticated", identity: identityFor(subject) }
+              : { status: "anonymous" };
+          },
+        },
+        membershipResolver: (identity) => findActiveMemberships(tx, identity),
+        tenantLoader: (tenantId) => findTenant(tx, tenantId),
+        leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
+      },
+      { logger: false },
+    );
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/leads",
+        headers: { "x-test-identity": owner.identity.subject },
+        payload: exampleLead(),
+      });
+      assert.equal(response.statusCode, 201);
+      const { id, status } = response.json();
+      assert.equal(status, "new");
+
+      const stored = await findLead(tx, tenant.id, id);
+      assert.equal(stored?.tenantId, tenant.id);
+      assert.equal(stored?.status, "new");
+      assert.equal(await findLead(tx, otherTenant.id, id), null);
     } finally {
       await app.close();
     }
