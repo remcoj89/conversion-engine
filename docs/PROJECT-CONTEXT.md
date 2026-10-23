@@ -2,7 +2,7 @@
 
 **Laatst bijgewerkt:** 23 oktober 2026
 **Status:** Fase 5, technische implementatie met kleine verticale slices
-**Laatste gepushte technische commit:** `ca0d5a8 feat: persist onboarding drafts`
+**Laatste gepushte technische commit:** `513a07f feat: add onboarding submission`
 
 Dit document is een compacte startcontext voor nieuwe Codex- en Claude-sessies. Het vervangt de leidende bron- en architectuurdocumenten niet.
 
