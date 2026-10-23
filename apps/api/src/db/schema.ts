@@ -54,6 +54,32 @@ export const memberships = pgTable(
   ],
 );
 
+// Minimal start: every lead begins as "new". Later statuses are added with their own migration.
+export const leadStatuses = ["new"] as const;
+
+// A lead always belongs to exactly one tenant; tenant_id is required and must reference an existing tenant.
+export const leads = pgTable(
+  "leads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone"),
+    message: text("message").notNull(),
+    source: text("source").notNull(),
+    status: text("status", { enum: leadStatuses }).notNull().default("new"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("leads_tenant_id_idx").on(table.tenantId),
+    check("leads_status_check", sql`${table.status} in ('new')`),
+  ],
+);
+
 // Server-side BFF sessions. Only the SHA-256 hash of the session ID and encrypted tokens are stored.
 export const bffSessions = pgTable(
   "bff_sessions",

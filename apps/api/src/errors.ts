@@ -17,7 +17,7 @@ export function apiErrorHandler(error: unknown, request: FastifyRequest, reply: 
   return reply.code(500).send({ error: "internal_error" });
 }
 
-function readCode(value: unknown): string | undefined {
+export function readCode(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null || !("code" in value)) return undefined;
   return typeof value.code === "string" ? value.code : undefined;
 }

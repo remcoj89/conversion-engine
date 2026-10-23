@@ -225,6 +225,8 @@ Gevoelige tenantdata, CRM-data en autorisatiebeslissingen worden niet onbeperkt 
 **Werk:** tenants/rollen, contacten, leads, tijdlijn, pipeline, deals, taken, brancheconfig.
 **Klaar als:** een formulierinzending als lead binnenkomt, gekoppeld kan worden aan een contact, handmatig naar een gewonnen/verloren deal kan worden verwerkt en auditbaar is.
 
+**Implementatiestatus — 23 oktober 2026:** het lead-datamodel is toegevoegd (tabel `leads`, migratie `0004`). Per lead worden naam, e-mail, optioneel telefoonnummer, bericht, bron, status (start als `new`) en aanmaak-/wijzigingstijd opgeslagen. Leads zijn altijd gekoppeld aan een bestaande tenant; opslaan zonder geldige tenant wordt geweigerd en ophalen gebeurt alleen op tenant én lead-ID. De koppeling met het contactformulier en de weergave in het dashboard staan nog open.
+
 ### Fase 2B — Automatiseringen en afspraken
 **Werk:** AI-classificatie, één AI-antwoord, escalation policy, outbound email adapter, consent, Calendly adapter, stopregels, retry/idempotentie.
 **Klaar als:** echte en gesimuleerde happy-path en failure-path flows foutloos en zonder dubbele antwoorden verlopen.

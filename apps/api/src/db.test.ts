@@ -9,6 +9,7 @@ import { findActiveMemberships } from "./auth/membershipResolver.js";
 import type { ExternalIdentity } from "./auth/types.js";
 import { createDb } from "./db.js";
 import * as schema from "./db/schema.js";
+import { createLead, findLead, InvalidLeadTenantError, type NewLead } from "./leads/leadRepository.js";
 import { findTenant } from "./tenants/tenantLoader.js";
 
 test("database connection reaches conversion_engine_test", async () => {
@@ -346,6 +347,100 @@ test("findTenant: geeft de opgeslagen status terug", async () => {
   });
 });
 
+const exampleLead = (overrides: Partial<NewLead> = {}): NewLead => ({
+  name: "Voorbeeld Persoon",
+  email: "voorbeeld@example.test",
+  phone: "0612345678",
+  message: "Ik wil graag kennismaken.",
+  source: "contact_form",
+  ...overrides,
+});
+
+// Verwacht InvalidLeadTenantError; de savepoint houdt de transactie bruikbaar na de databasefout.
+async function expectInvalidTenant(client: PoolClient, fn: () => Promise<unknown>) {
+  await client.query("savepoint expected_error");
+  await assert.rejects(fn, InvalidLeadTenantError);
+  await client.query("rollback to savepoint expected_error");
+}
+
+test("createLead: slaat de lead op bij de tenant met standaardstatus new", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const lead = await createLead(tx, tenant.id, exampleLead());
+
+    assert.match(lead.id, /^[0-9a-f-]{36}$/);
+    assert.equal(lead.tenantId, tenant.id);
+    assert.equal(lead.name, "Voorbeeld Persoon");
+    assert.equal(lead.email, "voorbeeld@example.test");
+    assert.equal(lead.phone, "0612345678");
+    assert.equal(lead.message, "Ik wil graag kennismaken.");
+    assert.equal(lead.source, "contact_form");
+    assert.equal(lead.status, "new");
+    assert.ok(lead.createdAt instanceof Date);
+    assert.ok(lead.updatedAt instanceof Date);
+    assert.deepEqual(await findLead(tx, tenant.id, lead.id), lead);
+  });
+});
+
+test("createLead: telefoonnummer is optioneel", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+
+    assert.equal((await createLead(tx, tenant.id, exampleLead({ phone: undefined }))).phone, null);
+    assert.equal((await createLead(tx, tenant.id, exampleLead({ phone: null }))).phone, null);
+  });
+});
+
+test("createLead: onbekende, ongeldige of lege tenant wordt geweigerd", async () => {
+  await withRollback(async (tx, client) => {
+    for (const tenantId of [randomUUID(), "abc", ""]) {
+      await expectInvalidTenant(client, () => createLead(tx, tenantId, exampleLead()));
+    }
+    const { rows } = await client.query<{ count: number }>("select count(*)::int as count from leads");
+    assert.equal(rows[0]?.count, 0);
+  });
+});
+
+test("leads: database weigert een lead zonder tenant of met onbekende status", async () => {
+  await withRollback(async (tx, client) => {
+    const tenant = await createTenant(tx);
+    // Ruwe SQL, omdat de TypeScript-types deze waarden al tegenhouden.
+    await expectPgError(client, "23502", () =>
+      client.query("insert into leads (name, email, message, source) values ('n', 'e', 'm', 's')"),
+    );
+    await expectPgError(client, "23514", () =>
+      client.query(
+        "insert into leads (tenant_id, name, email, message, source, status) values ($1, 'n', 'e', 'm', 's', 'won')",
+        [tenant.id],
+      ),
+    );
+  });
+});
+
+test("findLead: lead van tenant A is nooit zichtbaar voor tenant B", async () => {
+  await withRollback(async (tx) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    const leadA = await createLead(tx, tenantA.id, exampleLead({ name: "Lead A" }));
+    const leadB = await createLead(tx, tenantB.id, exampleLead({ name: "Lead B" }));
+
+    assert.equal((await findLead(tx, tenantA.id, leadA.id))?.name, "Lead A");
+    assert.equal((await findLead(tx, tenantB.id, leadB.id))?.name, "Lead B");
+    assert.equal(await findLead(tx, tenantB.id, leadA.id), null);
+    assert.equal(await findLead(tx, tenantA.id, leadB.id), null);
+  });
+});
+
+test("findLead: onbekende lead of onbekende tenant geeft null", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const lead = await createLead(tx, tenant.id, exampleLead());
+
+    assert.equal(await findLead(tx, tenant.id, randomUUID()), null);
+    assert.equal(await findLead(tx, randomUUID(), lead.id), null);
+  });
+});
+
 test("HTTP met echte resolver en loader: eigen tenant 200, andere tenant en disabled membership 403", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
@@ -409,12 +504,13 @@ test("HTTP met echte resolver en loader: eigen tenant 200, andere tenant en disa
 test("testdata is na de tests teruggedraaid", async () => {
   const { pool } = createDb(process.env.DATABASE_TEST_URL);
   try {
-    const { rows } = await pool.query<{ tenants: number; users: number; memberships: number }>(
+    const { rows } = await pool.query<{ tenants: number; users: number; memberships: number; leads: number }>(
       `select (select count(*)::int from tenants) as tenants,
               (select count(*)::int from users) as users,
-              (select count(*)::int from memberships) as memberships`,
+              (select count(*)::int from memberships) as memberships,
+              (select count(*)::int from leads) as leads`,
     );
-    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0 });
+    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0 });
   } finally {
     await pool.end();
   }
