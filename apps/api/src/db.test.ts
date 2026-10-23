@@ -9,6 +9,7 @@ import { findActiveMemberships } from "./auth/membershipResolver.js";
 import type { ExternalIdentity } from "./auth/types.js";
 import { createDb } from "./db.js";
 import * as schema from "./db/schema.js";
+import { findTenant } from "./tenants/tenantLoader.js";
 
 test("database connection reaches conversion_engine_test", async () => {
   const databaseUrl = process.env.DATABASE_TEST_URL;
@@ -319,9 +320,36 @@ test("findActiveMemberships: user met memberships in twee actieve tenants", asyn
   });
 });
 
-test("HTTP met echte resolver: actieve owner krijgt 200, disabled membership 403", async () => {
+test("findTenant: geeft alleen id, naam en status van precies die tenant", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
+    const other = await createTenant(tx);
+
+    assert.deepEqual(await findTenant(tx, tenant.id), { id: tenant.id, name: tenant.name, status: "active" });
+    assert.deepEqual(await findTenant(tx, other.id), { id: other.id, name: other.name, status: "active" });
+  });
+});
+
+test("findTenant: onbekende tenant geeft null", async () => {
+  await withRollback(async (tx) => {
+    await createTenant(tx);
+
+    assert.equal(await findTenant(tx, randomUUID()), null);
+  });
+});
+
+test("findTenant: geeft de opgeslagen status terug", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx, "suspended");
+
+    assert.deepEqual(await findTenant(tx, tenant.id), { id: tenant.id, name: tenant.name, status: "suspended" });
+  });
+});
+
+test("HTTP met echte resolver en loader: eigen tenant 200, andere tenant en disabled membership 403", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const otherTenant = await createTenant(tx);
     const active = await createUser(tx);
     const disabled = await createUser(tx);
     await tx.insert(schema.memberships).values([
@@ -341,6 +369,7 @@ test("HTTP met echte resolver: actieve owner krijgt 200, disabled membership 403
           },
         },
         membershipResolver: (identity) => findActiveMemberships(tx, identity),
+        tenantLoader: (tenantId) => findTenant(tx, tenantId),
       },
       { logger: false },
     );
@@ -352,6 +381,17 @@ test("HTTP met echte resolver: actieve owner krijgt 200, disabled membership 403
         headers: { "x-test-identity": active.identity.subject, "x-tenant-id": tenant.id },
       });
       assert.equal(ok.statusCode, 200);
+      assert.deepEqual(ok.json().tenant, { id: tenant.id, name: tenant.name, status: "active" });
+      assert.ok(!ok.body.includes(otherTenant.name));
+
+      // Een bestaande tenant zonder membership levert geen data op.
+      const otherResponse = await app.inject({
+        method: "GET",
+        url: "/v1/dashboard/today",
+        headers: { "x-test-identity": active.identity.subject, "x-tenant-id": otherTenant.id },
+      });
+      assert.equal(otherResponse.statusCode, 403);
+      assert.ok(!otherResponse.body.includes(otherTenant.name));
 
       const forbidden = await app.inject({
         method: "GET",

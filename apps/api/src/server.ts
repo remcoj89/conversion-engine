@@ -4,6 +4,7 @@ import { findActiveMemberships } from "./auth/membershipResolver.js";
 import { createDiscoveredKeySet } from "./auth/oidcDiscovery.js";
 import { createZitadelAdapter } from "./auth/zitadelAdapter.js";
 import { createDb } from "./db.js";
+import { findTenant } from "./tenants/tenantLoader.js";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4000;
@@ -29,6 +30,7 @@ const app = buildApp({
     keys: createDiscoveredKeySet(authConfig.issuer),
   }),
   membershipResolver: (identity) => findActiveMemberships(db, identity),
+  tenantLoader: (tenantId) => findTenant(db, tenantId),
 });
 
 try {

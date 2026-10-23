@@ -3,6 +3,12 @@
 import { useEffect, useState } from "react";
 
 type TodayResponse = {
+  // Tenant uit de auth-context van de API; null zolang er geen (geldige) response is.
+  tenant: {
+    id: string;
+    name: string;
+    status: string;
+  } | null;
   actionRequired: {
     id: string;
     label: string;
@@ -18,6 +24,7 @@ type TodayResponse = {
 
 // Lege/onbeschikbare staat tijdens laden en bij fouten; dit is ook wat in de server-HTML staat.
 const unavailableToday: TodayResponse = {
+  tenant: null,
   actionRequired: [
     {
       id: "leads-needing-attention",
@@ -44,7 +51,7 @@ const unavailableToday: TodayResponse = {
   directFollowUp: {
     status: "empty",
     message:
-      "Zodra de Conversion Engine API is gekoppeld, verschijnen hier de aanvragen die opvolging nodig hebben.",
+      "CRM- en leaddata zijn nog niet beschikbaar. Zodra die bron is gekoppeld, verschijnen hier de aanvragen die opvolging nodig hebben.",
   },
 };
 
@@ -74,10 +81,20 @@ export default function TodayOverview() {
     return () => controller.abort();
   }, []);
 
-  const { actionRequired, directFollowUp } = today;
+  const { tenant, actionRequired, directFollowUp } = today;
 
   return (
     <>
+      <p className="tenant-context" aria-busy={loading}>
+        Klantomgeving:{" "}
+        <strong>{tenant ? tenant.name : loading ? "Laden…" : "Niet beschikbaar"}</strong>
+        {tenant && (
+          <span className="badge badge-neutral">
+            {tenant.status === "active" ? "Actief" : tenant.status}
+          </span>
+        )}
+      </p>
+
       <section aria-labelledby="attention-title">
         <div className="section-heading">
           <h2 id="attention-title">Actie vereist</h2>

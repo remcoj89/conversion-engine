@@ -254,6 +254,19 @@ a.nav-item:hover {
   color: var(--text-secondary);
 }
 
+.tenant-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-unit);
+  margin-bottom: calc(var(--space-unit) * 3);
+  color: var(--text-secondary);
+}
+
+.tenant-context strong {
+  color: var(--text-primary);
+}
+
 section + section {
   margin-top: calc(var(--space-unit) * 4);
 }

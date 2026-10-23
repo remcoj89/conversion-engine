@@ -1,9 +1,9 @@
 import Fastify, { type FastifyServerOptions } from "fastify";
 import { createAuthHook, type AuthHookDependencies } from "./auth/authHook.js";
 import { apiErrorHandler } from "./errors.js";
-import { registerDashboardRoutes } from "./routes/dashboard.js";
+import { registerDashboardRoutes, type DashboardRouteDependencies } from "./routes/dashboard.js";
 
-export type AppDependencies = AuthHookDependencies;
+export type AppDependencies = AuthHookDependencies & DashboardRouteDependencies;
 
 export function buildApp(
   dependencies: AppDependencies,
@@ -22,7 +22,7 @@ export function buildApp(
   // Everything registered in this encapsulated scope requires an auth context.
   app.register(async (protectedApp) => {
     protectedApp.addHook("onRequest", createAuthHook(dependencies));
-    registerDashboardRoutes(protectedApp);
+    registerDashboardRoutes(protectedApp, dependencies);
   });
 
   return app;
