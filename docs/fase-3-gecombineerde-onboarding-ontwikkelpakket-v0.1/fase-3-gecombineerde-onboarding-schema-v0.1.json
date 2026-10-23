@@ -1883,13 +1883,6 @@
               ],
               "max_files": 5,
               "max_mb": 10,
-              "when": {
-                "field": "brand_status",
-                "in": [
-                  "complete",
-                  "basic"
-                ]
-              },
               "note": "Voorkeur: origineel vectorbestand (SVG/PDF). Bestanden worden pas via beveiligde upload opgeslagen in de echte app.",
               "source_questionnaire": "Q4"
             },
@@ -1904,10 +1897,6 @@
               ],
               "max_files": 2,
               "max_mb": 15,
-              "when": {
-                "field": "brand_status",
-                "eq": "complete"
-              },
               "source_questionnaire": "Q4"
             },
             {

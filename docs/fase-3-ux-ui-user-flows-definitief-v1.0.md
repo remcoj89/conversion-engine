@@ -78,7 +78,22 @@ Support blijft een **duidelijke ingang naar de centrale inbox**, niet een nieuw 
 | 9. **Monitoring** | Westend | 30m frontendcontrole en 3-daagse end-to-endtest | Separaat technisch bewijs, tests onderdrukken AI en commerciële flows |
 | 10. **Maandelijkse verbetering** | Westend + Owner | Brondata → signalen → adviesconcept → review → rapport | Aanbeveling is geen automatische publicatie; meerwerk na offerte |
 
-## 3.1 Goedkeuringen uniform benoemen
+## 3.1 Twee commerciële instroomroutes, één onboarding na akkoord
+
+Westend heeft twee routes om klanten te bereiken. De routes verschillen vóór de opdracht, maar komen na overeenkomst en betalingsafhandeling samen in dezelfde klant-onboarding:
+
+1. **Koude outreach:** Westend benadert een prospect en biedt handmatig een demo-landingspagina in de bestaande stijl aan. De demo kan bestaande, publiek beschikbare website-/socialinformatie, het logo, branding en beeldmateriaal gebruiken. De demo-opbouw en verzending van de demo/VSL blijven voorlopig handmatig en vallen buiten de scope van de Conversion Engine. Wordt de prospect klant, dan worden de al bekende en gecontroleerde gegevens waar mogelijk als prefill in de onboarding aangeboden.
+2. **Warme lead:** een prospect komt bijvoorbeeld via een referral, advertentie of ander inbound kanaal binnen zonder voorafgaande demo. Na overeenkomst en betalingsafhandeling doorloopt de klant de volledige onboarding; er is geen demo-prefill tenzij betrouwbare brondata beschikbaar is.
+
+In beide routes geldt:
+
+- de onboarding is geen saleskwalificatieformulier, maar de strategische intake voor de website en Project Brief;
+- vooraf ingevulde gegevens blijven zichtbaar als brondata, zijn door de klant te corrigeren en krijgen herkomst/provenance;
+- logo, branding en bestaande afbeeldingen hoeven niet opnieuw te worden aangeleverd wanneer ze al betrouwbaar beschikbaar zijn, maar de klant bevestigt of corrigeert ze waar nodig;
+- publiek beschikbaar beeldmateriaal is niet automatisch vrijgegeven voor productie. Rechten en toestemming blijven een expliciet reviewpunt vóór publicatie;
+- de Conversion Engine bouwt voorlopig geen koude outreach-demo’s en haalt hiervoor niet zelfstandig gegevens van externe websites of sociale kanalen op.
+
+## 3.2 Goedkeuringen uniform benoemen
 
 De Review Studio toont een **intakecontrole** en twee formele productie-gates. Om verwarring te voorkomen gebruiken we **niet drie afzonderlijke verplichte akkoordmomenten**:
 

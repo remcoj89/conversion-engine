@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Sidebar from "./sidebar";
+import TopbarContext from "./topbar-context";
 import ServiceWorkerRegistration from "./service-worker-registration";
 import "./globals.css";
 
@@ -27,10 +28,7 @@ export default function RootLayout({
           <Sidebar />
           <div className="app-main">
             <header className="topbar">
-              <p className="topbar-context">
-                Klantomgeving <span aria-hidden="true">/</span>{" "}
-                <strong>Vandaag</strong>
-              </p>
+              <TopbarContext />
               <span className="badge">Conversion Engine</span>
             </header>
             <main id="content" className="content">

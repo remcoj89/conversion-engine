@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 const navItems = [
   { label: "Vandaag", glyph: "▦", href: "/" },
+  { label: "Onboarding", glyph: "◎", href: "/onboarding" },
   { label: "Leads & contacten", glyph: "☷" },
   { label: "Pipeline", glyph: "▥" },
   { label: "Taken & afspraken", glyph: "✓" },
@@ -16,6 +18,7 @@ const navItems = [
 
 export default function Sidebar() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const pathname = usePathname();
 
   return (
     <aside className="sidebar">
@@ -49,7 +52,7 @@ export default function Sidebar() {
                 <Link
                   href={item.href}
                   className="nav-item"
-                  aria-current="page"
+                  aria-current={pathname === item.href ? "page" : undefined}
                 >
                   <span className="nav-glyph" aria-hidden="true">
                     {item.glyph}

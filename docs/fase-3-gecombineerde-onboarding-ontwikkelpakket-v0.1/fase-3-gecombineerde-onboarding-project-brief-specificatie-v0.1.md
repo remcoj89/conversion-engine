@@ -8,6 +8,15 @@
 
 Vier bestaande vragenlijsten blijven hun eigen bron van waarheid; deze integratie is de gebruikslaag en outputtransformatie. Q1–Q4 samen tellen **123 gedefinieerde velden, waarvan 70 als verplicht gemarkeerd in het bronschema**, inclusief voorwaardelijk zichtbare velden. De daadwerkelijke aantallen zijn afhankelijk van antwoorden. Het zijn géén 123 verplichte klantacties. Het doel van 10–15 minuten voor de gehele intake is hierdoor niet vanzelfsprekend: tijdens vijf pilotklanten daadwerkelijke invultijd en uitval meten en zo nodig reduceren of bestaande websitegegevens voorinvullen.
 
+### 1.1 Commerciële instroom en prefill
+
+De intake start pas na overeenkomst en betalingsafhandeling. Er zijn twee commerciële routes:
+
+- **Koude outreach:** Westend bouwt vóór de opdracht handmatig een demo-landingspagina in de bestaande stijl en stuurt die samen met een VSL. Deze demo-opbouw valt buiten de scope van de Conversion Engine. Bij akkoord kunnen gegevens die al betrouwbaar uit de demo, de bestaande website of andere aangeleverde bronnen bekend zijn — zoals bedrijfsgegevens, logo, branding en beeldreferenties — als prefill in Q1–Q4 worden aangeboden.
+- **Warme lead:** de prospect komt bijvoorbeeld via een referral of advertentie binnen zonder demo. Na akkoord doorloopt deze klant de volledige onboarding. Betrouwbare bestaande brondata mag ook hier als prefill worden gebruikt, maar ontbrekende informatie blijft onderdeel van de intake.
+
+Prefill is altijd herleidbaar, blijft door de klant corrigeerbaar en wordt niet automatisch als geverifieerde waarheid of publicatierecht beschouwd. Publiek vindbaar beeldmateriaal kan voor de handmatige demo worden gebruikt, maar rechten en toestemming blijven vóór productie en publicatie een expliciet reviewpunt. De Conversion Engine bouwt geen demo’s en verzamelt in deze scope niet zelfstandig data van externe websites of sociale kanalen.
+
 ## 2. UX-informatiearchitectuur
 
 Een doorlopend klantportaal met vier hoofdstukken en één eindcontrole:
