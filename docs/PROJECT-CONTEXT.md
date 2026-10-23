@@ -2,7 +2,7 @@
 
 **Laatst bijgewerkt:** 23 oktober 2026
 **Status:** Fase 5, technische implementatie met kleine verticale slices
-**Laatste gepushte technische commit:** `22a4bfe feat(api): add website registration context resolver`
+**Laatste gepushte technische commit:** `a521755 docs: sync onboarding demo schema`
 
 Dit document is een compacte startcontext voor nieuwe Codex- en Claude-sessies. Het vervangt de leidende bron- en architectuurdocumenten niet.
 
@@ -45,9 +45,13 @@ Conversion Engine is een multi-tenant SaaS-dashboard voor leadopvolging, website
 - Website-tabel en migratie `0005`.
 - Opaque website-public-key en `findActiveWebsiteContext` voor actieve website + actieve tenant.
 - Migratie `0005` toegepast op de lokale developmentdatabase; `websites` bevat 0 rijen.
+- Onboarding-draftopslag met migratie `0006`: versieerbare antwoorden en server-side gegenereerde Project Brief.
+- `GET/PUT /v1/onboarding/current` achter ZITADEL-auth; alleen een Owner met `onboarding:manage` heeft toegang.
+- Next.js BFF-route `/api/onboarding` met server-side sessie, token refresh en 409-conflictafhandeling.
+- Dashboard-onboarding hervat server-side drafts na refresh en slaat wijzigingen automatisch op; uploads zijn voorlopig metadata-only.
 - Zelfstandige demo-site in `apps/demo-site`, visueel gecontroleerd op desktop en mobiel.
 
-De laatste gecontroleerde backendstatus had groene API-typecheck, lint, 73 API-tests en 36 database-tests. De laatste migratiecontrole bevestigde 6 uitgevoerde migraties en ongewijzigde bestaande tabellen/data.
+De laatste gecontroleerde backendstatus had groene API-typecheck, lint, 88 API-tests en 44 database-tests. De dashboardtests stonden op 124; dashboard- en API-builds waren groen. Migratie `0006` is lokaal toegepast; 7 migraties zijn geregistreerd. De onboarding-backendslice is technisch getest en de handmatige ZITADEL-smoketest is geslaagd: login, conceptopslag, refresh en opnieuw inloggen behouden de ingevulde antwoorden.
 
 ## Belangrijk onderscheid: twee intakeflows
 
@@ -72,13 +76,13 @@ De klikdemo staat in:
 
 `docs/fase-3-gecombineerde-onboarding-ontwikkelpakket-v0.1/fase-3-gecombineerde-onboarding-interactief-v0.1.html`
 
-De bijbehorende schema- en contractspecificaties staan in dezelfde map. De demo gebruikt lokale browserstate en heeft geen echte authenticatie, serveropslag, uploads of workflowstatus. Het is de UX- en datacontractbron, geen productiecomponent.
+De bijbehorende schema- en contractspecificaties staan in dezelfde map. De demo gebruikt lokale browserstate en heeft geen echte authenticatie, serveropslag, uploads of workflowstatus. Het dashboard gebruikt dezelfde schema-/contractlaag en heeft nu wel server-side draftopslag en hervatten. De losse demo blijft UX- en datacontractbron, geen productiecomponent.
 
 ## Huidige werkpositie
 
-De backendfundering voor identiteit, tenantisolatie, leads en website-resolutie is aanwezig. De dashboard-frontend bevat inmiddels de volledige onboardingprototypeflow: Q1–Q4, 20 onderdelen, schema-gedreven validatie, conditionele velden, optionele assetmetadata en de eindcontrole met Project Brief-preview.
+De backendfundering voor identiteit, tenantisolatie, leads en website-resolutie is aanwezig. De dashboard-frontend bevat de volledige onboardingflow: Q1–Q4, 20 onderdelen, schema-gedreven validatie, conditionele velden, optionele assetmetadata en de eindcontrole met Project Brief-preview. De flow is via `/api/onboarding` gekoppeld aan server-side draftopslag.
 
-De frontendprototype gebruikt uitsluitend tijdelijke React-state, zonder API, database, echte uploads of `localStorage`. De volgende ontwikkelstap is eerst de losse HTML-demo synchroniseren met het actuele schema en daarna het definitieve opslag- en prefillcontract voor onboarding ontwerpen. Dat contract moet zowel warme leads zonder demo als koude leads met corrigeerbare, herleidbare prefill ondersteunen.
+Antwoorden worden per tenant en project versieerbaar opgeslagen. Bij refresh wordt een bestaand concept hervat; gelijktijdige wijzigingen leiden tot een expliciete 409-conflictkeuze. De vier uploadvelden bewaren voorlopig alleen metadata: echte uploads, scanning en private opslag zijn nog niet gebouwd. Indienen, Westend-review, audit-events, prefill en productiehandoff blijven volgende slices. De handmatige ZITADEL-smoketest is geslaagd; de slice is klaar voor gecontroleerde acceptatie en commit.
 
 De handmatige bouw en verzending van koude outreach-demo’s blijven buiten de Conversion Engine. De backend- en databasefundering wordt niet opnieuw gebouwd voor de demo-opbouw.
 
@@ -97,7 +101,7 @@ De handmatige bouw en verzending van koude outreach-demo’s blijven buiten de C
 
 - Productie-MFA/AAL-handhaving.
 - PostgreSQL-RLS en tenantveilige samengestelde relaties.
-- Persistente onboardingopslag, versies, audit en Project Brief-generatie.
+- Onboarding audit-events, formeel indienen, reviewworkflow en Project Brief-goedkeuring.
 - Veilige uploads, scanning en private opslag.
 - Publieke lead-ingest met anti-spam, rate limiting, outbox en idempotency.
 - CRM-contacten, pipeline, taken en verdere leadopvolging.

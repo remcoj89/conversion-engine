@@ -17,9 +17,13 @@ import {
   validateFiles,
   type Answers,
   type AnswerValue,
-} from "./engine";
+  allFields,
+  fieldById,
+  onboardingSchema,
+  steps,
+  type FieldDefinition,
+} from "../../../../packages/onboarding-contract/src/index";
 import { flowReducer, initialFlowState, type FlowAction, type FlowState } from "./flow";
-import { allFields, fieldById, onboardingSchema, steps, type FieldDefinition } from "./schema";
 
 // ---------- Hulpfuncties ----------
 
@@ -365,4 +369,16 @@ test("indienen: geldige intake krijgt submitted_demo; een latere wijziging zet h
   assert.equal(stepErrors(0, state.answers).company_name, undefined);
   state = flowReducer(state, { type: "answer", fieldId: "company_name", value: "Nieuwe naam BV" });
   assert.equal(state.reviewStatus, "draft");
+});
+
+test("hervatten: hydrate laadt opgeslagen antwoorden, wist verborgen waarden en behoudt de positie", () => {
+  const state = run([{ type: "goToStep", step: 5 }, { type: "next" }]);
+  const hydrated = flowReducer(state, {
+    type: "hydrate",
+    answers: { company_name: "Opgeslagen BV", domain_status: "new", domain_name: "verborgen.nl" },
+  });
+  assert.equal(hydrated.current, 5);
+  assert.deepEqual(hydrated.answers, { company_name: "Opgeslagen BV", domain_status: "new" });
+  assert.deepEqual(hydrated.errors, {});
+  assert.equal(hydrated.reviewStatus, "draft");
 });

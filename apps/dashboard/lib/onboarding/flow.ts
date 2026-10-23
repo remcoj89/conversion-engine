@@ -1,6 +1,7 @@
-// Navigatie en status van de onboardingflow als pure reducer: geen opslag, alleen tijdelijke state.
+// Navigatie en status van de onboardingflow als pure reducer. Opslag op de server staat in app/onboarding/use-draft-sync.ts.
 import {
   canSubmit,
+  clearHidden,
   isEmpty,
   missingFields,
   setAnswer,
@@ -9,8 +10,9 @@ import {
   type AnswerValue,
   type Answers,
   type ReviewStatus,
-} from "./engine";
-import { fieldById, steps } from "./schema";
+  fieldById,
+  steps,
+} from "../../../../packages/onboarding-contract/src/index";
 
 export type FlowState = Readonly<{
   answers: Answers;
@@ -22,6 +24,8 @@ export type FlowState = Readonly<{
 }>;
 
 export type FlowAction =
+  // Antwoorden uit een opgeslagen concept; navigatie blijft waar die is.
+  | Readonly<{ type: "hydrate"; answers: Answers }>
   | Readonly<{ type: "answer"; fieldId: string; value: AnswerValue }>
   | Readonly<{ type: "blur"; fieldId: string }>
   | Readonly<{ type: "fieldError"; fieldId: string; error: string }>
@@ -51,6 +55,8 @@ function withoutKey(record: Readonly<Record<string, string>>, key: string): Reco
 
 export function flowReducer(state: FlowState, action: FlowAction): FlowState {
   switch (action.type) {
+    case "hydrate":
+      return { ...state, answers: clearHidden(action.answers), errors: {}, reviewStatus: "draft" };
     case "answer":
       // Elke wijziging maakt een eerdere demo-indiening ongedaan: de klant moet opnieuw indienen.
       return {

@@ -1,11 +1,16 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  foreignKey,
   index,
+  integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
   timestamp,
+  unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { generateWebsitePublicKey, WEBSITE_PUBLIC_KEY_PATTERN } from "../websites/websitePublicKey.js";
@@ -98,6 +103,68 @@ export const leads = pgTable(
   (table) => [
     index("leads_tenant_id_idx").on(table.tenantId),
     check("leads_status_check", sql`${table.status} in ('new')`),
+  ],
+);
+
+// Statusmodel uit de onboardingspecificatie (§3). Deze slice gebruikt alleen "draft"; "approved" zet alleen Westend.
+export const onboardingProjectStatuses = ["draft", "submitted", "review_needed", "blocked", "approved"] as const;
+
+// Eén onboardingtraject van een tenant. Een toekomstig websiteproject kan via (tenant_id, id) tenantveilig
+// naar een onboardingproject verwijzen; daarvoor bestaat de samengestelde unieke sleutel hieronder.
+export const onboardingProjects = pgTable(
+  "onboarding_projects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    status: text("status", { enum: onboardingProjectStatuses }).notNull().default("draft"),
+    // Laatst opgeslagen versienummer; basis voor optimistic concurrency.
+    currentVersion: integer("current_version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("onboarding_projects_tenant_id_id_unique").on(table.tenantId, table.id),
+    // Maximaal één lopend onboardingproject per tenant.
+    uniqueIndex("onboarding_projects_one_active_per_tenant")
+      .on(table.tenantId)
+      .where(sql`${table.status} <> 'approved'`),
+    check("onboarding_projects_status_check", sql`${table.status} in ('draft', 'submitted', 'review_needed', 'blocked', 'approved')`),
+    check("onboarding_projects_current_version_check", sql`${table.currentVersion} >= 1`),
+  ],
+);
+
+// Onveranderlijke versies van de antwoorden plus de server-side gegenereerde Project Brief.
+export const onboardingVersions = pgTable(
+  "onboarding_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    projectId: uuid("project_id").notNull(),
+    version: integer("version").notNull(),
+    schemaId: text("schema_id").notNull(),
+    schemaVersion: text("schema_version").notNull(),
+    answers: jsonb("answers").notNull(),
+    projectBrief: jsonb("project_brief").notNull(),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Tenantveilig: een versie kan alleen bij een project van dezelfde tenant horen.
+    foreignKey({
+      name: "onboarding_versions_project_tenant_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [onboardingProjects.tenantId, onboardingProjects.id],
+    }),
+    unique("onboarding_versions_project_id_version_unique").on(table.projectId, table.version),
+    check("onboarding_versions_version_check", sql`${table.version} >= 1`),
+    check("onboarding_versions_answers_check", sql`jsonb_typeof(${table.answers}) = 'object'`),
+    check("onboarding_versions_project_brief_check", sql`jsonb_typeof(${table.projectBrief}) = 'object'`),
   ],
 );
 

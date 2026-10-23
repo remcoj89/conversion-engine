@@ -43,6 +43,13 @@
       "when": 1792746594341,
       "tag": "0005_ambiguous_harpoon",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792754769378,
+      "tag": "0006_silky_mikhail_rasputin",
+      "breakpoints": true
     }
   ]
 }

@@ -58,6 +58,10 @@ ZITADEL beheert identiteit en authenticatie. De eigen PostgreSQL-database blijft
 - High-severity dependencyproblemen opgelost; de productie-audit rapporteert geen kwetsbaarheden.
 - ZITADEL-login, logout, server-side sessies en token refresh in de dashboard-BFF.
 - JWT-validatie van ZITADEL-access tokens in de Fastify API.
+- Gecombineerde Q1–Q4-onboarding met 123 schema-velden, een gedeelde contractlaag en server-side Project Brief-generatie.
+- Server-side onboardingconcepten met versiebeheer via migratie `0006`; `GET/PUT /v1/onboarding/current`.
+- `/api/onboarding` in de Next.js BFF met server-side sessie, token refresh en conflictcontrole; alleen een Owner heeft `onboarding:manage`.
+- Dashboard-onboarding hervat concepten na refresh en slaat antwoorden automatisch op; bestanden zijn voorlopig metadata-only.
 - Zelfstandige demowebsite in `apps/demo-site`; zie [het implementatierecord](docs/demo-site-implementation-record-v1.0.md).
 
 ## Security foundation — 22 oktober 2026
@@ -68,7 +72,7 @@ De beveiligingsgrens van de Fastify API, bijgewerkt naar de huidige code (23 okt
 - Alle andere routes staan achter een auth-hook. De API authenticeert requests via de ZITADEL-adapter: het `Bearer`-access token wordt als JWT gevalideerd (RS256, issuer en audience uit de configuratie, sleutels via OIDC-discovery). Zonder geldige configuratie start de API niet.
 - Een geauthenticeerde identity wordt via de lokale user en actieve membership in een actieve tenant vertaald naar een immutable `RequestContext` met tenant en rol.
 - Bij één actieve membership wordt de tenant automatisch gekozen. Bij meerdere actieve memberships kan de gebruiker de tenant kiezen via `x-tenant-id`; deze waarde wordt server-side gecontroleerd tegen actieve memberships. Tenantwaarden uit body en query worden niet gebruikt.
-- De rolcontrole gebruikt een deny-by-default permission map met `dashboard:read` en `leads:create`, beide voor Owner en Team Member.
+- De rolcontrole gebruikt een deny-by-default permission map met `dashboard:read` en `leads:create`, beide voor Owner en Team Member, plus `onboarding:manage` voor Owner.
 - `GET /v1/dashboard/today` toont alleen de tenant uit de auth-context.
 - `POST /v1/leads` is alleen beschikbaar voor geauthenticeerde gebruikers met een actieve membership en `leads:create`. De lead wordt opgeslagen bij de tenant uit de auth-context; tenant-ID, status, lead-ID, timestamps en onbekende velden in de requestbody worden geweigerd en een nieuwe lead krijgt altijd status `new`.
 - De HTTP-laag is onafhankelijk van Drizzle door dependency injection van de membership resolver, tenant-loader en lead-repository.
@@ -76,6 +80,8 @@ De beveiligingsgrens van de Fastify API, bijgewerkt naar de huidige code (23 okt
 - De API-testset bevat HTTP-tests voor authenticatie (inclusief de ZITADEL-adapter), tenantkeuze, roltoegang, tenantisolatie, leadvalidatie en fail-closed gedrag. De database-testset controleert de echte membership resolver, tenant-loader en lead-repository.
 
 Nog niet aanwezig: MFA/AAL-handhaving en PostgreSQL-RLS. De resolver gaat uit van één geconfigureerde issuer en koppelt op `auth_provider_user_id`/OIDC-subject; issuer-opslag en de samengestelde uniqueness-regel zijn nog niet besloten.
+
+Voor onboarding zijn echte uploads/private opslag, formeel indienen, reviewworkflow, audit-events, prefill en productiehandoff nog niet aanwezig. De huidige draftopslag is lokaal gebouwd en getest. De handmatige smoketest met een echte ZITADEL-sessie is geslaagd: login, conceptopslag, refresh en opnieuw inloggen behouden de ingevulde antwoorden.
 
 Websites kunnen server-side worden geregistreerd met een opaque publieke key; een resolver koppelt een actieve key aan precies één actieve tenant. Voor leads staan nog open: de publieke formulier-endpoint, anti-spam, rate limiting, outbox, externe verwerking en idempotency/duplicate prevention.
 
@@ -93,6 +99,20 @@ De eerste bouwstenen voor server-side sessies zijn toegevoegd, zonder routes, da
 - Encryptie, manipulatie, verkeerde sleutels, cookie-attributen en configuratiefouten zijn getest.
 
 Deze foundation bevatte bewust nog geen sessietabel, sessiestore, login, refresh, logout of ZITADEL-integratie. Die zijn daarna gebouwd; zie hieronder.
+
+## Onboarding draft persistence — 23 oktober 2026
+
+De dashboard-onboarding is gekoppeld aan server-side conceptopslag.
+
+- `GET /v1/onboarding/current` laadt het actieve concept voor de tenant uit de auth-context.
+- `PUT /v1/onboarding/current` valideert `answers`, `base_version`, `schema_id` en `schema_version`, en schrijft een nieuwe versie.
+- Alleen een geauthenticeerde Owner met `onboarding:manage` kan onboardingconcepten lezen of wijzigen.
+- De API genereert de Project Brief server-side uit de gevalideerde antwoorden.
+- De BFF gebruikt de server-side sessie, geeft token-refresh door en behandelt versieconflicten met `409`.
+- Het dashboard laadt het concept na openen, bewaart wijzigingen automatisch en hervat het concept na een refresh.
+- Uploadvelden slaan voorlopig alleen metadata op. Bestandsbytes, private object storage, scanning, submit, review en audit-events vallen buiten deze slice.
+
+De technische checks zijn groen en de handmatige controle met een echte ZITADEL-login is geslaagd. Deze slice is klaar voor acceptatie en commit.
 
 ## Authenticatiebesluit — 21 oktober 2026
 

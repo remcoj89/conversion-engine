@@ -1,8 +1,15 @@
 "use client";
 
 import { useId, useRef } from "react";
-import { toggleChoice, validateFiles, type AnswerValue, type FileMeta, type RepeaterItem } from "../../lib/onboarding/engine";
-import type { FieldDefinition, RepeaterItemField } from "../../lib/onboarding/schema";
+import {
+  toggleChoice,
+  validateFiles,
+  type AnswerValue,
+  type FieldDefinition,
+  type FileMeta,
+  type RepeaterItem,
+  type RepeaterItemField,
+} from "../../../../packages/onboarding-contract/src/index";
 
 type Props = Readonly<{
   field: FieldDefinition;
@@ -263,8 +270,8 @@ function FileInput({
         }}
       />
       <p id={limitsId} className="field-help">
-        {(field.accept ?? []).join(", ")} · maximaal {maxFiles} {maxFiles === 1 ? "bestand" : "bestanden"} van elk {field.max_mb ?? 10} MB. In deze
-        versie wordt alleen de bestandsnaam bewaard, niets geüpload.
+        {(field.accept ?? []).join(", ")} · maximaal {maxFiles} {maxFiles === 1 ? "bestand" : "bestanden"} van elk {field.max_mb ?? 10} MB. Het
+        bestand zelf wordt nog niet geüpload; alleen naam, type en grootte worden bewaard.
       </p>
       {files.length > 0 && (
         <ul className="file-list" aria-label="Gekozen bestanden">

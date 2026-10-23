@@ -8,6 +8,7 @@ import { apiErrorHandler } from "./errors.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
 import type { Lead, NewLead } from "./leads/leadRepository.js";
 import type { LeadCreator } from "./routes/leads.js";
+import type { OnboardingStore } from "./routes/onboarding.js";
 import type { TenantLoader, TenantSummary } from "./tenants/tenantLoader.js";
 
 // Kaarten blijven unavailable; alleen de tenant komt uit de database.
@@ -88,6 +89,16 @@ function spyTenantLoader(lookup: TenantLoader = async (tenantId) => tenantsById[
   return { tenantLoader, calls };
 }
 
+// Deze tests raken onboarding niet; zie onboarding.test.ts.
+const unusedOnboardingStore: OnboardingStore = {
+  findCurrent: async () => {
+    throw new Error("not used in these tests");
+  },
+  saveDraft: async () => {
+    throw new Error("not used in these tests");
+  },
+};
+
 // Geeft de creator plus de aanroepen; de "opgeslagen" lead krijgt altijd status new, zoals de database.
 const CREATED_AT = new Date("2026-10-23T10:00:00.000Z");
 function spyLeadCreator() {
@@ -106,6 +117,7 @@ function setup(t: TestContext, dependencies: Partial<AppDependencies> = {}) {
       membershipResolver: testMembershipResolver,
       tenantLoader: spyTenantLoader().tenantLoader,
       leadCreator: spyLeadCreator().leadCreator,
+      onboardingStore: unusedOnboardingStore,
       ...dependencies,
     },
     { logger: false },
@@ -308,6 +320,7 @@ function setupWithLogs(t: TestContext, dependencies: Partial<AppDependencies>) {
       membershipResolver: testMembershipResolver,
       tenantLoader: spyTenantLoader().tenantLoader,
       leadCreator: spyLeadCreator().leadCreator,
+      onboardingStore: unusedOnboardingStore,
       ...dependencies,
     },
     { logger: { level: "info", stream: { write: (line: string) => logs.push(line) } } },

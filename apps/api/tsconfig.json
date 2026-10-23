@@ -7,9 +7,12 @@
     "strict": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "rootDir": "src",
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "../..",
     "outDir": "dist"
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "../../packages/onboarding-contract/src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

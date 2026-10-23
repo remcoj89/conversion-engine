@@ -3,8 +3,12 @@ import { createAuthHook, type AuthHookDependencies } from "./auth/authHook.js";
 import { apiErrorHandler } from "./errors.js";
 import { registerDashboardRoutes, type DashboardRouteDependencies } from "./routes/dashboard.js";
 import { registerLeadRoutes, type LeadRouteDependencies } from "./routes/leads.js";
+import { registerOnboardingRoutes, type OnboardingRouteDependencies } from "./routes/onboarding.js";
 
-export type AppDependencies = AuthHookDependencies & DashboardRouteDependencies & LeadRouteDependencies;
+export type AppDependencies = AuthHookDependencies &
+  DashboardRouteDependencies &
+  LeadRouteDependencies &
+  OnboardingRouteDependencies;
 
 export function buildApp(
   dependencies: AppDependencies,
@@ -25,6 +29,7 @@ export function buildApp(
     protectedApp.addHook("onRequest", createAuthHook(dependencies));
     registerDashboardRoutes(protectedApp, dependencies);
     registerLeadRoutes(protectedApp, dependencies);
+    registerOnboardingRoutes(protectedApp, dependencies);
   });
 
   return app;

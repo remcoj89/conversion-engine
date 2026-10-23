@@ -892,6 +892,69 @@ textarea.field-control {
   font-size: 13px;
 }
 
+/* Opslagstatus */
+
+.save-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.save-status-error {
+  color: var(--danger);
+}
+
+.save-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #aab5c5;
+}
+
+.save-dot-saved {
+  background: var(--success);
+}
+
+.save-dot-saving {
+  background: var(--brand-primary);
+}
+
+.save-dot-error,
+.save-dot-invalid {
+  background: var(--danger);
+}
+
+.save-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-unit) calc(var(--space-unit) * 2);
+  margin-top: calc(var(--space-unit) * 1.5);
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  font-size: 14px;
+}
+
+.save-notice p {
+  flex: 1 1 18rem;
+}
+
+.save-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-unit);
+}
+
+.onboarding-loading {
+  color: var(--text-secondary);
+}
+
 /* Eindcontrole */
 
 .review-stack {

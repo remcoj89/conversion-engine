@@ -9,7 +9,7 @@ import {
   steps,
   type FieldDefinition,
   type RepeaterItemField,
-} from "./schema";
+} from "./schema.ts";
 
 // Alleen metadata; er worden nooit bestandsbytes bewaard of verstuurd.
 export type FileMeta = Readonly<{ name: string; size: number; type: string }>;
@@ -396,6 +396,115 @@ export function buildProjectBrief(
       strategy_approval: "pending",
       website_publication: "not_authorized",
     },
-    notes: "Geordende intake-input door de klant verklaard, niet extern geverifieerd. Demo: niets opgeslagen of verstuurd.",
+    notes: "Geordende intake-input door de klant verklaard, niet extern geverifieerd. Bestanden zijn alleen metadata, niet geüpload.",
   };
+}
+
+// ---------- Server-side invoercontrole ----------
+
+// Structurele fouten maken een opslagverzoek ongeldig. Inhoudelijke fouten (verplicht, minimumlengte, formaat,
+// bereik) blokkeren een concept niet: die staan in review.required_fields_missing en blokkeren alleen indienen.
+export type AnswerIssueCode =
+  | "not_an_object"
+  | "unknown_field"
+  | "invalid_type"
+  | "too_long"
+  | "invalid_choice"
+  | "duplicate_choice"
+  | "exclusive_conflict"
+  | "too_many_items"
+  | "unknown_item_field"
+  | "invalid_file";
+
+export type AnswerIssue = Readonly<{ field_id: string; code: AnswerIssueCode }>;
+
+export type ParsedAnswers = { ok: true; answers: Answers } | { ok: false; issues: readonly AnswerIssue[] };
+
+// Bovengrens voor tekst zonder eigen max in het schema (getallen en bedragen); voorkomt willekeurig grote invoer.
+const MAX_UNBOUNDED_TEXT = 64;
+const MAX_FILE_NAME = 255;
+const MAX_FILE_TYPE = 255;
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+
+function textIssue(field: FieldDefinition, value: unknown): AnswerIssueCode | null {
+  if (typeof value !== "string") return "invalid_type";
+  const max = field.type === "number" || field.type === "money" ? MAX_UNBOUNDED_TEXT : (field.max ?? MAX_UNBOUNDED_TEXT);
+  return value.trim().length > max ? "too_long" : null;
+}
+
+function fieldIssue(field: FieldDefinition, value: unknown): AnswerIssueCode | null {
+  switch (field.type) {
+    case "text":
+    case "textarea":
+    case "url":
+    case "domain":
+    case "email":
+    case "number":
+    case "money":
+      return textIssue(field, value);
+    case "single_choice":
+      if (typeof value !== "string") return "invalid_type";
+      return value === "" || field.choices?.some((choice) => choice.value === value) ? null : "invalid_choice";
+    case "multi_choice": {
+      if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) return "invalid_type";
+      if (value.some((item) => !field.choices?.some((choice) => choice.value === item))) return "invalid_choice";
+      if (new Set(value).size !== value.length) return "duplicate_choice";
+      if (value.length > 1 && value.some((item) => field.exclusive?.includes(item))) return "exclusive_conflict";
+      return field.max_items !== undefined && value.length > field.max_items ? "too_many_items" : null;
+    }
+    case "repeater": {
+      if (!Array.isArray(value)) return "invalid_type";
+      if (field.max_items !== undefined && value.length > field.max_items) return "too_many_items";
+      for (const item of value) {
+        if (!isPlainObject(item)) return "invalid_type";
+        for (const [key, text] of Object.entries(item)) {
+          const itemField = field.item_fields?.find((candidate) => candidate.id === key);
+          if (!itemField) return "unknown_item_field";
+          if (typeof text !== "string") return "invalid_type";
+          if (text.trim().length > (itemField.max ?? MAX_UNBOUNDED_TEXT)) return "too_long";
+        }
+      }
+      return null;
+    }
+    case "file": {
+      if (!Array.isArray(value)) return "invalid_type";
+      const valid = value.every(
+        (file) =>
+          isPlainObject(file) &&
+          Object.keys(file).every((key) => key === "name" || key === "size" || key === "type") &&
+          typeof file.name === "string" &&
+          file.name.length > 0 &&
+          file.name.length <= MAX_FILE_NAME &&
+          typeof file.type === "string" &&
+          file.type.length <= MAX_FILE_TYPE &&
+          Number.isSafeInteger(file.size) &&
+          (file.size as number) >= 0,
+      );
+      if (!valid) return "invalid_file";
+      return validateFiles(field, value as readonly FileMeta[]) ? "invalid_file" : null;
+    }
+  }
+}
+
+// Controleert onvertrouwde invoer (bijv. een API-request) tegen het schema en geeft genormaliseerde antwoorden
+// terug: lege waarden en waarden van verborgen conditionele velden zijn verwijderd.
+export function parseAnswers(input: unknown): ParsedAnswers {
+  if (!isPlainObject(input)) return { ok: false, issues: [{ field_id: "", code: "not_an_object" }] };
+
+  const issues: AnswerIssue[] = [];
+  const answers: Record<string, AnswerValue> = {};
+  for (const [fieldId, value] of Object.entries(input)) {
+    const field = allFields.find((candidate) => candidate.id === fieldId);
+    if (!field) {
+      issues.push({ field_id: fieldId.slice(0, 64), code: "unknown_field" });
+      continue;
+    }
+    const issue = fieldIssue(field, value);
+    if (issue) issues.push({ field_id: fieldId, code: issue });
+    else if (!isEmpty(value as AnswerValue)) answers[fieldId] = value as AnswerValue;
+  }
+  if (issues.length > 0) return { ok: false, issues: issues.slice(0, 50) };
+  return { ok: true, answers: clearHidden(answers) };
 }

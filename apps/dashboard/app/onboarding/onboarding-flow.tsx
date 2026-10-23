@@ -1,18 +1,21 @@
 "use client";
 
-import { useEffect, useReducer, useRef } from "react";
-import { phaseProgress, stepErrors, stepProgress, visibleFields } from "../../lib/onboarding/engine";
-import { flowReducer, initialFlowState, type FlowAction } from "../../lib/onboarding/flow";
-import { onboardingSchema, steps } from "../../lib/onboarding/schema";
+import { useCallback, useEffect, useReducer, useRef } from "react";
+import { onboardingSchema, phaseProgress, stepErrors, stepProgress, steps, visibleFields } from "../../../../packages/onboarding-contract/src/index";
+import { flowReducer, initialFlowState, type FlowAction, type FlowState } from "../../lib/onboarding/flow";
 import OnboardingField from "./onboarding-field";
 import ReviewPanel from "./review-panel";
+import SaveStatus from "./save-status";
+import { useDraftSync } from "./use-draft-sync";
 
 const PHASE_COUNT = onboardingSchema.phases.length;
 
-// Volledige onboardingflow Q1–Q4 plus eindcontrole. Alleen tijdelijke React-state:
-// geen API, geen opslag, geen localStorage en geen uploads.
+// Volledige onboardingflow Q1–Q4 plus eindcontrole. Antwoorden worden als concept op de server opgeslagen
+// (via de BFF); bestanden blijven metadata, er wordt niets geüpload. Geen localStorage.
 export default function OnboardingFlow() {
   const [state, dispatch] = useReducer(flowReducer, initialFlowState);
+  const hydrate = useCallback((answers: FlowState["answers"]) => dispatch({ type: "hydrate", answers }), []);
+  const sync = useDraftSync(state.answers, hydrate);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const isFirstRender = useRef(true);
   const { current: currentStep, mode } = state;
@@ -60,7 +63,7 @@ export default function OnboardingFlow() {
         <p className="intro">
           {inReview
             ? "Controleer je antwoorden. We zetten ze om in een conceptbrief met bronverwijzingen, ontbrekende informatie en reviewpunten."
-            : "Vier vragenlijsten met elk vijf korte onderdelen. Je kunt vrij heen en weer bladeren; je antwoorden blijven staan zolang deze pagina open is."}
+            : "Vier vragenlijsten met elk vijf korte onderdelen. Je kunt vrij heen en weer bladeren; je antwoorden worden automatisch als concept opgeslagen."}
         </p>
         <div className="onboarding-overall">
           <div
@@ -76,6 +79,13 @@ export default function OnboardingFlow() {
           </div>
           <span className="onboarding-overall-label">{inReview ? "Eindcontrole" : `${state.current + 1} van ${steps.length} onderdelen`}</span>
         </div>
+        <SaveStatus
+          phase={sync.phase}
+          save={sync.save}
+          onRetry={sync.retry}
+          onKeepMine={sync.keepMine}
+          onLoadServer={sync.loadServerVersion}
+        />
       </div>
 
       <div className="onboarding-layout">
@@ -120,7 +130,12 @@ export default function OnboardingFlow() {
         </nav>
 
         <div className="onboarding-main">
-          {inReview ? (
+          {sync.phase === "loading" ? (
+            // Pas na het laden tonen, zodat niets lokaal wordt ingevuld dat het concept daarna overschrijft.
+            <div className="card onboarding-card onboarding-loading" aria-busy="true">
+              <p>Je opgeslagen antwoorden worden geladen…</p>
+            </div>
+          ) : inReview ? (
             <ReviewPanel state={state} dispatch={dispatch} headingRef={headingRef} />
           ) : (
             <form
@@ -202,7 +217,8 @@ export default function OnboardingFlow() {
                 </div>
               </div>
               <p className="onboarding-note">
-                Je antwoorden blijven alleen staan zolang deze pagina open is. Er wordt niets opgeslagen, geüpload of verstuurd.
+                Je antwoorden worden automatisch als concept opgeslagen. Bestanden worden nog niet geüpload: alleen naam, type en grootte
+                worden bewaard.
               </p>
             </form>
           )}

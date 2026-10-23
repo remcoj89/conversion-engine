@@ -1,9 +1,8 @@
 "use client";
 
 import { useMemo, type Dispatch, type RefObject } from "react";
-import { buildProjectBrief, phaseProgress, type ReviewFlag } from "../../lib/onboarding/engine";
+import { buildProjectBrief, onboardingSchema, phaseProgress, steps, type ReviewFlag } from "../../../../packages/onboarding-contract/src/index";
 import type { FlowAction, FlowState } from "../../lib/onboarding/flow";
-import { onboardingSchema, steps } from "../../lib/onboarding/schema";
 
 type Props = Readonly<{
   state: FlowState;

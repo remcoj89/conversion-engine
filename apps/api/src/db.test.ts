@@ -11,6 +11,8 @@ import { createDb } from "./db.js";
 import * as schema from "./db/schema.js";
 import { createLead, findLead, InvalidLeadTenantError, type NewLead } from "./leads/leadRepository.js";
 import { findTenant } from "./tenants/tenantLoader.js";
+import { findCurrentOnboarding, saveOnboardingDraftInTransaction } from "./onboarding/onboardingRepository.js";
+import type { OnboardingStore } from "./routes/onboarding.js";
 import { findActiveWebsiteContext } from "./websites/websiteResolver.js";
 import { generateWebsitePublicKey, WEBSITE_PUBLIC_KEY_PATTERN } from "./websites/websitePublicKey.js";
 
@@ -110,6 +112,12 @@ async function expectPgError(client: PoolClient, code: string, fn: () => Promise
 }
 
 const uniqueId = (prefix: string) => `${prefix}-${randomUUID()}`;
+
+// Echte repository binnen de rollback-transactie van de test.
+const onboardingStoreFor = (tx: Tx): OnboardingStore => ({
+  findCurrent: (tenantId) => findCurrentOnboarding(tx, tenantId),
+  saveDraft: (input) => saveOnboardingDraftInTransaction(tx, input),
+});
 
 test("users: user kan worden aangemaakt", async () => {
   await withRollback(async (tx, client) => {
@@ -468,6 +476,7 @@ test("HTTP met echte resolver en loader: eigen tenant 200, andere tenant en disa
         membershipResolver: (identity) => findActiveMemberships(tx, identity),
         tenantLoader: (tenantId) => findTenant(tx, tenantId),
         leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
+        onboardingStore: onboardingStoreFor(tx),
       },
       { logger: false },
     );
@@ -524,6 +533,7 @@ test("HTTP POST /v1/leads met echte repository: lead komt bij de eigen tenant, n
         membershipResolver: (identity) => findActiveMemberships(tx, identity),
         tenantLoader: (tenantId) => findTenant(tx, tenantId),
         leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
+        onboardingStore: onboardingStoreFor(tx),
       },
       { logger: false },
     );
@@ -676,17 +686,198 @@ test("websites: database weigert een website zonder geldige tenant, met ongeldig
   });
 });
 
+// ---------- Onboarding ----------
+
+const draftInput = (tenantId: string, userId: string, baseVersion: number, answers: Record<string, unknown> = {}) => ({
+  tenantId,
+  userId,
+  baseVersion,
+  schemaId: "WESTEND_ONBOARDING",
+  schemaVersion: "0.1.0-design",
+  answers,
+  projectBrief: { status: "incomplete_draft" },
+});
+
+test("onboarding: tenant zonder project heeft geen draft", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    assert.equal(await findCurrentOnboarding(tx, tenant.id), null);
+  });
+});
+
+test("onboarding: eerste opslag maakt project en versie 1; hervatten geeft dezelfde antwoorden", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createUser(tx);
+    const result = await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0, { company_name: "Bedrijf" }));
+    assert.equal(result.status, "saved");
+
+    const draft = await findCurrentOnboarding(tx, tenant.id);
+    assert.ok(draft);
+    assert.equal(draft.version, 1);
+    assert.equal(draft.status, "draft");
+    assert.deepEqual(draft.answers, { company_name: "Bedrijf" });
+    assert.deepEqual(draft.projectBrief, { status: "incomplete_draft" });
+    assert.equal(draft.schemaVersion, "0.1.0-design");
+  });
+});
+
+test("onboarding: elke opslag is een nieuwe, onveranderlijke versie", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createUser(tx);
+    for (let base = 0; base < 3; base++) {
+      const result = await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, base, { company_name: `Versie ${base + 1}` }));
+      assert.equal(result.status === "saved" && result.draft.version, base + 1);
+    }
+    const versions = await tx
+      .select({ version: schema.onboardingVersions.version, answers: schema.onboardingVersions.answers, createdBy: schema.onboardingVersions.createdBy })
+      .from(schema.onboardingVersions)
+      .where(eq(schema.onboardingVersions.tenantId, tenant.id));
+    assert.deepEqual(versions.map((row) => row.version).sort(), [1, 2, 3]);
+    assert.ok(versions.every((row) => row.createdBy === user.id));
+    assert.deepEqual((await findCurrentOnboarding(tx, tenant.id))?.answers, { company_name: "Versie 3" });
+  });
+});
+
+test("onboarding: een verouderde base_version geeft een conflict en wijzigt niets", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createUser(tx);
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0, { company_name: "Eerste" }));
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 1, { company_name: "Tweede" }));
+
+    assert.deepEqual(await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 1, { company_name: "Oud" })), {
+      status: "conflict",
+      currentVersion: 2,
+    });
+    assert.deepEqual(await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0)), { status: "conflict", currentVersion: 2 });
+    const other = await createTenant(tx);
+    assert.deepEqual(await saveOnboardingDraftInTransaction(tx, draftInput(other.id, user.id, 3)), { status: "conflict", currentVersion: 0 });
+    assert.deepEqual((await findCurrentOnboarding(tx, tenant.id))?.answers, { company_name: "Tweede" });
+  });
+});
+
+test("onboarding: een niet-concept project kan niet worden gewijzigd", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createUser(tx);
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0));
+    await tx.update(schema.onboardingProjects).set({ status: "submitted" }).where(eq(schema.onboardingProjects.tenantId, tenant.id));
+    assert.deepEqual(await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 1)), { status: "not_editable" });
+  });
+});
+
+test("onboarding: tenant A ziet en wijzigt nooit de draft van tenant B", async () => {
+  await withRollback(async (tx) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    const { user } = await createUser(tx);
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenantB.id, user.id, 0, { company_name: "Geheim B" }));
+
+    assert.equal(await findCurrentOnboarding(tx, tenantA.id), null);
+    const savedA = await saveOnboardingDraftInTransaction(tx, draftInput(tenantA.id, user.id, 0, { company_name: "A" }));
+    assert.equal(savedA.status === "saved" && savedA.draft.version, 1, "A begint een eigen project");
+    assert.deepEqual((await findCurrentOnboarding(tx, tenantB.id))?.answers, { company_name: "Geheim B" });
+  });
+});
+
+test("onboarding: database bewaakt tenantkoppeling, unieke versies, één lopend project en geldige waarden", async () => {
+  await withRollback(async (tx, client) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    const { user } = await createUser(tx);
+    const saved = await saveOnboardingDraftInTransaction(tx, draftInput(tenantA.id, user.id, 0));
+    assert.equal(saved.status, "saved");
+    const projectId = saved.status === "saved" ? saved.draft.projectId : "";
+    const insertVersion = (tenantId: string, version: number, answers = "{}") =>
+      client.query(
+        `insert into onboarding_versions (tenant_id, project_id, version, schema_id, schema_version, answers, project_brief, created_by)
+         values ($1, $2, $3, 'WESTEND_ONBOARDING', '0.1.0-design', $4::jsonb, '{}'::jsonb, $5)`,
+        [tenantId, projectId, version, answers, user.id],
+      );
+
+    // Versie van tenant B die naar het project van tenant A wijst.
+    await expectPgError(client, "23503", () => insertVersion(tenantB.id, 2));
+    await expectPgError(client, "23505", () => insertVersion(tenantA.id, 1));
+    await expectPgError(client, "23514", () => insertVersion(tenantA.id, 0));
+    await expectPgError(client, "23514", () => insertVersion(tenantA.id, 2, "[]"));
+    await expectPgError(client, "23505", () =>
+      client.query("insert into onboarding_projects (tenant_id, current_version) values ($1, 1)", [tenantA.id]),
+    );
+    await expectPgError(client, "23514", () =>
+      client.query("insert into onboarding_projects (tenant_id, status, current_version) values ($1, 'live', 1)", [tenantB.id]),
+    );
+    await expectPgError(client, "23503", () =>
+      client.query("insert into onboarding_projects (tenant_id, current_version) values ($1, 1)", [randomUUID()]),
+    );
+  });
+});
+
+test("HTTP onboarding met echte repository: Owner bewaart en hervat, Team Member krijgt 403", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const owner = await createUser(tx);
+    const member = await createUser(tx);
+    await tx.insert(schema.memberships).values([
+      { tenantId: tenant.id, userId: owner.user.id, role: "owner" },
+      { tenantId: tenant.id, userId: member.user.id, role: "team_member" },
+    ]);
+    const app = buildApp(
+      {
+        authAdapter: {
+          authenticate: async (request) => {
+            const subject = request.headers["x-test-identity"];
+            return typeof subject === "string" ? { status: "authenticated", identity: identityFor(subject) } : { status: "anonymous" };
+          },
+        },
+        membershipResolver: (identity) => findActiveMemberships(tx, identity),
+        tenantLoader: (tenantId) => findTenant(tx, tenantId),
+        leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
+        onboardingStore: onboardingStoreFor(tx),
+      },
+      { logger: false },
+    );
+    const payload = {
+      schema_id: "WESTEND_ONBOARDING",
+      schema_version: "0.1.0-design",
+      base_version: 0,
+      answers: { company_name: "Sterk & Fit Coaching", domain_status: "new", domain_name: "verborgen.nl" },
+    };
+    try {
+      const put = await app.inject({ method: "PUT", url: "/v1/onboarding/current", headers: { "x-test-identity": owner.identity.subject }, payload });
+      assert.equal(put.statusCode, 200);
+      assert.equal(put.json().version, 1);
+
+      const get = await app.inject({ method: "GET", url: "/v1/onboarding/current", headers: { "x-test-identity": owner.identity.subject } });
+      assert.deepEqual(get.json().answers, { company_name: "Sterk & Fit Coaching", domain_status: "new" });
+      assert.equal(get.json().project_brief.client_supplied.business.name, "Sterk & Fit Coaching");
+      assert.ok(!get.body.includes("verborgen.nl"));
+
+      const conflict = await app.inject({ method: "PUT", url: "/v1/onboarding/current", headers: { "x-test-identity": owner.identity.subject }, payload });
+      assert.equal(conflict.statusCode, 409);
+
+      const forbidden = await app.inject({ method: "GET", url: "/v1/onboarding/current", headers: { "x-test-identity": member.identity.subject } });
+      assert.equal(forbidden.statusCode, 403);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 test("testdata is na de tests teruggedraaid", async () => {
   const { pool } = createDb(process.env.DATABASE_TEST_URL);
   try {
-    const { rows } = await pool.query<{ tenants: number; users: number; memberships: number; leads: number; websites: number }>(
+    const { rows } = await pool.query<Record<string, number>>(
       `select (select count(*)::int from tenants) as tenants,
               (select count(*)::int from users) as users,
               (select count(*)::int from memberships) as memberships,
               (select count(*)::int from leads) as leads,
-              (select count(*)::int from websites) as websites`,
+              (select count(*)::int from websites) as websites,
+              (select count(*)::int from onboarding_projects) as onboarding_projects,
+              (select count(*)::int from onboarding_versions) as onboarding_versions`,
     );
-    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0, websites: 0 });
+    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0, websites: 0, onboarding_projects: 0, onboarding_versions: 0 });
   } finally {
     await pool.end();
   }

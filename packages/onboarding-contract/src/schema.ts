@@ -1,8 +1,8 @@
-// Getypeerde toegang tot het gecombineerde onboardingschema (Q1–Q4).
-// onboarding-schema.json is een exacte kopie van
+// Getypeerde toegang tot het gecombineerde onboardingschema (Q1–Q4), gedeeld door dashboard en API.
+// onboarding-schema.json is een exacte kopie van het normatieve
 // docs/fase-3-gecombineerde-onboarding-ontwikkelpakket-v0.1/fase-3-gecombineerde-onboarding-schema-v0.1.json;
-// schema.test.ts bewaakt dat beide gelijk blijven.
-import rawSchema from "./onboarding-schema.json";
+// apps/dashboard/lib/onboarding/onboarding.test.ts bewaakt dat beide gelijk blijven.
+import rawSchema from "./onboarding-schema.json" with { type: "json" };
 
 export type FieldType =
   | "text"
