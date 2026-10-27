@@ -6,13 +6,25 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { PoolClient } from "pg";
 import { buildApp } from "./app.js";
 import { findActiveMemberships } from "./auth/membershipResolver.js";
+import { findActiveReviewerAssignments } from "./auth/reviewerAssignmentResolver.js";
 import type { ExternalIdentity } from "./auth/types.js";
 import { createDb } from "./db.js";
 import * as schema from "./db/schema.js";
 import { createLead, findLead, InvalidLeadTenantError, type NewLead } from "./leads/leadRepository.js";
 import { findTenant } from "./tenants/tenantLoader.js";
-import { findCurrentOnboarding, saveOnboardingDraftInTransaction, submitOnboardingInTransaction } from "./onboarding/onboardingRepository.js";
+import {
+  findCurrentOnboarding,
+  saveOnboardingDraftInTransaction,
+  submitOnboardingInTransaction,
+  type SaveDraftInput,
+} from "./onboarding/onboardingRepository.js";
+import {
+  findReviewableOnboarding,
+  requestOnboardingChangesInTransaction,
+  type RequestChangesInput,
+} from "./onboarding/onboardingReviewRepository.js";
 import type { OnboardingStore } from "./routes/onboarding.js";
+import type { ReviewStore } from "./routes/review.js";
 import { completeAnswers } from "../../../packages/onboarding-contract/src/testFixtures.ts";
 import { findActiveWebsiteContext } from "./websites/websiteResolver.js";
 import { generateWebsitePublicKey, WEBSITE_PUBLIC_KEY_PATTERN } from "./websites/websitePublicKey.js";
@@ -119,6 +131,12 @@ const onboardingStoreFor = (tx: Tx): OnboardingStore => ({
   findCurrent: (tenantId) => findCurrentOnboarding(tx, tenantId),
   saveDraft: (input) => saveOnboardingDraftInTransaction(tx, input),
   submit: (input) => submitOnboardingInTransaction(tx, input),
+});
+
+// Real review repository inside the test's rollback transaction.
+const reviewStoreFor = (tx: Tx): ReviewStore => ({
+  findReviewable: (tenantId) => findReviewableOnboarding(tx, tenantId),
+  requestChanges: (input) => requestOnboardingChangesInTransaction(tx, input),
 });
 
 test("users: user kan worden aangemaakt", async () => {
@@ -245,6 +263,13 @@ async function createUser(tx: Tx) {
   const [user] = await tx.insert(schema.users).values({ authProviderUserId: uniqueId("auth") }).returning();
   assert.ok(user);
   return { user, identity: identityFor(user.authProviderUserId) };
+}
+
+// Maakt een user aan met een Owner-membership in elk van de opgegeven tenants.
+async function createMember(tx: Tx, ...tenantIds: string[]) {
+  const created = await createUser(tx);
+  await tx.insert(schema.memberships).values(tenantIds.map((tenantId) => ({ tenantId, userId: created.user.id, role: "owner" as const })));
+  return created;
 }
 
 async function createTenant(tx: Tx, status = "active") {
@@ -479,6 +504,8 @@ test("HTTP met echte resolver en loader: eigen tenant 200, andere tenant en disa
         tenantLoader: (tenantId) => findTenant(tx, tenantId),
         leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
         onboardingStore: onboardingStoreFor(tx),
+        reviewerAssignmentResolver: (identity) => findActiveReviewerAssignments(tx, identity),
+        reviewStore: reviewStoreFor(tx),
       },
       { logger: false },
     );
@@ -536,6 +563,8 @@ test("HTTP POST /v1/leads met echte repository: lead komt bij de eigen tenant, n
         tenantLoader: (tenantId) => findTenant(tx, tenantId),
         leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
         onboardingStore: onboardingStoreFor(tx),
+        reviewerAssignmentResolver: (identity) => findActiveReviewerAssignments(tx, identity),
+        reviewStore: reviewStoreFor(tx),
       },
       { logger: false },
     );
@@ -700,6 +729,33 @@ const draftInput = (tenantId: string, userId: string, baseVersion: number, answe
   projectBrief: { status: "incomplete_draft" },
 });
 
+// Fastify-app met de echte resolver, loader en repositories binnen de rollback-transactie van de test.
+const appWithRealRepositories = (tx: Tx) =>
+  buildApp(
+    {
+      authAdapter: {
+        authenticate: async (request) => {
+          const subject = request.headers["x-test-identity"];
+          return typeof subject === "string" ? { status: "authenticated", identity: identityFor(subject) } : { status: "anonymous" };
+        },
+      },
+      membershipResolver: (identity) => findActiveMemberships(tx, identity),
+      tenantLoader: (tenantId) => findTenant(tx, tenantId),
+      leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
+      onboardingStore: onboardingStoreFor(tx),
+      reviewerAssignmentResolver: (identity) => findActiveReviewerAssignments(tx, identity),
+      reviewStore: reviewStoreFor(tx),
+    },
+    { logger: false },
+  );
+
+const onboardingPayload = (baseVersion: number, answers: Record<string, unknown>) => ({
+  schema_id: "WESTEND_ONBOARDING",
+  schema_version: "0.1.0-design",
+  base_version: baseVersion,
+  answers,
+});
+
 test("onboarding: tenant zonder project heeft geen draft", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
@@ -825,27 +881,8 @@ test("HTTP onboarding met echte repository: Owner bewaart en hervat, Team Member
       { tenantId: tenant.id, userId: owner.user.id, role: "owner" },
       { tenantId: tenant.id, userId: member.user.id, role: "team_member" },
     ]);
-    const app = buildApp(
-      {
-        authAdapter: {
-          authenticate: async (request) => {
-            const subject = request.headers["x-test-identity"];
-            return typeof subject === "string" ? { status: "authenticated", identity: identityFor(subject) } : { status: "anonymous" };
-          },
-        },
-        membershipResolver: (identity) => findActiveMemberships(tx, identity),
-        tenantLoader: (tenantId) => findTenant(tx, tenantId),
-        leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
-        onboardingStore: onboardingStoreFor(tx),
-      },
-      { logger: false },
-    );
-    const payload = {
-      schema_id: "WESTEND_ONBOARDING",
-      schema_version: "0.1.0-design",
-      base_version: 0,
-      answers: { company_name: "Sterk & Fit Coaching", domain_status: "new", domain_name: "verborgen.nl" },
-    };
+    const app = appWithRealRepositories(tx);
+    const payload = onboardingPayload(0, { company_name: "Sterk & Fit Coaching", domain_status: "new", domain_name: "verborgen.nl" });
     try {
       const put = await app.inject({ method: "PUT", url: "/v1/onboarding/current", headers: { "x-test-identity": owner.identity.subject }, payload });
       assert.equal(put.statusCode, 200);
@@ -877,7 +914,7 @@ const versionCount = async (tx: Tx, tenantId: string) =>
 test("onboarding submit: concept wordt ingediend als nieuwe versie met status submitted", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
-    const { user } = await createUser(tx);
+    const { user } = await createMember(tx, tenant.id);
     await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0, { company_name: "Concept" }));
 
     const result = await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 1, { company_name: "Definitief" }));
@@ -895,7 +932,7 @@ test("onboarding submit: concept wordt ingediend als nieuwe versie met status su
 test("onboarding submit: zonder bestaand concept wordt het project direct als submitted aangemaakt", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
-    const { user } = await createUser(tx);
+    const { user } = await createMember(tx, tenant.id);
     const result = await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 0, { company_name: "Direct" }));
     assert.equal(result.status === "saved" && result.draft.version, 1);
     assert.equal((await projectRow(tx, tenant.id))?.status, "submitted");
@@ -919,7 +956,7 @@ test("onboarding submit: verouderde base_version geeft conflict zonder wijziging
 test("onboarding submit: na indienen kunnen submit en conceptopslag niets meer wijzigen", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
-    const { user } = await createUser(tx);
+    const { user } = await createMember(tx, tenant.id);
     await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 0, { company_name: "Ingediend" }));
 
     assert.deepEqual(await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 1)), { status: "not_editable" });
@@ -952,7 +989,7 @@ test("onboarding submit: indienen bij tenant A laat tenant B ongemoeid", async (
   await withRollback(async (tx) => {
     const tenantA = await createTenant(tx);
     const tenantB = await createTenant(tx);
-    const { user } = await createUser(tx);
+    const { user } = await createMember(tx, tenantA.id);
     await saveOnboardingDraftInTransaction(tx, draftInput(tenantB.id, user.id, 0, { company_name: "B" }));
     await submitOnboardingInTransaction(tx, draftInput(tenantA.id, user.id, 0, { company_name: "A" }));
 
@@ -970,33 +1007,13 @@ test("HTTP submit met echte repository: Owner dient in, daarna is PUT geblokkeer
       { tenantId: tenant.id, userId: owner.user.id, role: "owner" },
       { tenantId: tenant.id, userId: member.user.id, role: "team_member" },
     ]);
-    const app = buildApp(
-      {
-        authAdapter: {
-          authenticate: async (request) => {
-            const subject = request.headers["x-test-identity"];
-            return typeof subject === "string" ? { status: "authenticated", identity: identityFor(subject) } : { status: "anonymous" };
-          },
-        },
-        membershipResolver: (identity) => findActiveMemberships(tx, identity),
-        tenantLoader: (tenantId) => findTenant(tx, tenantId),
-        leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
-        onboardingStore: onboardingStoreFor(tx),
-      },
-      { logger: false },
-    );
-    const payload = (baseVersion: number, answers: Record<string, unknown>) => ({
-      schema_id: "WESTEND_ONBOARDING",
-      schema_version: "0.1.0-design",
-      base_version: baseVersion,
-      answers,
-    });
+    const app = appWithRealRepositories(tx);
     const ownerHeaders = { "x-test-identity": owner.identity.subject };
     try {
-      const forbidden = await app.inject({ method: "POST", url: "/v1/onboarding/current/submit", headers: { "x-test-identity": member.identity.subject }, payload: payload(0, completeAnswers()) });
+      const forbidden = await app.inject({ method: "POST", url: "/v1/onboarding/current/submit", headers: { "x-test-identity": member.identity.subject }, payload: onboardingPayload(0, completeAnswers()) });
       assert.equal(forbidden.statusCode, 403);
 
-      const submitted = await app.inject({ method: "POST", url: "/v1/onboarding/current/submit", headers: ownerHeaders, payload: payload(0, completeAnswers()) });
+      const submitted = await app.inject({ method: "POST", url: "/v1/onboarding/current/submit", headers: ownerHeaders, payload: onboardingPayload(0, completeAnswers()) });
       assert.equal(submitted.statusCode, 200);
       assert.equal(submitted.json().status, "submitted");
 
@@ -1004,9 +1021,870 @@ test("HTTP submit met echte repository: Owner dient in, daarna is PUT geblokkeer
       assert.equal(get.json().status, "submitted");
       assert.equal(get.json().project_brief.submitted_for_review, true);
 
-      const put = await app.inject({ method: "PUT", url: "/v1/onboarding/current", headers: ownerHeaders, payload: payload(1, { company_name: "Later" }) });
+      const put = await app.inject({ method: "PUT", url: "/v1/onboarding/current", headers: ownerHeaders, payload: onboardingPayload(1, { company_name: "Later" }) });
       assert.equal(put.statusCode, 409);
       assert.deepEqual(put.json(), { error: "not_editable" });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+// ---------- Onboarding audit-events ----------
+
+const auditEvents = (tx: Tx, tenantId: string) =>
+  tx.select().from(schema.onboardingAuditEvents).where(eq(schema.onboardingAuditEvents.tenantId, tenantId));
+
+test("onboarding audit: submit legt één event vast met tenant, project, actor en statusovergang, zonder inhoud", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createMember(tx, tenant.id);
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0, { company_name: "Concept" }));
+    assert.deepEqual(await auditEvents(tx, tenant.id), [], "conceptopslag is geen auditevent");
+
+    const result = await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 1, { company_name: "Geheime Inhoud BV" }));
+    assert.equal(result.status, "saved");
+
+    const [event, ...rest] = await auditEvents(tx, tenant.id);
+    assert.ok(event);
+    assert.deepEqual(rest, []);
+    // Alleen deze kolommen: geen antwoorden, Project Brief of andere klantdata.
+    assert.deepEqual(Object.keys(event).sort(), [
+      "createdAt", "eventType", "fromStatus", "id", "memberUserId", "projectId", "reviewerUserId", "tenantId", "toStatus", "version",
+    ]);
+    assert.match(event.id, /^[0-9a-f-]{36}$/);
+    assert.equal(event.tenantId, tenant.id);
+    assert.equal(event.projectId, result.status === "saved" ? result.draft.projectId : "");
+    assert.equal(event.memberUserId, user.id, "submitted uses the member actor");
+    assert.equal(event.reviewerUserId, null);
+    assert.equal(event.version, 2, "the submitted version");
+    assert.equal(event.eventType, "submitted");
+    assert.equal(event.fromStatus, "draft");
+    assert.equal(event.toStatus, "submitted");
+    assert.ok(event.createdAt instanceof Date);
+    assert.ok(!JSON.stringify(event).includes("Geheime Inhoud"));
+  });
+});
+
+test("onboarding audit: direct indienen zonder concept heeft geen vorige status", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createMember(tx, tenant.id);
+    await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 0));
+
+    const events = await auditEvents(tx, tenant.id);
+    assert.deepEqual(events.map((event) => [event.fromStatus, event.toStatus]), [[null, "submitted"]]);
+  });
+});
+
+test("onboarding audit: verouderde base_version, tweede submit en submit na een eerdere statusovergang leggen geen event vast", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createMember(tx, tenant.id);
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0));
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 1));
+
+    assert.deepEqual(await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 1)), { status: "conflict", currentVersion: 2 });
+    assert.equal((await auditEvents(tx, tenant.id)).length, 0);
+
+    assert.equal((await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 2))).status, "saved");
+    assert.deepEqual(await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 3)), { status: "not_editable" });
+    assert.equal((await auditEvents(tx, tenant.id)).length, 1, "alleen de geslaagde submit");
+
+    // Een project dat al een andere statusovergang heeft gehad, kan niet (opnieuw) worden ingediend.
+    for (const status of ["review_needed", "blocked"] as const) {
+      const other = await createTenant(tx);
+      await saveOnboardingDraftInTransaction(tx, draftInput(other.id, user.id, 0));
+      await tx.update(schema.onboardingProjects).set({ status }).where(eq(schema.onboardingProjects.tenantId, other.id));
+      assert.deepEqual(await submitOnboardingInTransaction(tx, draftInput(other.id, user.id, 1)), { status: "not_editable" }, status);
+      assert.equal((await auditEvents(tx, other.id)).length, 0, status);
+    }
+  });
+});
+
+test("onboarding audit: een fout tijdens de transactie laat geen event, versie of statuswijziging achter", async () => {
+  await withRollback(async (tx, client) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createMember(tx, tenant.id);
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0));
+
+    // De savepoint speelt de rol van de transactie in submitOnboarding.
+    const expectRolledBackSubmit = async (input: SaveDraftInput, setup?: string) => {
+      await client.query("savepoint submit_attempt");
+      if (setup) await client.query(setup);
+      await assert.rejects(submitOnboardingInTransaction(tx, input));
+      await client.query("rollback to savepoint submit_attempt");
+
+      const project = await projectRow(tx, tenant.id);
+      assert.deepEqual([project?.status, project?.currentVersion], ["draft", 1]);
+      assert.equal(await versionCount(tx, tenant.id), 1);
+      assert.equal((await auditEvents(tx, tenant.id)).length, 0);
+    };
+
+    // Fout vóór het event: de versie-insert faalt op een onbekende gebruiker.
+    await expectRolledBackSubmit(draftInput(tenant.id, randomUUID(), 1));
+    // Fout bij het event zelf, nadat versie en statusovergang al zijn geschreven. De tijdelijke
+    // constraint valt binnen de savepoint en verdwijnt bij de rollback.
+    await expectRolledBackSubmit(
+      draftInput(tenant.id, user.id, 1),
+      "alter table onboarding_audit_events add constraint test_forced_failure check (false) not valid",
+    );
+  });
+});
+
+type AuditEventValues = {
+  tenantId?: string;
+  memberUserId?: string | null;
+  reviewerUserId?: string | null;
+  eventType?: string;
+  fromStatus?: string | null;
+  toStatus?: string;
+  version?: number | null;
+};
+
+// Ingediend project van tenant A met een Owner, plus een helper die rechtstreeks (buiten de repository)
+// een audit-event invoegt. Standaard is dat een geldig submitted-event van die Owner voor dat project.
+async function auditFixture(tx: Tx, client: PoolClient) {
+  const tenantA = await createTenant(tx);
+  const tenantB = await createTenant(tx);
+  const { user } = await createMember(tx, tenantA.id);
+  const submitted = await submitOnboardingInTransaction(tx, draftInput(tenantA.id, user.id, 0));
+  const projectId = submitted.status === "saved" ? submitted.draft.projectId : "";
+  const insertEvent = (values: AuditEventValues = {}) => {
+    const {
+      tenantId = tenantA.id,
+      memberUserId = user.id,
+      reviewerUserId = null,
+      eventType = "submitted",
+      fromStatus = "draft",
+      toStatus = "submitted",
+      version = 1,
+    } = values;
+    return client.query(
+      `insert into onboarding_audit_events (tenant_id, project_id, member_user_id, reviewer_user_id, event_type, from_status, to_status, version)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [tenantId, projectId, memberUserId, reviewerUserId, eventType, fromStatus, toStatus, version],
+    );
+  };
+  return { tenantA, tenantB, user, insertEvent };
+}
+
+test("onboarding audit: database bewaakt tenantkoppeling, geldige waarden en onveranderlijkheid", async () => {
+  await withRollback(async (tx, client) => {
+    const { tenantA, tenantB, insertEvent } = await auditFixture(tx, client);
+
+    // Event van tenant B dat naar het project van tenant A wijst.
+    await expectPgError(client, "23503", () => insertEvent({ tenantId: tenantB.id }));
+    await expectPgError(client, "23503", () => insertEvent({ memberUserId: randomUUID() }));
+    await expectPgError(client, "23514", () => insertEvent({ eventType: "reopened" }));
+    await expectPgError(client, "23514", () => insertEvent({ fromStatus: "live" }));
+    await expectPgError(client, "23514", () => insertEvent({ toStatus: "draft" }));
+
+    // Onveranderlijk: bijwerken en verwijderen worden door de trigger geweigerd.
+    await expectPgError(client, "23001", () => client.query("update onboarding_audit_events set to_status = 'approved' where tenant_id = $1", [tenantA.id]));
+    await expectPgError(client, "23001", () => client.query("delete from onboarding_audit_events where tenant_id = $1", [tenantA.id]));
+    assert.equal((await auditEvents(tx, tenantA.id)).length, 1);
+  });
+});
+
+test("onboarding audit: een submitted-event heeft alleen draft of geen vorige status", async () => {
+  await withRollback(async (tx, client) => {
+    const { tenantA, insertEvent } = await auditFixture(tx, client);
+
+    for (const fromStatus of ["approved", "submitted", "blocked", "review_needed"]) {
+      await expectPgError(client, "23514", () => insertEvent({ fromStatus }));
+    }
+    await insertEvent({ fromStatus: null });
+    await insertEvent({ fromStatus: "draft" });
+
+    const fromStatuses = (await auditEvents(tx, tenantA.id)).map((event) => event.fromStatus);
+    // De echte submit in de fixture (zonder concept, dus null) plus de twee toegestane inserts.
+    assert.deepEqual(fromStatuses.sort(), ["draft", null, null]);
+  });
+});
+
+test("onboarding audit: de actor moet een membership hebben in de tenant van het event", async () => {
+  await withRollback(async (tx, client) => {
+    const { tenantA, tenantB, insertEvent } = await auditFixture(tx, client);
+    const outsider = await createMember(tx, tenantB.id);
+    const colleague = await createMember(tx, tenantA.id);
+
+    // Een gebruiker van tenant B kan geen event voor tenant A veroorzaken.
+    await expectPgError(client, "23503", () => insertEvent({ memberUserId: outsider.user.id }));
+    await insertEvent({ memberUserId: colleague.user.id });
+
+    const actors = (await auditEvents(tx, tenantA.id)).map((event) => event.memberUserId);
+    assert.ok(actors.includes(colleague.user.id));
+    assert.ok(!actors.includes(outsider.user.id));
+  });
+});
+
+test("HTTP submit met echte repository: auditevent met tenant en actor uit de auth-context; foutpaden laten geen event achter", async () => {
+  await withRollback(async (tx) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    const owner = await createUser(tx);
+    const outsider = await createUser(tx);
+    await tx.insert(schema.memberships).values([
+      { tenantId: tenantA.id, userId: owner.user.id, role: "owner" },
+      { tenantId: tenantB.id, userId: owner.user.id, role: "owner" },
+      { tenantId: tenantA.id, userId: outsider.user.id, role: "owner" },
+    ]);
+    const app = appWithRealRepositories(tx);
+    const submit = (subject: string, tenantId: string, payload: object) =>
+      app.inject({ method: "POST", url: "/v1/onboarding/current/submit", headers: { "x-test-identity": subject, "x-tenant-id": tenantId }, payload });
+    const incomplete = { ...completeAnswers() };
+    delete incomplete.contact_email;
+    try {
+      const failures: [number, string, () => Promise<{ statusCode: number; json: () => { error: string } }>][] = [
+        [400, "incomplete_answers", () => submit(owner.identity.subject, tenantB.id, onboardingPayload(0, incomplete))],
+        [400, "invalid_answers", () => submit(owner.identity.subject, tenantB.id, onboardingPayload(0, { ...completeAnswers(), brand_status: "rebranding" }))],
+        [400, "invalid_body", () => submit(owner.identity.subject, tenantB.id, { ...onboardingPayload(0, completeAnswers()), tenant_id: tenantA.id })],
+        [403, "forbidden", () => submit(outsider.identity.subject, tenantB.id, onboardingPayload(0, completeAnswers()))],
+      ];
+      for (const [status, error, request] of failures) {
+        const response = await request();
+        assert.equal(response.statusCode, status, error);
+        assert.equal(response.json().error, error);
+      }
+
+      // Verouderde base_version: eerst een concept (versie 1), dan indienen op basis van versie 0.
+      await app.inject({ method: "PUT", url: "/v1/onboarding/current", headers: { "x-test-identity": owner.identity.subject, "x-tenant-id": tenantB.id }, payload: onboardingPayload(0, { company_name: "B" }) });
+      const stale = await submit(owner.identity.subject, tenantB.id, onboardingPayload(0, completeAnswers()));
+      assert.equal(stale.statusCode, 409);
+      assert.equal((await auditEvents(tx, tenantB.id)).length, 0, "geen event na een foutpad");
+
+      const submitted = await submit(owner.identity.subject, tenantB.id, onboardingPayload(1, completeAnswers()));
+      assert.equal(submitted.statusCode, 200);
+      const second = await submit(owner.identity.subject, tenantB.id, onboardingPayload(2, completeAnswers()));
+      assert.deepEqual([second.statusCode, second.json().error], [409, "not_editable"]);
+
+      const events = await auditEvents(tx, tenantB.id);
+      assert.deepEqual(
+        events.map((event) => [event.tenantId, event.memberUserId, event.eventType, event.fromStatus, event.toStatus]),
+        [[tenantB.id, owner.user.id, "submitted", "draft", "submitted"]],
+      );
+      assert.equal(events[0]?.projectId, (await projectRow(tx, tenantB.id))?.id);
+      assert.equal((await auditEvents(tx, tenantA.id)).length, 0, "de andere tenant van de Owner blijft leeg");
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+// ---------- Westend-reviewer assignments ----------
+
+type AssignmentOverrides = Partial<Pick<typeof schema.onboardingReviewerAssignments.$inferInsert, "status" | "revokedAt">>;
+
+// Assigns userId as reviewer of tenantId, granted by a separate synthetic user.
+async function assignReviewer(tx: Tx, tenantId: string, userId: string, overrides: AssignmentOverrides = {}) {
+  const granter = await createUser(tx);
+  const [row] = await tx
+    .insert(schema.onboardingReviewerAssignments)
+    .values({ tenantId, userId, grantedBy: granter.user.id, ...overrides })
+    .returning();
+  assert.ok(row);
+  return row;
+}
+
+test("reviewer assignments: assignment wordt aangemaakt als active, zonder revoked_at", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createUser(tx);
+    const row = await assignReviewer(tx, tenant.id, user.id);
+    assert.equal(row.tenantId, tenant.id);
+    assert.equal(row.userId, user.id);
+    assert.equal(row.status, "active");
+    assert.equal(row.revokedAt, null);
+    assert.ok(row.createdAt instanceof Date);
+    assert.match(row.grantedBy, /^[0-9a-f-]{36}$/);
+  });
+});
+
+test("reviewer assignments: database bewaakt uniciteit, koppelingen, status en revoked_at", async () => {
+  await withRollback(async (tx, client) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createUser(tx);
+    const granter = await createUser(tx);
+    await assignReviewer(tx, tenant.id, user.id);
+    const insert = (tenantId: string, userId: string, grantedBy: string, status = "active", revokedAt: string | null = null) =>
+      client.query(
+        "insert into onboarding_reviewer_assignments (tenant_id, user_id, granted_by, status, revoked_at) values ($1, $2, $3, $4, $5)",
+        [tenantId, userId, grantedBy, status, revokedAt],
+      );
+    const other = await createUser(tx);
+
+    await expectPgError(client, "23505", () => insert(tenant.id, user.id, granter.user.id));
+    await expectPgError(client, "23503", () => insert(randomUUID(), other.user.id, granter.user.id));
+    await expectPgError(client, "23503", () => insert(tenant.id, randomUUID(), granter.user.id));
+    await expectPgError(client, "23503", () => insert(tenant.id, other.user.id, randomUUID()));
+    await expectPgError(client, "23514", () => insert(tenant.id, other.user.id, granter.user.id, "pending"));
+    // revoked_at is set exactly when the assignment is revoked.
+    await expectPgError(client, "23514", () => insert(tenant.id, other.user.id, granter.user.id, "revoked", null));
+    await expectPgError(client, "23514", () => insert(tenant.id, other.user.id, granter.user.id, "active", new Date().toISOString()));
+    await insert(tenant.id, other.user.id, granter.user.id, "revoked", new Date().toISOString());
+  });
+});
+
+test("findActiveReviewerAssignments: alleen actieve assignments in actieve tenants, alleen tenant- en user-ID", async () => {
+  await withRollback(async (tx) => {
+    const active = await createTenant(tx);
+    const revoked = await createTenant(tx);
+    const inactive = await createTenant(tx, "disabled");
+    const reviewer = await createUser(tx);
+    const otherReviewer = await createUser(tx);
+    await assignReviewer(tx, active.id, reviewer.user.id);
+    await assignReviewer(tx, revoked.id, reviewer.user.id, { status: "revoked", revokedAt: new Date() });
+    await assignReviewer(tx, inactive.id, reviewer.user.id);
+    await assignReviewer(tx, revoked.id, otherReviewer.user.id);
+
+    assert.deepEqual(await findActiveReviewerAssignments(tx, reviewer.identity), [{ tenantId: active.id, userId: reviewer.user.id }]);
+    assert.deepEqual(await findActiveReviewerAssignments(tx, otherReviewer.identity), [{ tenantId: revoked.id, userId: otherReviewer.user.id }]);
+    assert.deepEqual(await findActiveReviewerAssignments(tx, identityFor(uniqueId("onbekend"))), []);
+  });
+});
+
+test("findReviewableOnboarding: geen project of draft geeft null; submitted en latere statussen geven metadata", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createMember(tx, tenant.id);
+    assert.equal(await findReviewableOnboarding(tx, tenant.id), null);
+
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0, { company_name: "Concept" }));
+    assert.equal(await findReviewableOnboarding(tx, tenant.id), null, "een draft is niet reviewbaar");
+
+    await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 1, { company_name: "Ingediend" }));
+    const submitted = await findReviewableOnboarding(tx, tenant.id);
+    assert.deepEqual([submitted?.status, submitted?.version, submitted?.answers], ["submitted", 2, { company_name: "Ingediend" }]);
+    assert.ok(submitted?.updatedAt instanceof Date);
+
+    // Later statuses are not written by the application yet; set them as fixtures.
+    for (const status of ["review_needed", "blocked", "approved"] as const) {
+      await tx.update(schema.onboardingProjects).set({ status }).where(eq(schema.onboardingProjects.tenantId, tenant.id));
+      assert.equal((await findReviewableOnboarding(tx, tenant.id))?.status, status);
+    }
+    assert.equal(await findReviewableOnboarding(tx, (await createTenant(tx)).id), null, "andere tenant ziet niets");
+  });
+});
+
+test("findReviewableOnboarding: een open draft gaat voor een eerder goedgekeurd project", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const { user } = await createMember(tx, tenant.id);
+    await submitOnboardingInTransaction(tx, draftInput(tenant.id, user.id, 0));
+    await tx.update(schema.onboardingProjects).set({ status: "approved" }).where(eq(schema.onboardingProjects.tenantId, tenant.id));
+    assert.equal((await findReviewableOnboarding(tx, tenant.id))?.status, "approved");
+
+    // After approval the current repository lets the Owner start a new project (open decision O-5).
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, user.id, 0));
+    assert.equal(await findReviewableOnboarding(tx, tenant.id), null, "het actuele project is een draft");
+  });
+});
+
+test("HTTP review met echte repositories: toegang alleen met actieve assignment in een actieve tenant, zonder zelfreview", async () => {
+  await withRollback(async (tx) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    const inactive = await createTenant(tx, "disabled");
+    const owner = await createMember(tx, tenantA.id);
+    const reviewer = await createUser(tx);
+    const revokedReviewer = await createUser(tx);
+    const selfReviewer = await createMember(tx, tenantA.id);
+    await assignReviewer(tx, tenantA.id, reviewer.user.id);
+    await assignReviewer(tx, inactive.id, reviewer.user.id);
+    await assignReviewer(tx, tenantA.id, revokedReviewer.user.id, { status: "revoked", revokedAt: new Date() });
+    await assignReviewer(tx, tenantA.id, selfReviewer.user.id);
+    await submitOnboardingInTransaction(tx, draftInput(tenantA.id, owner.user.id, 0, completeAnswers()));
+
+    const app = appWithRealRepositories(tx);
+    const review = (subject: string, tenantId: string) =>
+      app.inject({ method: "GET", url: "/v1/review/onboarding", headers: { "x-test-identity": subject, "x-tenant-id": tenantId } });
+    try {
+      const ok = await review(reviewer.identity.subject, tenantA.id);
+      assert.equal(ok.statusCode, 200);
+      assert.deepEqual(Object.keys(ok.json()).sort(), ["missing_required_fields", "status", "updated_at", "version"]);
+      assert.deepEqual([ok.json().status, ok.json().version, ok.json().missing_required_fields], ["submitted", 1, 0]);
+      assert.ok(!ok.body.includes(String(completeAnswers().company_name)), "geen antwoorden in de response");
+
+      const denied: [string, string, number, string][] = [
+        [reviewer.identity.subject, tenantB.id, 403, "forbidden"],
+        [reviewer.identity.subject, inactive.id, 403, "forbidden"],
+        [revokedReviewer.identity.subject, tenantA.id, 403, "forbidden"],
+        [owner.identity.subject, tenantA.id, 403, "forbidden"],
+        [selfReviewer.identity.subject, tenantA.id, 403, "self_review_forbidden"],
+      ];
+      for (const [subject, tenantId, status, error] of denied) {
+        const response = await review(subject, tenantId);
+        assert.equal(response.statusCode, status, error);
+        assert.deepEqual(response.json(), { error });
+      }
+
+      // A reviewer without membership still cannot use the client onboarding routes.
+      const clientRoute = await app.inject({
+        method: "GET",
+        url: "/v1/onboarding/current",
+        headers: { "x-test-identity": reviewer.identity.subject, "x-tenant-id": tenantA.id },
+      });
+      assert.equal(clientRoute.statusCode, 403);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+test("HTTP review met echte repositories: draft en ontbrekende onboarding geven 404", async () => {
+  await withRollback(async (tx) => {
+    const withDraft = await createTenant(tx);
+    const empty = await createTenant(tx);
+    const owner = await createMember(tx, withDraft.id);
+    const reviewer = await createUser(tx);
+    await assignReviewer(tx, withDraft.id, reviewer.user.id);
+    await assignReviewer(tx, empty.id, reviewer.user.id);
+    await saveOnboardingDraftInTransaction(tx, draftInput(withDraft.id, owner.user.id, 0, { company_name: "Concept" }));
+
+    const app = appWithRealRepositories(tx);
+    try {
+      for (const tenant of [withDraft, empty]) {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/review/onboarding",
+          headers: { "x-test-identity": reviewer.identity.subject, "x-tenant-id": tenant.id },
+        });
+        assert.equal(response.statusCode, 404);
+        assert.deepEqual(response.json(), { error: "onboarding_not_found" });
+        assert.ok(!response.body.includes("Concept"));
+      }
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+// ---------- Review requests en reviewer-actor (submitted → review_needed) ----------
+
+const reviewRequests = (tx: Tx, tenantId: string) =>
+  tx.select().from(schema.onboardingReviewRequests).where(eq(schema.onboardingReviewRequests.tenantId, tenantId));
+const reviewRequestedEvents = async (tx: Tx, tenantId: string) =>
+  (await auditEvents(tx, tenantId)).filter((event) => event.eventType === "review_requested");
+
+const changesInput = (tenantId: string, reviewerUserId: string, baseVersion = 1): RequestChangesInput => ({
+  tenantId,
+  reviewerUserId,
+  baseVersion,
+  reasonCode: "missing_information",
+  note: "Lever de ontbrekende informatie over de dienstverlening aan.",
+});
+
+// Tenant with a submitted onboarding (version 1) and an assigned reviewer without membership.
+async function submittedForReview(tx: Tx, answers: Record<string, unknown> = { company_name: "Ingediend" }) {
+  const tenant = await createTenant(tx);
+  const owner = await createMember(tx, tenant.id);
+  const reviewer = await createUser(tx);
+  await assignReviewer(tx, tenant.id, reviewer.user.id);
+  await submitOnboardingInTransaction(tx, draftInput(tenant.id, owner.user.id, 0, answers));
+  const project = await projectRow(tx, tenant.id);
+  assert.ok(project);
+  return { tenant, owner, reviewer, project };
+}
+
+test("review requests: verzoek wordt opgeslagen met id, versie, reden, notitie en created_at", async () => {
+  await withRollback(async (tx) => {
+    const { tenant, reviewer, project } = await submittedForReview(tx);
+    const [row] = await tx
+      .insert(schema.onboardingReviewRequests)
+      .values({ tenantId: tenant.id, projectId: project.id, reviewerUserId: reviewer.user.id, version: 1, reasonCode: "rights_unclear", note: "Wie heeft de foto's gemaakt?" })
+      .returning();
+    assert.ok(row);
+    assert.match(row.id, /^[0-9a-f-]{36}$/);
+    assert.deepEqual([row.version, row.reasonCode, row.note], [1, "rights_unclear", "Wie heeft de foto's gemaakt?"]);
+    assert.ok(row.createdAt instanceof Date);
+  });
+});
+
+test("review requests: database bewaakt tenant, project, reviewer-tenant, reason_code, notitie en versie", async () => {
+  await withRollback(async (tx, client) => {
+    const { tenant, reviewer, project } = await submittedForReview(tx);
+    const other = await submittedForReview(tx);
+    const insert = (values: { tenantId?: string; projectId?: string; reviewerUserId?: string; version?: number; reasonCode?: string; note?: string } = {}) => {
+      const { tenantId = tenant.id, projectId = project.id, reviewerUserId = reviewer.user.id, version = 1, reasonCode = "out_of_scope", note = "Notitie" } = values;
+      return client.query(
+        "insert into onboarding_review_requests (tenant_id, project_id, reviewer_user_id, version, reason_code, note) values ($1, $2, $3, $4, $5, $6)",
+        [tenantId, projectId, reviewerUserId, version, reasonCode, note],
+      );
+    };
+
+    await expectPgError(client, "23503", () => insert({ tenantId: randomUUID() }));
+    await expectPgError(client, "23503", () => insert({ projectId: randomUUID() }));
+    // Project of the other tenant, and a reviewer who is only assigned to the other tenant.
+    await expectPgError(client, "23503", () => insert({ projectId: other.project.id }));
+    await expectPgError(client, "23503", () => insert({ reviewerUserId: other.reviewer.user.id }));
+    await expectPgError(client, "23514", () => insert({ reasonCode: "approved" }));
+    await expectPgError(client, "23514", () => insert({ note: "" }));
+    await expectPgError(client, "23514", () => insert({ note: "   " }));
+    await expectPgError(client, "23514", () => insert({ note: "x".repeat(2001) }));
+    await expectPgError(client, "23514", () => insert({ version: 0 }));
+    await insert({ note: "x".repeat(2000) });
+    assert.equal((await reviewRequests(tx, tenant.id)).length, 1);
+  });
+});
+
+test("audit actors: precies één actor, de juiste actorsoort per eventtype, en de trigger blijft werken", async () => {
+  await withRollback(async (tx, client) => {
+    const { tenantA, tenantB, user, insertEvent } = await auditFixture(tx, client);
+    const reviewer = await createUser(tx);
+    await assignReviewer(tx, tenantA.id, reviewer.user.id);
+    const otherReviewer = await createUser(tx);
+    await assignReviewer(tx, tenantB.id, otherReviewer.user.id);
+    const reviewRequested = { memberUserId: null, reviewerUserId: reviewer.user.id, eventType: "review_requested", fromStatus: "submitted", toStatus: "review_needed" };
+
+    await expectPgError(client, "23514", () => insertEvent({ reviewerUserId: reviewer.user.id }));
+    await expectPgError(client, "23514", () => insertEvent({ memberUserId: null }));
+    await expectPgError(client, "23514", () => insertEvent({ memberUserId: null, reviewerUserId: reviewer.user.id }));
+    await expectPgError(client, "23514", () => insertEvent({ ...reviewRequested, memberUserId: user.id, reviewerUserId: null }));
+    await expectPgError(client, "23514", () => insertEvent({ ...reviewRequested, fromStatus: "draft" }));
+    await expectPgError(client, "23514", () => insertEvent({ ...reviewRequested, toStatus: "approved" }));
+    await expectPgError(client, "23514", () => insertEvent({ ...reviewRequested, version: null }));
+    await expectPgError(client, "23514", () => insertEvent({ version: 0 }));
+    // A reviewer assigned to another tenant cannot be the actor of this tenant's event.
+    await expectPgError(client, "23503", () => insertEvent({ ...reviewRequested, reviewerUserId: otherReviewer.user.id }));
+
+    await insertEvent(reviewRequested);
+    // A submitted event without version, as written before migration 0010, stays valid.
+    await insertEvent({ fromStatus: null, version: null });
+
+    await expectPgError(client, "23001", () => client.query("update onboarding_audit_events set version = 9 where tenant_id = $1", [tenantA.id]));
+    await expectPgError(client, "23001", () => client.query("delete from onboarding_audit_events where event_type = 'review_requested' and tenant_id = $1", [tenantA.id]));
+    assert.equal((await reviewRequestedEvents(tx, tenantA.id)).length, 1);
+  });
+});
+
+test("requestOnboardingChanges: submitted wordt review_needed met precies één review request en één audit-event, zonder antwoorden", async () => {
+  await withRollback(async (tx) => {
+    const { tenant, reviewer, project } = await submittedForReview(tx, { company_name: "Geheime Inhoud BV" });
+    const result = await requestOnboardingChangesInTransaction(tx, changesInput(tenant.id, reviewer.user.id));
+    assert.deepEqual(result, { status: "review_needed", version: 1 });
+
+    const updated = await projectRow(tx, tenant.id);
+    assert.deepEqual([updated?.status, updated?.currentVersion], ["review_needed", 1]);
+    assert.ok(updated!.updatedAt >= project.updatedAt);
+
+    const [request, ...moreRequests] = await reviewRequests(tx, tenant.id);
+    assert.ok(request);
+    assert.deepEqual(moreRequests, []);
+    assert.deepEqual(Object.keys(request).sort(), ["createdAt", "id", "note", "projectId", "reasonCode", "reviewerUserId", "tenantId", "version"]);
+    assert.deepEqual([request.projectId, request.reviewerUserId, request.version, request.reasonCode], [project.id, reviewer.user.id, 1, "missing_information"]);
+
+    const [event, ...moreEvents] = await reviewRequestedEvents(tx, tenant.id);
+    assert.ok(event);
+    assert.deepEqual(moreEvents, []);
+    assert.deepEqual(
+      [event.projectId, event.memberUserId, event.reviewerUserId, event.fromStatus, event.toStatus, event.version],
+      [project.id, null, reviewer.user.id, "submitted", "review_needed", 1],
+    );
+    // Neither the request nor the event contains answers or Project Brief content; the event has no note.
+    assert.ok(!JSON.stringify([request, event]).includes("Geheime Inhoud"));
+    assert.ok(!JSON.stringify(event).includes(request.note));
+  });
+});
+
+test("requestOnboardingChanges: geen project, niet-submitted status en verouderde versie wijzigen niets", async () => {
+  await withRollback(async (tx) => {
+    const reviewer = await createUser(tx);
+    const empty = await createTenant(tx);
+    await assignReviewer(tx, empty.id, reviewer.user.id);
+    assert.deepEqual(await requestOnboardingChangesInTransaction(tx, changesInput(empty.id, reviewer.user.id)), { status: "not_found" });
+
+    const draftTenant = await createTenant(tx);
+    const draftOwner = await createMember(tx, draftTenant.id);
+    await assignReviewer(tx, draftTenant.id, reviewer.user.id);
+    await saveOnboardingDraftInTransaction(tx, draftInput(draftTenant.id, draftOwner.user.id, 0));
+    assert.deepEqual(await requestOnboardingChangesInTransaction(tx, changesInput(draftTenant.id, reviewer.user.id)), { status: "not_reviewable" });
+
+    for (const status of ["review_needed", "blocked", "approved"] as const) {
+      const { tenant, reviewer: assigned } = await submittedForReview(tx);
+      await tx.update(schema.onboardingProjects).set({ status }).where(eq(schema.onboardingProjects.tenantId, tenant.id));
+      assert.deepEqual(await requestOnboardingChangesInTransaction(tx, changesInput(tenant.id, assigned.user.id)), { status: "not_reviewable" }, status);
+      assert.equal((await projectRow(tx, tenant.id))?.status, status);
+      assert.equal((await reviewRequests(tx, tenant.id)).length, 0, status);
+    }
+
+    // Stale version: the client saved version 2 after the reviewer looked at version 1.
+    const stale = await createTenant(tx);
+    const staleOwner = await createMember(tx, stale.id);
+    await assignReviewer(tx, stale.id, reviewer.user.id);
+    await saveOnboardingDraftInTransaction(tx, draftInput(stale.id, staleOwner.user.id, 0));
+    await submitOnboardingInTransaction(tx, draftInput(stale.id, staleOwner.user.id, 1));
+    assert.deepEqual(await requestOnboardingChangesInTransaction(tx, changesInput(stale.id, reviewer.user.id, 1)), { status: "conflict", currentVersion: 2 });
+    assert.equal((await projectRow(tx, stale.id))?.status, "submitted");
+
+    for (const tenantId of [empty.id, draftTenant.id, stale.id]) {
+      assert.equal((await reviewRequests(tx, tenantId)).length, 0);
+      assert.equal((await reviewRequestedEvents(tx, tenantId)).length, 0);
+    }
+  });
+});
+
+test("requestOnboardingChanges: een tweede verzoek geeft not_reviewable en geen tweede overgang", async () => {
+  await withRollback(async (tx) => {
+    const { tenant, reviewer } = await submittedForReview(tx);
+    assert.equal((await requestOnboardingChangesInTransaction(tx, changesInput(tenant.id, reviewer.user.id))).status, "review_needed");
+    assert.deepEqual(await requestOnboardingChangesInTransaction(tx, changesInput(tenant.id, reviewer.user.id)), { status: "not_reviewable" });
+    assert.equal((await reviewRequests(tx, tenant.id)).length, 1);
+    assert.equal((await reviewRequestedEvents(tx, tenant.id)).length, 1);
+  });
+});
+
+test("requestOnboardingChanges: een fout bij review request of audit-event rolt status, verzoek en event samen terug", async () => {
+  await withRollback(async (tx, client) => {
+    const { tenant, reviewer } = await submittedForReview(tx);
+
+    // The savepoint plays the role of the transaction in requestOnboardingChanges.
+    const expectRolledBack = async (input: RequestChangesInput, setup?: string) => {
+      await client.query("savepoint request_changes_attempt");
+      if (setup) await client.query(setup);
+      await assert.rejects(requestOnboardingChangesInTransaction(tx, input));
+      await client.query("rollback to savepoint request_changes_attempt");
+
+      assert.equal((await projectRow(tx, tenant.id))?.status, "submitted");
+      assert.equal((await reviewRequests(tx, tenant.id)).length, 0);
+      assert.equal((await reviewRequestedEvents(tx, tenant.id)).length, 0);
+    };
+
+    // Failure at the first write, after authorization passed and the project was locked.
+    await expectRolledBack(
+      changesInput(tenant.id, reviewer.user.id),
+      "alter table onboarding_review_requests add constraint test_forced_failure check (false) not valid",
+    );
+    // Failure at the last write, after request and status change were written.
+    await expectRolledBack(
+      changesInput(tenant.id, reviewer.user.id),
+      "alter table onboarding_audit_events add constraint test_forced_failure check (false) not valid",
+    );
+  });
+});
+
+// Nothing changed: still submitted, no review request and no review_requested event.
+async function assertNoReviewChange(tx: Tx, tenantId: string, label: string) {
+  assert.equal((await projectRow(tx, tenantId))?.status, "submitted", label);
+  assert.equal((await reviewRequests(tx, tenantId)).length, 0, label);
+  assert.equal((await reviewRequestedEvents(tx, tenantId)).length, 0, label);
+}
+
+test("requestOnboardingChanges: de repository controleert assignment en zelfreview opnieuw, los van de HTTP-hook", async () => {
+  await withRollback(async (tx) => {
+    // Revoked after the hook would have run: a direct repository call must still be refused.
+    const revoked = await submittedForReview(tx);
+    await tx
+      .update(schema.onboardingReviewerAssignments)
+      .set({ status: "revoked", revokedAt: new Date() })
+      .where(eq(schema.onboardingReviewerAssignments.tenantId, revoked.tenant.id));
+    assert.deepEqual(await requestOnboardingChangesInTransaction(tx, changesInput(revoked.tenant.id, revoked.reviewer.user.id)), { status: "reviewer_forbidden" });
+    await assertNoReviewChange(tx, revoked.tenant.id, "revoked");
+
+    // No assignment at all, and an assignment that only exists for another tenant.
+    const missing = await submittedForReview(tx);
+    const stranger = await createUser(tx);
+    assert.deepEqual(await requestOnboardingChangesInTransaction(tx, changesInput(missing.tenant.id, stranger.user.id)), { status: "reviewer_forbidden" });
+    assert.deepEqual(await requestOnboardingChangesInTransaction(tx, changesInput(missing.tenant.id, revoked.reviewer.user.id)), { status: "reviewer_forbidden" });
+    await assertNoReviewChange(tx, missing.tenant.id, "missing");
+
+    // Active membership in the same tenant: self-review.
+    const self = await submittedForReview(tx);
+    await tx.insert(schema.memberships).values({ tenantId: self.tenant.id, userId: self.reviewer.user.id, role: "team_member" });
+    assert.deepEqual(await requestOnboardingChangesInTransaction(tx, changesInput(self.tenant.id, self.reviewer.user.id)), { status: "self_review_forbidden" });
+    await assertNoReviewChange(tx, self.tenant.id, "self-review");
+  });
+});
+
+test("requestOnboardingChanges: een disabled of invited membership blokkeert niet; een actieve assignment gaat door", async () => {
+  await withRollback(async (tx) => {
+    for (const status of ["disabled", "invited"] as const) {
+      const { tenant, reviewer } = await submittedForReview(tx);
+      await tx.insert(schema.memberships).values({ tenantId: tenant.id, userId: reviewer.user.id, role: "owner", status });
+      assert.deepEqual(await requestOnboardingChangesInTransaction(tx, changesInput(tenant.id, reviewer.user.id)), { status: "review_needed", version: 1 }, status);
+      assert.equal((await reviewRequestedEvents(tx, tenant.id)).length, 1, status);
+    }
+  });
+});
+
+test("versies: review requests en audit-events verwijzen naar een bestaande onboardingversie van hetzelfde project", async () => {
+  await withRollback(async (tx, client) => {
+    const { tenantA, insertEvent } = await auditFixture(tx, client);
+    const reviewer = await createUser(tx);
+    await assignReviewer(tx, tenantA.id, reviewer.user.id);
+    const [projectA] = await tx.select().from(schema.onboardingProjects).where(eq(schema.onboardingProjects.tenantId, tenantA.id));
+    assert.ok(projectA);
+    // Another project that does have a version 2.
+    const other = await createTenant(tx);
+    const otherOwner = await createMember(tx, other.id);
+    await saveOnboardingDraftInTransaction(tx, draftInput(other.id, otherOwner.user.id, 0));
+    await submitOnboardingInTransaction(tx, draftInput(other.id, otherOwner.user.id, 1));
+
+    const insertRequest = (version: number) =>
+      client.query(
+        "insert into onboarding_review_requests (tenant_id, project_id, reviewer_user_id, version, reason_code, note) values ($1, $2, $3, $4, 'missing_information', 'Notitie')",
+        [tenantA.id, projectA.id, reviewer.user.id, version],
+      );
+    await insertRequest(1);
+    // Project A only has version 1; version 2 exists for the other project, which must not count.
+    await expectPgError(client, "23503", () => insertRequest(2));
+    await expectPgError(client, "23503", () => insertRequest(99));
+
+    const reviewRequested = { memberUserId: null, reviewerUserId: reviewer.user.id, eventType: "review_requested", fromStatus: "submitted", toStatus: "review_needed" };
+    await insertEvent({ ...reviewRequested, version: 1 });
+    await expectPgError(client, "23503", () => insertEvent({ ...reviewRequested, version: 2 }));
+    await expectPgError(client, "23503", () => insertEvent({ version: 2 }));
+    // Legacy submitted event without version stays valid.
+    await insertEvent({ fromStatus: null, version: null });
+  });
+});
+
+test("HTTP request-changes met echte repositories: alleen de toegewezen reviewer wijzigt de eigen tenant", async () => {
+  await withRollback(async (tx) => {
+    const a = await submittedForReview(tx);
+    const b = await submittedForReview(tx);
+    const revoked = await createUser(tx);
+    await assignReviewer(tx, a.tenant.id, revoked.user.id, { status: "revoked", revokedAt: new Date() });
+    const selfReviewer = await createMember(tx, a.tenant.id);
+    await assignReviewer(tx, a.tenant.id, selfReviewer.user.id);
+
+    const app = appWithRealRepositories(tx);
+    const post = (subject: string, tenantId: string, payload: object = { base_version: 1, reason_code: "missing_information", note: "Graag aanvullen." }) =>
+      app.inject({ method: "POST", url: "/v1/review/onboarding/request-changes", headers: { "x-test-identity": subject, "x-tenant-id": tenantId }, payload });
+    try {
+      const denied: [string, string, number, string][] = [
+        [a.reviewer.identity.subject, b.tenant.id, 403, "forbidden"],
+        [a.owner.identity.subject, a.tenant.id, 403, "forbidden"],
+        [revoked.identity.subject, a.tenant.id, 403, "forbidden"],
+        [selfReviewer.identity.subject, a.tenant.id, 403, "self_review_forbidden"],
+      ];
+      for (const [subject, tenantId, status, error] of denied) {
+        const response = await post(subject, tenantId);
+        assert.equal(response.statusCode, status, error);
+        assert.deepEqual(response.json(), { error });
+      }
+
+      const invalid = await post(a.reviewer.identity.subject, a.tenant.id, { base_version: 1, reason_code: "missing_information", note: "x", tenant_id: b.tenant.id });
+      assert.deepEqual([invalid.statusCode, invalid.json()], [400, { error: "invalid_body" }]);
+      const stale = await post(a.reviewer.identity.subject, a.tenant.id, { base_version: 2, reason_code: "missing_information", note: "Graag aanvullen." });
+      assert.deepEqual([stale.statusCode, stale.json()], [409, { error: "version_conflict", current_version: 1 }]);
+      assert.equal((await reviewRequests(tx, a.tenant.id)).length, 0, "geen verzoek na een foutpad");
+
+      const ok = await post(a.reviewer.identity.subject, a.tenant.id);
+      assert.deepEqual([ok.statusCode, ok.json()], [200, { status: "review_needed", version: 1 }]);
+      const again = await post(a.reviewer.identity.subject, a.tenant.id);
+      assert.deepEqual([again.statusCode, again.json()], [409, { error: "not_reviewable" }]);
+
+      assert.equal((await projectRow(tx, a.tenant.id))?.status, "review_needed");
+      assert.deepEqual((await reviewRequests(tx, a.tenant.id)).map((row) => row.reviewerUserId), [a.reviewer.user.id]);
+      assert.equal((await reviewRequestedEvents(tx, a.tenant.id)).length, 1);
+      assert.equal((await projectRow(tx, b.tenant.id))?.status, "submitted", "tenant B blijft ongewijzigd");
+      assert.equal((await reviewRequests(tx, b.tenant.id)).length, 0);
+
+      const metadata = await app.inject({ method: "GET", url: "/v1/review/onboarding", headers: { "x-test-identity": a.reviewer.identity.subject, "x-tenant-id": a.tenant.id } });
+      assert.equal(metadata.json().status, "review_needed");
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+// ---------- Concept opslaan in review_needed (O-6) ----------
+
+// Tenant whose onboarding went through the real flow: submitted (v1), then review_needed by a reviewer.
+async function inReviewNeeded(tx: Tx) {
+  const setup = await submittedForReview(tx, { company_name: "Versie 1" });
+  assert.equal((await requestOnboardingChangesInTransaction(tx, changesInput(setup.tenant.id, setup.reviewer.user.id))).status, "review_needed");
+  return setup;
+}
+
+const versionsOf = (tx: Tx, tenantId: string) =>
+  tx
+    .select({ version: schema.onboardingVersions.version, answers: schema.onboardingVersions.answers, createdBy: schema.onboardingVersions.createdBy })
+    .from(schema.onboardingVersions)
+    .where(eq(schema.onboardingVersions.tenantId, tenantId))
+    .orderBy(schema.onboardingVersions.version);
+
+test("review_needed: Owner slaat een nieuwe onveranderlijke versie op; status blijft review_needed en er komt geen audit-event bij", async () => {
+  await withRollback(async (tx) => {
+    const { tenant, owner } = await inReviewNeeded(tx);
+    const eventsBefore = await auditEvents(tx, tenant.id);
+
+    const result = await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, owner.user.id, 1, { company_name: "Aangevuld" }));
+    assert.equal(result.status, "saved");
+    assert.deepEqual(result.status === "saved" && [result.draft.status, result.draft.version], ["review_needed", 2]);
+
+    const project = await projectRow(tx, tenant.id);
+    assert.deepEqual([project?.status, project?.currentVersion], ["review_needed", 2]);
+    assert.deepEqual(await versionsOf(tx, tenant.id), [
+      { version: 1, answers: { company_name: "Versie 1" }, createdBy: owner.user.id },
+      { version: 2, answers: { company_name: "Aangevuld" }, createdBy: owner.user.id },
+    ]);
+    assert.deepEqual((await auditEvents(tx, tenant.id)).map((event) => event.id), eventsBefore.map((event) => event.id), "concept opslaan is geen audit-event");
+    assert.equal((await findCurrentOnboarding(tx, tenant.id))?.status, "review_needed");
+  });
+});
+
+test("review_needed: verouderde base_version geeft conflict; opnieuw indienen geeft not_editable; niets wijzigt", async () => {
+  await withRollback(async (tx) => {
+    const { tenant, owner } = await inReviewNeeded(tx);
+    await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, owner.user.id, 1, { company_name: "Versie 2" }));
+    const eventCount = (await auditEvents(tx, tenant.id)).length;
+
+    assert.deepEqual(await saveOnboardingDraftInTransaction(tx, draftInput(tenant.id, owner.user.id, 1, { company_name: "Verouderd" })), {
+      status: "conflict",
+      currentVersion: 2,
+    });
+    // review_needed → submitted is a separate slice.
+    assert.deepEqual(await submitOnboardingInTransaction(tx, draftInput(tenant.id, owner.user.id, 2)), { status: "not_editable" });
+
+    const project = await projectRow(tx, tenant.id);
+    assert.deepEqual([project?.status, project?.currentVersion], ["review_needed", 2]);
+    assert.equal(await versionCount(tx, tenant.id), 2);
+    assert.equal((await auditEvents(tx, tenant.id)).length, eventCount);
+  });
+});
+
+test("review_needed: blocked blijft niet bewerkbaar, en opslaan in review_needed raakt een andere tenant niet", async () => {
+  await withRollback(async (tx) => {
+    const blocked = await submittedForReview(tx);
+    await tx.update(schema.onboardingProjects).set({ status: "blocked" }).where(eq(schema.onboardingProjects.tenantId, blocked.tenant.id));
+    assert.deepEqual(await saveOnboardingDraftInTransaction(tx, draftInput(blocked.tenant.id, blocked.owner.user.id, 1)), { status: "not_editable" });
+    assert.equal(await versionCount(tx, blocked.tenant.id), 1);
+
+    const a = await inReviewNeeded(tx);
+    const b = await inReviewNeeded(tx);
+    await saveOnboardingDraftInTransaction(tx, draftInput(a.tenant.id, a.owner.user.id, 1, { company_name: "Alleen A" }));
+    assert.deepEqual([(await projectRow(tx, b.tenant.id))?.currentVersion, await versionCount(tx, b.tenant.id)], [1, 1]);
+    assert.deepEqual((await findCurrentOnboarding(tx, b.tenant.id))?.answers, { company_name: "Versie 1" });
+  });
+});
+
+test("HTTP PUT in review_needed met echte repositories: Owner 200, verouderd 409; Team Member en reviewer 403", async () => {
+  await withRollback(async (tx) => {
+    const { tenant, owner, reviewer } = await inReviewNeeded(tx);
+    const member = await createUser(tx);
+    await tx.insert(schema.memberships).values({ tenantId: tenant.id, userId: member.user.id, role: "team_member" });
+    const eventCount = (await auditEvents(tx, tenant.id)).length;
+
+    const app = appWithRealRepositories(tx);
+    const put = (subject: string, baseVersion: number, url = "/v1/onboarding/current") =>
+      app.inject({ method: "PUT", url, headers: { "x-test-identity": subject, "x-tenant-id": tenant.id }, payload: onboardingPayload(baseVersion, { company_name: "Aangevuld" }) });
+    try {
+      for (const subject of [member.identity.subject, reviewer.identity.subject]) {
+        const denied = await put(subject, 1);
+        assert.deepEqual([denied.statusCode, denied.json()], [403, { error: "forbidden" }]);
+      }
+
+      const saved = await put(owner.identity.subject, 1);
+      assert.equal(saved.statusCode, 200);
+      assert.deepEqual([saved.json().status, saved.json().version], ["review_needed", 2]);
+      const stale = await put(owner.identity.subject, 1);
+      assert.deepEqual([stale.statusCode, stale.json()], [409, { error: "version_conflict", current_version: 2 }]);
+
+      const metadata = await app.inject({ method: "GET", url: "/v1/review/onboarding", headers: { "x-test-identity": reviewer.identity.subject, "x-tenant-id": tenant.id } });
+      assert.deepEqual([metadata.json().status, metadata.json().version], ["review_needed", 2]);
+      assert.equal((await auditEvents(tx, tenant.id)).length, eventCount);
     } finally {
       await app.close();
     }
@@ -1023,9 +1901,12 @@ test("testdata is na de tests teruggedraaid", async () => {
               (select count(*)::int from leads) as leads,
               (select count(*)::int from websites) as websites,
               (select count(*)::int from onboarding_projects) as onboarding_projects,
-              (select count(*)::int from onboarding_versions) as onboarding_versions`,
+              (select count(*)::int from onboarding_versions) as onboarding_versions,
+              (select count(*)::int from onboarding_audit_events) as onboarding_audit_events,
+              (select count(*)::int from onboarding_reviewer_assignments) as onboarding_reviewer_assignments,
+              (select count(*)::int from onboarding_review_requests) as onboarding_review_requests`,
     );
-    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0, websites: 0, onboarding_projects: 0, onboarding_versions: 0 });
+    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0, websites: 0, onboarding_projects: 0, onboarding_versions: 0, onboarding_audit_events: 0, onboarding_reviewer_assignments: 0, onboarding_review_requests: 0 });
   } finally {
     await pool.end();
   }

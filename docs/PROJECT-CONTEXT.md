@@ -1,8 +1,8 @@
 # Conversion Engine — projectcontext
 
-**Laatst bijgewerkt:** 23 oktober 2026
+**Laatst bijgewerkt:** 27 oktober 2026
 **Status:** Fase 5, technische implementatie met kleine verticale slices
-**Laatste gepushte technische commit:** `513a07f feat: add onboarding submission`
+**Laatste gepushte commit:** `36c4d1f docs: record onboarding submission`
 
 Dit document is een compacte startcontext voor nieuwe Codex- en Claude-sessies. Het vervangt de leidende bron- en architectuurdocumenten niet.
 
@@ -50,10 +50,13 @@ Conversion Engine is een multi-tenant SaaS-dashboard voor leadopvolging, website
 - Officieel indienen via `POST /v1/onboarding/current/submit`: volledige server-side validatie, transactionele statusovergang `draft` → `submitted`; daarna weigert de API wijzigingen (`409 not_editable`).
 - Next.js BFF-route `/api/onboarding` met server-side sessie, token refresh en 409-conflictafhandeling.
 - Dashboard-onboarding hervat server-side drafts na refresh en slaat wijzigingen automatisch op; uploads zijn voorlopig metadata-only.
+- Bij officieel indienen legt de API in dezelfde transactie een onveranderlijk `submitted`-audit-event vast (`onboarding_audit_events`, migraties `0007` en `0008`). De tabel ondersteunt inmiddels ook `review_requested`, met aparte member- en reviewer-actoren (migratie `0010`) en tenantveilige versie-FK's (migratie `0011`). Tenant en actor komen uit de auth-context en zijn met samengestelde foreign keys aan dezelfde tenant gekoppeld. De slices zijn onafhankelijk gecontroleerd.
+- Westend-reviewer foundation: tabel `onboarding_reviewer_assignments` (migratie `0009`), een aparte `/v1/review`-scope met eigen `ReviewerContext` (verplichte `x-tenant-id`, actieve toewijzing vereist, zelfreview geweigerd) en `GET /v1/review/onboarding` met alleen status, versie, `updated_at` en het aantal ontbrekende verplichte velden.
+- Eerste reviewactie `submitted` → `review_needed` (`POST /v1/review/onboarding/request-changes`, migratie `0010`). In één transactie worden een review request met reden en notitie (tabel `onboarding_review_requests`), de statusovergang en een `review_requested`-audit-event opgeslagen. Audit-events ondersteunen een aparte member- en reviewer-actor, met precies één per event. De repository controleert de reviewer-toewijzing (actief op het moment van de transactie) en zelfreview opnieuw binnen de transactie. Review requests en audit-events verwijzen via een FK naar een bestaande onboardingversie (migratie `0011`).
 - Het dashboard dient de onboarding in via de BFF (`POST /api/onboarding`), wacht daarbij een lopende autosave af, en toont een ingediende onboarding na refresh alleen-lezen.
 - Zelfstandige demo-site in `apps/demo-site`, visueel gecontroleerd op desktop en mobiel.
 
-De laatste gecontroleerde status na de submit-slice: groene API-typecheck, lint, 96 API-tests en 51 database-tests; 127 dashboardtests; dashboard- en API-builds groen. Er is geen nieuwe migratie nodig (de status `submitted` bestond al in `0006`); 7 migraties zijn geregistreerd. De handmatige ZITADEL-smoketest voor conceptopslag en de handmatige submit-smoketest met een echte sessie zijn geslaagd: indienen werkt en de onboarding wordt daarna alleen-lezen.
+De laatste gepushte technische slice is onboarding indienen; de daaropvolgende audit- en reviewwijzigingen staan nog als lokale wijzigingen in het worktree. De actuele onafhankelijke controle van die wijzigingen is groen: API-lint, API-typecheck, API-build, 108 API-tests, 77 database-tests en `git diff --check`. De migraties `0007` t/m `0011` zijn handmatig op de lokale testdatabase toegepast; de ontwikkeldatabase is niet gemigreerd. De handmatige ZITADEL-smoketests voor conceptopslag en indienen zijn eerder geslaagd: indienen werkt en de onboarding wordt daarna alleen-lezen.
 
 ## Belangrijk onderscheid: twee intakeflows
 
@@ -84,7 +87,11 @@ De bijbehorende schema- en contractspecificaties staan in dezelfde map. De demo 
 
 De backendfundering voor identiteit, tenantisolatie, leads en website-resolutie is aanwezig. De dashboard-frontend bevat de volledige onboardingflow: Q1–Q4, 20 onderdelen, schema-gedreven validatie, conditionele velden, optionele assetmetadata en de eindcontrole met Project Brief-preview. De flow is via `/api/onboarding` gekoppeld aan server-side draftopslag.
 
-Antwoorden worden per tenant en project versieerbaar opgeslagen. Bij refresh wordt een bestaand concept hervat; gelijktijdige wijzigingen leiden tot een expliciete 409-conflictkeuze. De vier uploadvelden bewaren voorlopig alleen metadata: echte uploads, scanning en private opslag zijn nog niet gebouwd. Officieel indienen is aanwezig: de status `submitted` wordt server-side afgedwongen en een ingediende onboarding is niet meer automatisch wijzigbaar. De handmatige submit-smoketest met een echte ZITADEL-sessie is geslaagd. Westend-review, audit-events, prefill en productiehandoff blijven volgende slices.
+Antwoorden worden per tenant en project versieerbaar opgeslagen. Bij refresh wordt een bestaand concept hervat; gelijktijdige wijzigingen leiden tot een expliciete 409-conflictkeuze. De vier uploadvelden bewaren voorlopig alleen metadata: echte uploads, scanning en private opslag zijn nog niet gebouwd. Officieel indienen is aanwezig: de status `submitted` wordt server-side afgedwongen en een ingediende onboarding is niet meer automatisch wijzigbaar. Audit-events bij indienen en de eerste revieweractie `submitted` → `review_needed` zijn geïmplementeerd. De migraties `0007` t/m `0011` staan alleen op de lokale testdatabase; de ontwikkeldatabase is nog niet gemigreerd. Een audit-dashboard, prefill, de overige reviewstatusovergangen, reviewnotitiezichtbaarheid en productiehandoff blijven volgende slices.
+
+Voor de reviewworkflow is richting B besloten (zie `docs/reviewworkflow-foundation-decision.md`): een reviewer-toewijzing per tenant, los van memberships, zonder zelfreview. Gebouwd zijn het autorisatiefundament (toewijzingen, de reviewer-scope en een read-only metadata-endpoint) en de eerste reviewactie `submitted` → `review_needed`. Die slaat een review request met notitie op en registreert de reviewer als aparte audit-actor.
+
+Nog niet gebouwd: bewerken door de Owner in `review_needed`, de overige reviewstatusovergangen (`resubmitted`, `blocked`, `approved`, `reopened`), het tonen van reviewnotities aan de klant, beheer van toewijzingen (O-2 en O-3 staan open), inzage in antwoorden door reviewers, MFA/AAL en RLS. Migraties `0009` t/m `0011` staan alleen op de lokale testdatabase, handmatig toegepast; de ontwikkeldatabase is niet gemigreerd. De voortgang van slices en besluiten staat in `docs/PROJECT-CHECKLIST.md`.
 
 De handmatige bouw en verzending van koude outreach-demo’s blijven buiten de Conversion Engine. De backend- en databasefundering wordt niet opnieuw gebouwd voor de demo-opbouw.
 
@@ -103,7 +110,7 @@ De handmatige bouw en verzending van koude outreach-demo’s blijven buiten de C
 
 - Productie-MFA/AAL-handhaving.
 - PostgreSQL-RLS en tenantveilige samengestelde relaties.
-- Onboarding audit-events, reviewworkflow en Project Brief-goedkeuring.
+- Reviewworkflow: Owner-bewerken en opnieuw indienen, overige statusovergangen, reviewnotitiezichtbaarheid, beheer van toewijzingen en inzage-logging (O-2, O-3 en O-5 t/m O-10 in `docs/reviewworkflow-foundation-decision.md`), daarna het audit-dashboard en de Project Brief-goedkeuring.
 - Veilige uploads, scanning en private opslag.
 - Publieke lead-ingest met anti-spam, rate limiting, outbox en idempotency.
 - CRM-contacten, pipeline, taken en verdere leadopvolging.

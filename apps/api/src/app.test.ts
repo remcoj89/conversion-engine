@@ -121,6 +121,13 @@ function setup(t: TestContext, dependencies: Partial<AppDependencies> = {}) {
       tenantLoader: spyTenantLoader().tenantLoader,
       leadCreator: spyLeadCreator().leadCreator,
       onboardingStore: unusedOnboardingStore,
+      reviewerAssignmentResolver: async () => [],
+      reviewStore: {
+        findReviewable: async () => null,
+        requestChanges: async () => {
+          throw new Error("not used in these tests");
+        },
+      },
       ...dependencies,
     },
     { logger: false },
@@ -324,6 +331,13 @@ function setupWithLogs(t: TestContext, dependencies: Partial<AppDependencies>) {
       tenantLoader: spyTenantLoader().tenantLoader,
       leadCreator: spyLeadCreator().leadCreator,
       onboardingStore: unusedOnboardingStore,
+      reviewerAssignmentResolver: async () => [],
+      reviewStore: {
+        findReviewable: async () => null,
+        requestChanges: async () => {
+          throw new Error("not used in these tests");
+        },
+      },
       ...dependencies,
     },
     { logger: { level: "info", stream: { write: (line: string) => logs.push(line) } } },

@@ -168,6 +168,174 @@ export const onboardingVersions = pgTable(
   ],
 );
 
+export const reviewerAssignmentStatuses = ["active", "revoked"] as const;
+
+// Explicit, per-tenant permission for a Westend reviewer to review that tenant's onboarding.
+// Deliberately separate from memberships: a reviewer is not part of the client's team and gets
+// no client permissions. Assignments are revoked, never deleted, so they stay traceable.
+export const onboardingReviewerAssignments = pgTable(
+  "onboarding_reviewer_assignments",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    status: text("status", { enum: reviewerAssignmentStatuses }).notNull().default("active"),
+    // Who granted the assignment; required so every grant is traceable to a person.
+    grantedBy: uuid("granted_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.userId] }),
+    // Reviewer lookups start from the authenticated user and only need active assignments.
+    index("onboarding_reviewer_assignments_active_user_idx").on(table.userId).where(sql`${table.status} = 'active'`),
+    check("onboarding_reviewer_assignments_status_check", sql`${table.status} in ('active', 'revoked')`),
+    // revoked_at is set exactly when the assignment is revoked.
+    check(
+      "onboarding_reviewer_assignments_revoked_at_check",
+      sql`(${table.status} = 'active' and ${table.revokedAt} is null) or (${table.status} = 'revoked' and ${table.revokedAt} is not null)`,
+    ),
+  ],
+);
+
+// Event types and their transitions are enforced per type by the check constraints below.
+export const onboardingAuditEventTypes = ["submitted", "review_requested"] as const;
+
+// Onveranderlijk auditlog van statusovergangen. Bevat bewust geen antwoorden, Project Brief-inhoud
+// of reviewnotities, alleen wie (actor), waar (tenant + project), wat (eventtype) en de statusovergang.
+// Een databasetrigger in migratie 0007 weigert UPDATE en DELETE.
+// Migration 0010 renamed actor_user_id to member_user_id and added the reviewer actor and version;
+// migration 0011 ties a non-null version to an existing onboarding version.
+export const onboardingAuditEvents = pgTable(
+  "onboarding_audit_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    projectId: uuid("project_id").notNull(),
+    // Exactly one actor per event: a client member or a Westend reviewer, each tenant-safe.
+    memberUserId: uuid("member_user_id").references(() => users.id),
+    reviewerUserId: uuid("reviewer_user_id"),
+    eventType: text("event_type", { enum: onboardingAuditEventTypes }).notNull(),
+    // Null als het project in dezelfde transactie is aangemaakt en er dus geen vorige status was.
+    fromStatus: text("from_status", { enum: onboardingProjectStatuses }),
+    toStatus: text("to_status", { enum: onboardingProjectStatuses }).notNull(),
+    // Project version the event refers to. Nullable only for submitted events written before 0010.
+    version: integer("version"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Tenantveilig: een event kan alleen naar een project van dezelfde tenant verwijzen.
+    foreignKey({
+      name: "onboarding_audit_events_project_tenant_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [onboardingProjects.tenantId, onboardingProjects.id],
+    }),
+    // Tenant-safe member actor: a membership in the same tenant as the event.
+    foreignKey({
+      name: "onboarding_audit_events_member_membership_fk",
+      columns: [table.tenantId, table.memberUserId],
+      foreignColumns: [memberships.tenantId, memberships.userId],
+    }),
+    // Tenant-safe reviewer actor: a reviewer assignment for the same tenant as the event.
+    foreignKey({
+      name: "onboarding_audit_events_reviewer_assignment_fk",
+      columns: [table.tenantId, table.reviewerUserId],
+      foreignColumns: [onboardingReviewerAssignments.tenantId, onboardingReviewerAssignments.userId],
+    }),
+    // A non-null version must exist for this project. NULL (legacy submitted events) is not checked.
+    foreignKey({
+      name: "onboarding_audit_events_project_version_fk",
+      columns: [table.projectId, table.version],
+      foreignColumns: [onboardingVersions.projectId, onboardingVersions.version],
+    }),
+    index("onboarding_audit_events_tenant_project_idx").on(table.tenantId, table.projectId),
+    check("onboarding_audit_events_event_type_check", sql`${table.eventType} in ('submitted', 'review_requested')`),
+    check(
+      "onboarding_audit_events_from_status_check",
+      sql`${table.fromStatus} is null or ${table.fromStatus} in ('draft', 'submitted', 'review_needed', 'blocked', 'approved')`,
+    ),
+    check("onboarding_audit_events_to_status_check", sql`${table.toStatus} in ('draft', 'submitted', 'review_needed', 'blocked', 'approved')`),
+    check("onboarding_audit_events_version_check", sql`${table.version} is null or ${table.version} >= 1`),
+    check("onboarding_audit_events_one_actor_check", sql`num_nonnulls(${table.memberUserId}, ${table.reviewerUserId}) = 1`),
+    // Each event type has a fixed kind of actor: clients submit, reviewers request changes.
+    check(
+      "onboarding_audit_events_actor_kind_check",
+      sql`(${table.eventType} = 'submitted' and ${table.memberUserId} is not null) or (${table.eventType} = 'review_requested' and ${table.reviewerUserId} is not null)`,
+    ),
+    // Een submitted-event beschrijft altijd een overgang naar "submitted".
+    check("onboarding_audit_events_submitted_check", sql`${table.eventType} <> 'submitted' or ${table.toStatus} = 'submitted'`),
+    // Indienen kan alleen vanuit een concept, of zonder vorige status als de submit het project aanmaakt.
+    check(
+      "onboarding_audit_events_submitted_from_status_check",
+      sql`${table.eventType} <> 'submitted' or ${table.fromStatus} is null or ${table.fromStatus} = 'draft'`,
+    ),
+    // A change request always moves a submitted onboarding to review_needed, for a known version.
+    check(
+      "onboarding_audit_events_review_requested_check",
+      sql`${table.eventType} <> 'review_requested' or (${table.fromStatus} = 'submitted' and ${table.toStatus} = 'review_needed' and ${table.version} is not null)`,
+    ),
+  ],
+);
+
+export const reviewRequestReasonCodes = ["missing_information", "rights_unclear", "out_of_scope"] as const;
+
+// Upper bound for a reviewer note: room for a clear request, not a document.
+export const REVIEW_NOTE_MAX_LENGTH = 2000;
+
+// A reviewer's request to complete or clarify a submitted onboarding. Holds the note for the client;
+// the note is kept out of the audit log because free text may contain client content.
+export const onboardingReviewRequests = pgTable(
+  "onboarding_review_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    projectId: uuid("project_id").notNull(),
+    reviewerUserId: uuid("reviewer_user_id").notNull(),
+    // Project version the reviewer looked at.
+    version: integer("version").notNull(),
+    reasonCode: text("reason_code", { enum: reviewRequestReasonCodes }).notNull(),
+    note: text("note").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Tenant-safe: the request belongs to a project of the same tenant.
+    foreignKey({
+      name: "onboarding_review_requests_project_tenant_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [onboardingProjects.tenantId, onboardingProjects.id],
+    }),
+    // Tenant-safe: the reviewer is assigned to the same tenant.
+    foreignKey({
+      name: "onboarding_review_requests_reviewer_assignment_fk",
+      columns: [table.tenantId, table.reviewerUserId],
+      foreignColumns: [onboardingReviewerAssignments.tenantId, onboardingReviewerAssignments.userId],
+    }),
+    // The reviewed version must exist for this project.
+    foreignKey({
+      name: "onboarding_review_requests_project_version_fk",
+      columns: [table.projectId, table.version],
+      foreignColumns: [onboardingVersions.projectId, onboardingVersions.version],
+    }),
+    index("onboarding_review_requests_tenant_project_idx").on(table.tenantId, table.projectId),
+    check("onboarding_review_requests_version_check", sql`${table.version} >= 1`),
+    check(
+      "onboarding_review_requests_reason_code_check",
+      sql`${table.reasonCode} in ('missing_information', 'rights_unclear', 'out_of_scope')`,
+    ),
+    check("onboarding_review_requests_note_not_blank_check", sql`char_length(btrim(${table.note})) > 0`),
+    check("onboarding_review_requests_note_length_check", sql`char_length(${table.note}) <= ${sql.raw(String(REVIEW_NOTE_MAX_LENGTH))}`),
+  ],
+);
+
 // Server-side BFF sessions. Only the SHA-256 hash of the session ID and encrypted tokens are stored.
 export const bffSessions = pgTable(
   "bff_sessions",

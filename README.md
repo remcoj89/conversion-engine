@@ -61,6 +61,9 @@ ZITADEL beheert identiteit en authenticatie. De eigen PostgreSQL-database blijft
 - Gecombineerde Q1–Q4-onboarding met 123 schema-velden, een gedeelde contractlaag en server-side Project Brief-generatie.
 - Server-side onboardingconcepten met versiebeheer via migratie `0006`; `GET/PUT /v1/onboarding/current`.
 - Officieel indienen via `POST /v1/onboarding/current/submit`; status `submitted` wordt server-side afgedwongen.
+- Onveranderlijke audit-events bij het officieel indienen van een onboarding via migraties `0007` en `0008`.
+- Westend-reviewer-toewijzingen per tenant (migratie `0009`) en het read-only metadata-endpoint `GET /v1/review/onboarding`.
+- Eerste reviewactie `submitted` → `review_needed` via `POST /v1/review/onboarding/request-changes`, met een review request en een `review_requested`-audit-event in één transactie (migraties `0010` en `0011`).
 - `/api/onboarding` in de Next.js BFF met server-side sessie, token refresh en conflictcontrole; alleen een Owner heeft `onboarding:manage`.
 - Dashboard-onboarding hervat concepten na refresh en slaat antwoorden automatisch op; bestanden zijn voorlopig metadata-only.
 - Zelfstandige demowebsite in `apps/demo-site`; zie [het implementatierecord](docs/demo-site-implementation-record-v1.0.md).
@@ -82,7 +85,7 @@ De beveiligingsgrens van de Fastify API, bijgewerkt naar de huidige code (23 okt
 
 Nog niet aanwezig: MFA/AAL-handhaving en PostgreSQL-RLS. De resolver gaat uit van één geconfigureerde issuer en koppelt op `auth_provider_user_id`/OIDC-subject; issuer-opslag en de samengestelde uniqueness-regel zijn nog niet besloten.
 
-Voor onboarding zijn echte uploads/private opslag, reviewworkflow, audit-events, prefill en productiehandoff nog niet aanwezig; draftopslag en officieel indienen zijn er wel. De huidige draftopslag is lokaal gebouwd en getest. De handmatige smoketest met een echte ZITADEL-sessie is geslaagd: login, conceptopslag, refresh en opnieuw inloggen behouden de ingevulde antwoorden.
+Voor onboarding zijn echte uploads/private opslag, prefill en productiehandoff nog niet aanwezig; draftopslag, officieel indienen, audit-events en de eerste reviewerworkflow zijn er wel. De huidige draftopslag is lokaal gebouwd en getest. De handmatige smoketest met een echte ZITADEL-sessie is geslaagd: login, conceptopslag, refresh en opnieuw inloggen behouden de ingevulde antwoorden.
 
 Websites kunnen server-side worden geregistreerd met een opaque publieke key; een resolver koppelt een actieve key aan precies één actieve tenant. Voor leads staan nog open: de publieke formulier-endpoint, anti-spam, rate limiting, outbox, externe verwerking en idempotency/duplicate prevention.
 
@@ -126,7 +129,101 @@ Een ingelogde Owner kan de volledige onboarding officieel indienen; conceptopsla
 - Na indienen weigert de API elke verdere `PUT` of submit met `409 not_editable`.
 - De BFF proxyt `POST /api/onboarding` met hetzelfde sessie- en tokenpatroon. Het dashboard wacht een lopende autosave af, stuurt de laatste antwoorden mee in de submit, toont de indienstatus en maakt de vragen daarna alleen-lezen; na een refresh laadt de status `submitted` opnieuw.
 
-De handmatige submit-smoketest met een echte ZITADEL-sessie is geslaagd: de onboarding is ingediend en daarna alleen-lezen. Echte uploads, de reviewworkflow, audit-events, prefill en de productiehandoff blijven buiten scope.
+De handmatige submit-smoketest met een echte ZITADEL-sessie is geslaagd: de onboarding is ingediend en daarna alleen-lezen. Echte uploads, de reviewworkflow, prefill en de productiehandoff blijven buiten scope. Audit-events bij indienen zijn in een volgende slice toegevoegd; zie hieronder.
+
+## Onboarding audit-events — 27 oktober 2026
+
+Het officieel indienen van een onboarding wordt vastgelegd in een onveranderlijk auditlog.
+
+- De eerste audit-event-slice introduceerde `onboarding_audit_events` (migratie `0007`, aangescherpt in `0008`) met `member_user_id` als actor voor klantacties. Migratie `0010` voegde `reviewer_user_id`, `version` en het eventtype `review_requested` toe; migratie `0011` koppelde versies aan echte onboardingversies.
+- Een `submitted`-event gaat altijd naar status `submitted`, en de database staat als vorige status alleen `draft` toe, of leeg als het project bij het indienen zelf is aangemaakt. Een `review_requested`-event gaat altijd van `submitted` naar `review_needed`.
+- Het event wordt geschreven in dezelfde transactie als de nieuwe onboardingversie en de statusovergang. Bij een fout of rollback blijft er geen event achter.
+- Tenant en actor komen uitsluitend uit de auth-context. Samengestelde foreign keys borgen dit ook in de database: `(tenant_id, project_id)` verwijst naar een project van dezelfde tenant, `(tenant_id, member_user_id)` naar een membership van dezelfde tenant en `(tenant_id, reviewer_user_id)` naar een reviewer assignment van dezelfde tenant.
+- Het event bevat geen antwoorden, Project Brief-inhoud, tokens of andere klantdata.
+- Een databasetrigger weigert `UPDATE` en `DELETE` op de tabel. Deze trigger is handmatig aan de gegenereerde migratie toegevoegd, omdat Drizzle triggers niet modelleert.
+- Database- en API-tests dekken het geslaagde event en de foutpaden: onvolledige of ongeldige antwoorden, verouderde `base_version`, tweede submit, submit na een eerdere statusovergang, een fout tijdens de transactie, een mismatch tussen tenant en project, een actor uit een andere tenant en een ongeldige vorige status.
+
+Een audit-endpoint of audit-dashboard bestaat nog niet. De migraties `0007` t/m `0011` zijn alleen op de lokale testdatabase toegepast; de ontwikkeldatabase is nog niet gemigreerd. De audit- en review-slices zijn onafhankelijk gecontroleerd.
+
+## Westend-reviewer foundation — 27 oktober 2026
+
+Gebouwd volgens richting B uit [`docs/reviewworkflow-foundation-decision.md`](docs/reviewworkflow-foundation-decision.md): een reviewer-toewijzing per tenant, los van memberships. Zelfreview is verboden. Klantrollen blijven `owner` en `team_member`.
+
+- Nieuwe tabel `onboarding_reviewer_assignments` (migratie `0009`):
+  - kolommen `tenant_id`, `user_id`, `status`, `granted_by`, `created_at` en `revoked_at`;
+  - primaire sleutel `(tenant_id, user_id)`;
+  - FK's naar `tenants` en `users`, voor zowel de user als `granted_by`;
+  - `status` is alleen `active` of `revoked`, en `revoked_at` is gevuld precies wanneer de toewijzing is ingetrokken;
+  - een partial index op `user_id` voor actieve toewijzingen.
+- `findActiveReviewerAssignments` geeft alleen actieve toewijzingen in actieve tenants, en alleen tenant- en user-ID.
+- Reviewroutes staan in een **aparte** Fastify-scope met een eigen hook en een eigen `ReviewerContext`. De bestaande auth-hook voor klantroutes is niet gewijzigd.
+  - Een reviewer zonder membership kan klantroutes niet gebruiken (403).
+  - In de reviewscope is `x-tenant-id` verplicht en moet het een UUID zijn (anders 400).
+  - De header moet overeenkomen met een actieve toewijzing (anders 403).
+  - Een actieve membership in dezelfde tenant geeft 403 `self_review_forbidden`.
+  - Tenantwaarden uit body of query worden niet gebruikt.
+- `GET /v1/review/onboarding` geeft alleen `status`, `version`, `updated_at` en `missing_required_fields`. Dat laatste wordt berekend met het gedeelde onboarding-contract.
+  - Reviewbaar zijn `submitted`, `review_needed`, `blocked` en `approved`.
+  - Een draft of een ontbrekende onboarding geeft `404 onboarding_not_found`.
+  - Antwoorden en Project Brief-inhoud komen nooit in de response.
+
+**Nog niet gebouwd in deze slice** (`submitted` → `review_needed` en reviewnotities zijn daarna toegevoegd, zie hieronder):
+
+- reviewstatusovergangen;
+- reviewnotities;
+- beheer van toewijzingen (geen endpoint, script of UI; O-2 en O-3 staan open);
+- inzage in antwoorden door reviewers, en het loggen daarvan;
+- MFA/AAL-handhaving en PostgreSQL-RLS.
+
+Migratie `0009` is handmatig toegepast op de lokale testdatabase; de testworkflow migreert niet automatisch. De ontwikkeldatabase is niet gemigreerd. De voortgang staat in [`docs/PROJECT-CHECKLIST.md`](docs/PROJECT-CHECKLIST.md).
+
+## Westend-review: wijzigingen aanvragen — 27 oktober 2026
+
+Een toegewezen reviewer kan een ingediende onboarding terugzetten naar `review_needed` met een reden en een notitie voor de klant. Dit is de eerste echte reviewstatusovergang.
+
+- `POST /v1/review/onboarding/request-changes` staat in de reviewer-scope en gebruikt uitsluitend de `ReviewerContext`. Tenant en reviewer komen uit de context.
+  - De body bevat precies `base_version` (≥ 1), `reason_code` (`missing_information`, `rights_unclear` of `out_of_scope`) en `note` (verplicht, na trimmen 1 tot 2.000 tekens). Een `tenant_id`, `project_id` of ander veld geeft `400 invalid_body`.
+  - Succes geeft `200 { "status": "review_needed", "version": n }`.
+  - Fouten: `401`, `400 invalid_body`, `403 forbidden`, `403 self_review_forbidden`, `404 onboarding_not_found`, `409 version_conflict` en `409 not_reviewable`. Interne fouten geven een generieke `500`.
+- `requestOnboardingChanges` doet in **één transactie**, met een rijlock op het project:
+  1. controleren dat de status `submitted` is en dat `base_version` actueel is;
+  2. een review request opslaan;
+  3. de status op `review_needed` zetten;
+  4. een `review_requested`-audit-event opslaan.
+
+  Faalt één stap, dan rolt alles terug. Een tweede verzoek ziet `review_needed` en krijgt `409 not_reviewable`.
+- **Reviewer-autorisatie wordt twee keer gecontroleerd:** in de reviewer-hook en opnieuw in de repository, binnen dezelfde transactie en vóór elke wijziging.
+  - De toewijzing moet op het moment van de transactie bestaan en `active` zijn; anders volgt `reviewer_forbidden` → `403 forbidden`.
+  - Een actieve membership in dezelfde tenant geeft `self_review_forbidden` → `403`. Een `disabled` of `invited` membership blokkeert niet.
+  - De volgorde is: toewijzing, dan membership (beide met `FOR SHARE`), dan het project (`FOR UPDATE`). Een intrekking tijdens de transactie wacht daardoor tot de transactie klaar is.
+  - Zo kan ook een directe repository-aanroep de hook niet omzeilen.
+- **Versies verwijzen naar echte onboardingversies** (migratie `0011`): `onboarding_review_requests(project_id, version)` en `onboarding_audit_events(project_id, version)` hebben een FK naar `onboarding_versions(project_id, version)`. Oudere `submitted`-events met `version = NULL` blijven geldig.
+- **Nieuwe tabel `onboarding_review_requests`** (migratie `0010`):
+  - kolommen `id`, `tenant_id`, `project_id`, `reviewer_user_id`, `version`, `reason_code`, `note` en `created_at`;
+  - samengestelde FK's naar het project van dezelfde tenant en naar de reviewer-toewijzing van dezelfde tenant;
+  - checks op de reden-code, `version` ≥ 1, een niet-lege notitie en maximaal 2.000 tekens.
+
+  De **reviewnotitie staat alleen in deze tabel**, niet in het auditlog.
+- **Audit-events kennen nu twee soorten actor:**
+  - `member_user_id` voor klantacties: de voormalige `actor_user_id`, hernoemd zodat bestaande events en de membership-FK intact blijven;
+  - `reviewer_user_id` voor Westend-reviewacties, met een FK naar de reviewer-toewijzing van dezelfde tenant.
+
+  Regels:
+  - precies één actor per event;
+  - `submitted` heeft altijd een member, `review_requested` altijd een reviewer;
+  - `review_requested` gaat altijd van `submitted` naar `review_needed`, met een `version`.
+
+  Indienen legt voortaan ook de versie vast. Oudere `submitted`-events zonder versie blijven geldig. De immutability-trigger is ongewijzigd.
+
+**Nog niet gebouwd:**
+
+- bewerken door de Owner in `review_needed`;
+- `review_needed` → `submitted` (`resubmitted`), `blocked`, `approved` en `reopened`;
+- het tonen van reviewnotities aan de klant;
+- beheer van toewijzingen (O-2) en de ZITADEL-inrichting voor Westend-medewerkers (O-3);
+- MFA/AAL en RLS.
+
+Migraties `0010` en `0011` zijn alleen op de lokale testdatabase toegepast, handmatig (de testworkflow migreert niet automatisch). De ontwikkeldatabase is niet gemigreerd.
 
 ## Authenticatiebesluit — 21 oktober 2026
 

@@ -28,7 +28,8 @@ export type SaveDraftInput = Readonly<{
   projectBrief: Record<string, unknown>;
 }>;
 
-// Concept opslaan houdt het project op "draft"; indienen zet het in dezelfde transactie op "submitted".
+// Saving a draft keeps the editable status (draft or review_needed, see statusAfterSave);
+// submitting moves a draft to "submitted" in the same transaction.
 export type SaveTarget = "draft" | "submitted";
 
 export type SaveDraftResult =
@@ -69,8 +70,8 @@ export async function saveOnboardingDraft(db: Db, input: SaveDraftInput): Promis
   return db.transaction((tx) => saveOnboardingVersionInTransaction(tx, input, "draft"));
 }
 
-// Indienen: zelfde lock- en versieregels, plus statusovergang draft → submitted in dezelfde transactie.
-// Faalt een stap, dan rolt de hele transactie terug: geen nieuwe versie en geen statuswijziging.
+// Indienen: zelfde lock- en versieregels, plus statusovergang draft → submitted en een auditevent
+// in dezelfde transactie. Faalt een stap, dan rolt alles terug: geen versie, statuswijziging of event.
 export async function submitOnboarding(db: Db, input: SaveDraftInput): Promise<SaveDraftResult> {
   return db.transaction((tx) => saveOnboardingVersionInTransaction(tx, input, "submitted"));
 }
@@ -85,9 +86,19 @@ export function submitOnboardingInTransaction(tx: Tx, input: SaveDraftInput): Pr
   return saveOnboardingVersionInTransaction(tx, input, "submitted");
 }
 
-type Tx = Pick<Db, "select" | "insert" | "update">;
+export type Tx = Pick<Db, "select" | "insert" | "update">;
 
-// Alleen een project met status "draft" (of nog geen project) kan een nieuwe versie krijgen.
+// Editing rule for an existing project: the status after saving a new version, or null when the
+// project is not editable for this target. A draft may be saved or submitted. In review_needed the
+// Owner may only save drafts and the status stays review_needed (decision O-6); resubmitting is a
+// separate slice. submitted, blocked and approved are not editable.
+export function statusAfterSave(current: OnboardingStatus, target: SaveTarget): OnboardingStatus | null {
+  if (current === "draft") return target;
+  if (current === "review_needed" && target === "draft") return "review_needed";
+  return null;
+}
+
+// Saves a new version when there is no project yet or statusAfterSave allows editing the existing one.
 async function saveOnboardingVersionInTransaction(tx: Tx, input: SaveDraftInput, target: SaveTarget): Promise<SaveDraftResult> {
   const [project] = await tx
     .select()
@@ -112,11 +123,12 @@ async function saveOnboardingVersionInTransaction(tx: Tx, input: SaveDraftInput,
     if (!created) return { status: "conflict", currentVersion: 1 };
     ({ id: projectId, currentVersion: version, status, updatedAt } = created);
   } else {
-    if (project.status !== "draft") return { status: "not_editable" };
+    const nextStatus = statusAfterSave(project.status, target);
+    if (!nextStatus) return { status: "not_editable" };
     if (project.currentVersion !== input.baseVersion) return { status: "conflict", currentVersion: project.currentVersion };
     const [updated] = await tx
       .update(schema.onboardingProjects)
-      .set({ currentVersion: sql`${schema.onboardingProjects.currentVersion} + 1`, status: target, updatedAt: sql`now()` })
+      .set({ currentVersion: sql`${schema.onboardingProjects.currentVersion} + 1`, status: nextStatus, updatedAt: sql`now()` })
       .where(and(eq(schema.onboardingProjects.id, project.id), eq(schema.onboardingProjects.tenantId, input.tenantId)))
       .returning();
     if (!updated) throw new Error("Onboarding project update returned no row");
@@ -133,6 +145,20 @@ async function saveOnboardingVersionInTransaction(tx: Tx, input: SaveDraftInput,
     projectBrief: input.projectBrief,
     createdBy: input.userId,
   });
+
+  // Het auditevent hoort bij dezelfde transactie: rolt de submit terug, dan verdwijnt het event mee.
+  // Bewust zonder antwoorden of Project Brief; tenant en actor komen uit de auth-context via input.
+  if (target === "submitted") {
+    await tx.insert(schema.onboardingAuditEvents).values({
+      tenantId: input.tenantId,
+      projectId,
+      memberUserId: input.userId,
+      eventType: "submitted",
+      fromStatus: project?.status ?? null,
+      toStatus: status,
+      version,
+    });
+  }
 
   return {
     status: "saved",

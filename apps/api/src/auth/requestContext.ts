@@ -12,7 +12,7 @@ export type RequestContextResult =
   | { status: "invalid_tenant" }
   | { status: "membership_forbidden" };
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Selects the tenant for this request. The tenant always comes from a membership, never from the request.
 export function resolveRequestContext(

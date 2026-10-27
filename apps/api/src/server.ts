@@ -1,11 +1,13 @@
 import { buildApp } from "./app.js";
 import { readAuthConfig, type AuthConfig } from "./auth/authConfig.js";
 import { findActiveMemberships } from "./auth/membershipResolver.js";
+import { findActiveReviewerAssignments } from "./auth/reviewerAssignmentResolver.js";
 import { createDiscoveredKeySet } from "./auth/oidcDiscovery.js";
 import { createZitadelAdapter } from "./auth/zitadelAdapter.js";
 import { createDb } from "./db.js";
 import { createLead } from "./leads/leadRepository.js";
 import { findCurrentOnboarding, saveOnboardingDraft, submitOnboarding } from "./onboarding/onboardingRepository.js";
+import { findReviewableOnboarding, requestOnboardingChanges } from "./onboarding/onboardingReviewRepository.js";
 import { findTenant } from "./tenants/tenantLoader.js";
 
 const HOST = "127.0.0.1";
@@ -32,12 +34,17 @@ const app = buildApp({
     keys: createDiscoveredKeySet(authConfig.issuer),
   }),
   membershipResolver: (identity) => findActiveMemberships(db, identity),
+  reviewerAssignmentResolver: (identity) => findActiveReviewerAssignments(db, identity),
   tenantLoader: (tenantId) => findTenant(db, tenantId),
   leadCreator: (tenantId, lead) => createLead(db, tenantId, lead),
   onboardingStore: {
     findCurrent: (tenantId) => findCurrentOnboarding(db, tenantId),
     saveDraft: (input) => saveOnboardingDraft(db, input),
     submit: (input) => submitOnboarding(db, input),
+  },
+  reviewStore: {
+    findReviewable: (tenantId) => findReviewableOnboarding(db, tenantId),
+    requestChanges: (input) => requestOnboardingChanges(db, input),
   },
 });
 

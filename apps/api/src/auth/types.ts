@@ -29,3 +29,12 @@ export interface AuthAdapter {
 
 // Keeps the HTTP layer independent of Drizzle/PostgreSQL.
 export type MembershipResolver = (identity: ExternalIdentity) => Promise<readonly Membership[]>;
+
+// An active Westend reviewer assignment for one tenant. Not a membership and not a tenant role.
+export type ReviewerAssignment = {
+  tenantId: string;
+  userId: string;
+};
+
+// Returns only active assignments in active tenants; an unknown user yields an empty list.
+export type ReviewerAssignmentResolver = (identity: ExternalIdentity) => Promise<readonly ReviewerAssignment[]>;

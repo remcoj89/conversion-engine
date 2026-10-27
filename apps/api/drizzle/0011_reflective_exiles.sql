@@ -1,0 +1,2 @@
+ALTER TABLE "onboarding_audit_events" ADD CONSTRAINT "onboarding_audit_events_project_version_fk" FOREIGN KEY ("project_id","version") REFERENCES "public"."onboarding_versions"("project_id","version") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "onboarding_review_requests" ADD CONSTRAINT "onboarding_review_requests_project_version_fk" FOREIGN KEY ("project_id","version") REFERENCES "public"."onboarding_versions"("project_id","version") ON DELETE no action ON UPDATE no action;

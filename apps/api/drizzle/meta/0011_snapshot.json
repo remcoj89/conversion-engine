@@ -1,0 +1,1258 @@
+{
+  "id": "8df2442f-0276-4d7f-b3ae-bd7223a6a78a",
+  "prevId": "7f05bd51-2ad7-4ade-b55b-509c78af91cb",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.bff_sessions": {
+      "name": "bff_sessions",
+      "schema": "",
+      "columns": {
+        "id_hash": {
+          "name": "id_hash",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "access_token_enc": {
+          "name": "access_token_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refresh_token_enc": {
+          "name": "refresh_token_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id_token_enc": {
+          "name": "id_token_enc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_expires_at": {
+          "name": "access_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "absolute_expires_at": {
+          "name": "absolute_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "bff_sessions_id_hash_check": {
+          "name": "bff_sessions_id_hash_check",
+          "value": "\"bff_sessions\".\"id_hash\" ~ '^[0-9a-f]{64}$'"
+        },
+        "bff_sessions_access_token_enc_check": {
+          "name": "bff_sessions_access_token_enc_check",
+          "value": "\"bff_sessions\".\"access_token_enc\" like 'v1.%'"
+        },
+        "bff_sessions_refresh_token_enc_check": {
+          "name": "bff_sessions_refresh_token_enc_check",
+          "value": "\"bff_sessions\".\"refresh_token_enc\" like 'v1.%'"
+        },
+        "bff_sessions_id_token_enc_check": {
+          "name": "bff_sessions_id_token_enc_check",
+          "value": "\"bff_sessions\".\"id_token_enc\" is null or \"bff_sessions\".\"id_token_enc\" like 'v1.%'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.leads": {
+      "name": "leads",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "message": {
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'new'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "leads_tenant_id_idx": {
+          "name": "leads_tenant_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "leads_tenant_id_tenants_id_fk": {
+          "name": "leads_tenant_id_tenants_id_fk",
+          "tableFrom": "leads",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "leads_status_check": {
+          "name": "leads_status_check",
+          "value": "\"leads\".\"status\" in ('new')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.memberships": {
+      "name": "memberships",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "memberships_user_id_idx": {
+          "name": "memberships_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "memberships_tenant_id_tenants_id_fk": {
+          "name": "memberships_tenant_id_tenants_id_fk",
+          "tableFrom": "memberships",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "memberships_user_id_users_id_fk": {
+          "name": "memberships_user_id_users_id_fk",
+          "tableFrom": "memberships",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "memberships_tenant_id_user_id_pk": {
+          "name": "memberships_tenant_id_user_id_pk",
+          "columns": [
+            "tenant_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "memberships_role_check": {
+          "name": "memberships_role_check",
+          "value": "\"memberships\".\"role\" in ('owner', 'team_member')"
+        },
+        "memberships_status_check": {
+          "name": "memberships_status_check",
+          "value": "\"memberships\".\"status\" in ('active', 'invited', 'disabled')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.onboarding_audit_events": {
+      "name": "onboarding_audit_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "member_user_id": {
+          "name": "member_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reviewer_user_id": {
+          "name": "reviewer_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_status": {
+          "name": "from_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "to_status": {
+          "name": "to_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "onboarding_audit_events_tenant_project_idx": {
+          "name": "onboarding_audit_events_tenant_project_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "onboarding_audit_events_tenant_id_tenants_id_fk": {
+          "name": "onboarding_audit_events_tenant_id_tenants_id_fk",
+          "tableFrom": "onboarding_audit_events",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_audit_events_member_user_id_users_id_fk": {
+          "name": "onboarding_audit_events_member_user_id_users_id_fk",
+          "tableFrom": "onboarding_audit_events",
+          "tableTo": "users",
+          "columnsFrom": [
+            "member_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_audit_events_project_tenant_fk": {
+          "name": "onboarding_audit_events_project_tenant_fk",
+          "tableFrom": "onboarding_audit_events",
+          "tableTo": "onboarding_projects",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_audit_events_member_membership_fk": {
+          "name": "onboarding_audit_events_member_membership_fk",
+          "tableFrom": "onboarding_audit_events",
+          "tableTo": "memberships",
+          "columnsFrom": [
+            "tenant_id",
+            "member_user_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_audit_events_reviewer_assignment_fk": {
+          "name": "onboarding_audit_events_reviewer_assignment_fk",
+          "tableFrom": "onboarding_audit_events",
+          "tableTo": "onboarding_reviewer_assignments",
+          "columnsFrom": [
+            "tenant_id",
+            "reviewer_user_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_audit_events_project_version_fk": {
+          "name": "onboarding_audit_events_project_version_fk",
+          "tableFrom": "onboarding_audit_events",
+          "tableTo": "onboarding_versions",
+          "columnsFrom": [
+            "project_id",
+            "version"
+          ],
+          "columnsTo": [
+            "project_id",
+            "version"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "onboarding_audit_events_event_type_check": {
+          "name": "onboarding_audit_events_event_type_check",
+          "value": "\"onboarding_audit_events\".\"event_type\" in ('submitted', 'review_requested')"
+        },
+        "onboarding_audit_events_from_status_check": {
+          "name": "onboarding_audit_events_from_status_check",
+          "value": "\"onboarding_audit_events\".\"from_status\" is null or \"onboarding_audit_events\".\"from_status\" in ('draft', 'submitted', 'review_needed', 'blocked', 'approved')"
+        },
+        "onboarding_audit_events_to_status_check": {
+          "name": "onboarding_audit_events_to_status_check",
+          "value": "\"onboarding_audit_events\".\"to_status\" in ('draft', 'submitted', 'review_needed', 'blocked', 'approved')"
+        },
+        "onboarding_audit_events_version_check": {
+          "name": "onboarding_audit_events_version_check",
+          "value": "\"onboarding_audit_events\".\"version\" is null or \"onboarding_audit_events\".\"version\" >= 1"
+        },
+        "onboarding_audit_events_one_actor_check": {
+          "name": "onboarding_audit_events_one_actor_check",
+          "value": "num_nonnulls(\"onboarding_audit_events\".\"member_user_id\", \"onboarding_audit_events\".\"reviewer_user_id\") = 1"
+        },
+        "onboarding_audit_events_actor_kind_check": {
+          "name": "onboarding_audit_events_actor_kind_check",
+          "value": "(\"onboarding_audit_events\".\"event_type\" = 'submitted' and \"onboarding_audit_events\".\"member_user_id\" is not null) or (\"onboarding_audit_events\".\"event_type\" = 'review_requested' and \"onboarding_audit_events\".\"reviewer_user_id\" is not null)"
+        },
+        "onboarding_audit_events_submitted_check": {
+          "name": "onboarding_audit_events_submitted_check",
+          "value": "\"onboarding_audit_events\".\"event_type\" <> 'submitted' or \"onboarding_audit_events\".\"to_status\" = 'submitted'"
+        },
+        "onboarding_audit_events_submitted_from_status_check": {
+          "name": "onboarding_audit_events_submitted_from_status_check",
+          "value": "\"onboarding_audit_events\".\"event_type\" <> 'submitted' or \"onboarding_audit_events\".\"from_status\" is null or \"onboarding_audit_events\".\"from_status\" = 'draft'"
+        },
+        "onboarding_audit_events_review_requested_check": {
+          "name": "onboarding_audit_events_review_requested_check",
+          "value": "\"onboarding_audit_events\".\"event_type\" <> 'review_requested' or (\"onboarding_audit_events\".\"from_status\" = 'submitted' and \"onboarding_audit_events\".\"to_status\" = 'review_needed' and \"onboarding_audit_events\".\"version\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.onboarding_projects": {
+      "name": "onboarding_projects",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "current_version": {
+          "name": "current_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "onboarding_projects_one_active_per_tenant": {
+          "name": "onboarding_projects_one_active_per_tenant",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"onboarding_projects\".\"status\" <> 'approved'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "onboarding_projects_tenant_id_tenants_id_fk": {
+          "name": "onboarding_projects_tenant_id_tenants_id_fk",
+          "tableFrom": "onboarding_projects",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "onboarding_projects_tenant_id_id_unique": {
+          "name": "onboarding_projects_tenant_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "onboarding_projects_status_check": {
+          "name": "onboarding_projects_status_check",
+          "value": "\"onboarding_projects\".\"status\" in ('draft', 'submitted', 'review_needed', 'blocked', 'approved')"
+        },
+        "onboarding_projects_current_version_check": {
+          "name": "onboarding_projects_current_version_check",
+          "value": "\"onboarding_projects\".\"current_version\" >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.onboarding_review_requests": {
+      "name": "onboarding_review_requests",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reviewer_user_id": {
+          "name": "reviewer_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason_code": {
+          "name": "reason_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "onboarding_review_requests_tenant_project_idx": {
+          "name": "onboarding_review_requests_tenant_project_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "onboarding_review_requests_tenant_id_tenants_id_fk": {
+          "name": "onboarding_review_requests_tenant_id_tenants_id_fk",
+          "tableFrom": "onboarding_review_requests",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_review_requests_project_tenant_fk": {
+          "name": "onboarding_review_requests_project_tenant_fk",
+          "tableFrom": "onboarding_review_requests",
+          "tableTo": "onboarding_projects",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_review_requests_reviewer_assignment_fk": {
+          "name": "onboarding_review_requests_reviewer_assignment_fk",
+          "tableFrom": "onboarding_review_requests",
+          "tableTo": "onboarding_reviewer_assignments",
+          "columnsFrom": [
+            "tenant_id",
+            "reviewer_user_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_review_requests_project_version_fk": {
+          "name": "onboarding_review_requests_project_version_fk",
+          "tableFrom": "onboarding_review_requests",
+          "tableTo": "onboarding_versions",
+          "columnsFrom": [
+            "project_id",
+            "version"
+          ],
+          "columnsTo": [
+            "project_id",
+            "version"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "onboarding_review_requests_version_check": {
+          "name": "onboarding_review_requests_version_check",
+          "value": "\"onboarding_review_requests\".\"version\" >= 1"
+        },
+        "onboarding_review_requests_reason_code_check": {
+          "name": "onboarding_review_requests_reason_code_check",
+          "value": "\"onboarding_review_requests\".\"reason_code\" in ('missing_information', 'rights_unclear', 'out_of_scope')"
+        },
+        "onboarding_review_requests_note_not_blank_check": {
+          "name": "onboarding_review_requests_note_not_blank_check",
+          "value": "char_length(btrim(\"onboarding_review_requests\".\"note\")) > 0"
+        },
+        "onboarding_review_requests_note_length_check": {
+          "name": "onboarding_review_requests_note_length_check",
+          "value": "char_length(\"onboarding_review_requests\".\"note\") <= 2000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.onboarding_reviewer_assignments": {
+      "name": "onboarding_reviewer_assignments",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "granted_by": {
+          "name": "granted_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "onboarding_reviewer_assignments_active_user_idx": {
+          "name": "onboarding_reviewer_assignments_active_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"onboarding_reviewer_assignments\".\"status\" = 'active'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "onboarding_reviewer_assignments_tenant_id_tenants_id_fk": {
+          "name": "onboarding_reviewer_assignments_tenant_id_tenants_id_fk",
+          "tableFrom": "onboarding_reviewer_assignments",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_reviewer_assignments_user_id_users_id_fk": {
+          "name": "onboarding_reviewer_assignments_user_id_users_id_fk",
+          "tableFrom": "onboarding_reviewer_assignments",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_reviewer_assignments_granted_by_users_id_fk": {
+          "name": "onboarding_reviewer_assignments_granted_by_users_id_fk",
+          "tableFrom": "onboarding_reviewer_assignments",
+          "tableTo": "users",
+          "columnsFrom": [
+            "granted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "onboarding_reviewer_assignments_tenant_id_user_id_pk": {
+          "name": "onboarding_reviewer_assignments_tenant_id_user_id_pk",
+          "columns": [
+            "tenant_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "onboarding_reviewer_assignments_status_check": {
+          "name": "onboarding_reviewer_assignments_status_check",
+          "value": "\"onboarding_reviewer_assignments\".\"status\" in ('active', 'revoked')"
+        },
+        "onboarding_reviewer_assignments_revoked_at_check": {
+          "name": "onboarding_reviewer_assignments_revoked_at_check",
+          "value": "(\"onboarding_reviewer_assignments\".\"status\" = 'active' and \"onboarding_reviewer_assignments\".\"revoked_at\" is null) or (\"onboarding_reviewer_assignments\".\"status\" = 'revoked' and \"onboarding_reviewer_assignments\".\"revoked_at\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.onboarding_versions": {
+      "name": "onboarding_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "schema_id": {
+          "name": "schema_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "schema_version": {
+          "name": "schema_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "answers": {
+          "name": "answers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_brief": {
+          "name": "project_brief",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "onboarding_versions_tenant_id_tenants_id_fk": {
+          "name": "onboarding_versions_tenant_id_tenants_id_fk",
+          "tableFrom": "onboarding_versions",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_versions_created_by_users_id_fk": {
+          "name": "onboarding_versions_created_by_users_id_fk",
+          "tableFrom": "onboarding_versions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "onboarding_versions_project_tenant_fk": {
+          "name": "onboarding_versions_project_tenant_fk",
+          "tableFrom": "onboarding_versions",
+          "tableTo": "onboarding_projects",
+          "columnsFrom": [
+            "tenant_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "onboarding_versions_project_id_version_unique": {
+          "name": "onboarding_versions_project_id_version_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "project_id",
+            "version"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "onboarding_versions_version_check": {
+          "name": "onboarding_versions_version_check",
+          "value": "\"onboarding_versions\".\"version\" >= 1"
+        },
+        "onboarding_versions_answers_check": {
+          "name": "onboarding_versions_answers_check",
+          "value": "jsonb_typeof(\"onboarding_versions\".\"answers\") = 'object'"
+        },
+        "onboarding_versions_project_brief_check": {
+          "name": "onboarding_versions_project_brief_check",
+          "value": "jsonb_typeof(\"onboarding_versions\".\"project_brief\") = 'object'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.tenants": {
+      "name": "tenants",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "auth_provider_user_id": {
+          "name": "auth_provider_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_auth_provider_user_id_unique": {
+          "name": "users_auth_provider_user_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "auth_provider_user_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.websites": {
+      "name": "websites",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "public_key": {
+          "name": "public_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'disabled'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "websites_tenant_id_idx": {
+          "name": "websites_tenant_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "websites_tenant_id_tenants_id_fk": {
+          "name": "websites_tenant_id_tenants_id_fk",
+          "tableFrom": "websites",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "websites_public_key_unique": {
+          "name": "websites_public_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "public_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "websites_status_check": {
+          "name": "websites_status_check",
+          "value": "\"websites\".\"status\" in ('active', 'disabled')"
+        },
+        "websites_public_key_check": {
+          "name": "websites_public_key_check",
+          "value": "\"websites\".\"public_key\" ~ '^site_[A-Za-z0-9_-]{32}$'"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

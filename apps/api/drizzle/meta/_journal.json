@@ -50,6 +50,41 @@
       "when": 1792754769378,
       "tag": "0006_silky_mikhail_rasputin",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793092329579,
+      "tag": "0007_unique_firestar",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793092795077,
+      "tag": "0008_lyrical_khan",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793094147042,
+      "tag": "0009_certain_morlun",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793095151622,
+      "tag": "0010_soft_scream",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793095899845,
+      "tag": "0011_reflective_exiles",
+      "breakpoints": true
     }
   ]
 }

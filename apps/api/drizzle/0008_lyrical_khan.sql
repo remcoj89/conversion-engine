@@ -1,0 +1,2 @@
+ALTER TABLE "onboarding_audit_events" ADD CONSTRAINT "onboarding_audit_events_actor_membership_fk" FOREIGN KEY ("tenant_id","actor_user_id") REFERENCES "public"."memberships"("tenant_id","user_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "onboarding_audit_events" ADD CONSTRAINT "onboarding_audit_events_submitted_from_status_check" CHECK ("onboarding_audit_events"."event_type" <> 'submitted' or "onboarding_audit_events"."from_status" is null or "onboarding_audit_events"."from_status" = 'draft');

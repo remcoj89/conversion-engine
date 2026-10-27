@@ -1,14 +1,18 @@
 import Fastify, { type FastifyServerOptions } from "fastify";
 import { createAuthHook, type AuthHookDependencies } from "./auth/authHook.js";
+import { createReviewerAuthHook, type ReviewerAuthHookDependencies } from "./auth/reviewerAuthHook.js";
 import { apiErrorHandler } from "./errors.js";
 import { registerDashboardRoutes, type DashboardRouteDependencies } from "./routes/dashboard.js";
 import { registerLeadRoutes, type LeadRouteDependencies } from "./routes/leads.js";
 import { registerOnboardingRoutes, type OnboardingRouteDependencies } from "./routes/onboarding.js";
+import { registerReviewRoutes, type ReviewRouteDependencies } from "./routes/review.js";
 
 export type AppDependencies = AuthHookDependencies &
+  ReviewerAuthHookDependencies &
   DashboardRouteDependencies &
   LeadRouteDependencies &
-  OnboardingRouteDependencies;
+  OnboardingRouteDependencies &
+  ReviewRouteDependencies;
 
 export function buildApp(
   dependencies: AppDependencies,
@@ -30,6 +34,13 @@ export function buildApp(
     registerDashboardRoutes(protectedApp, dependencies);
     registerLeadRoutes(protectedApp, dependencies);
     registerOnboardingRoutes(protectedApp, dependencies);
+  });
+
+  // Review routes live in a sibling scope with their own hook: they are authorized by reviewer
+  // assignments, not memberships, and the client auth hook above is not applied or relaxed.
+  app.register(async (reviewApp) => {
+    reviewApp.addHook("onRequest", createReviewerAuthHook(dependencies));
+    registerReviewRoutes(reviewApp, dependencies);
   });
 
   return app;

@@ -50,7 +50,7 @@ export function getAuthContext(request: FastifyRequest): RequestContext {
 }
 
 // The tenant is only read from this header, never from body or query. An empty header counts as absent.
-function readRequestedTenantId(request: FastifyRequest): string | undefined {
+export function readRequestedTenantId(request: FastifyRequest): string | undefined {
   const value = request.headers["x-tenant-id"];
   // Repeated headers are joined, so they can never pass UUID validation.
   const raw = Array.isArray(value) ? value.join(",") : value;
