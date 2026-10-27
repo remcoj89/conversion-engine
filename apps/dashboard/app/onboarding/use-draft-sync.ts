@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { onboardingSchema, type Answers, type ReviewStatus } from "../../../../packages/onboarding-contract/src/index";
+import { allowsSubmit, isReadOnly, reviewStatusFromServer } from "../../lib/onboarding/flow";
 
 // Server-side conceptopslag en officiële indiening voor de onboarding via de BFF (/api/onboarding).
 // De lokale antwoorden blijven altijd leidend in de UI: geen enkele fout of conflict wist ze stilzwijgend.
@@ -56,9 +57,6 @@ function stableKey(answers: Answers): string {
 const requestBody = (baseVersion: number, answers: Answers) =>
   JSON.stringify({ schema_id: onboardingSchema.id, schema_version: onboardingSchema.version, base_version: baseVersion, answers });
 
-// Alles behalve "draft" (ingediend of verder in review) is voor de klant alleen-lezen.
-const reviewStatusOf = (serverStatus: string): ReviewStatus => (serverStatus === "draft" ? "draft" : "submitted");
-
 export function useDraftSync(
   answers: Answers,
   hydrate: (answers: Answers, reviewStatus: ReviewStatus) => void,
@@ -75,6 +73,8 @@ export function useDraftSync(
   const pendingRef = useRef(false);
   // Geen automatische opslag tijdens indienen, na indienen, bij een conflict of bij een blokkade.
   const blockedRef = useRef(false);
+  // Only a loaded draft may be submitted; review_needed saves drafts but cannot resubmit yet.
+  const submittableRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Voor een vervolgopslag na een lopende opslag, zonder dat saveNow zichzelf hoeft te kennen.
   const saveNowRef = useRef<() => Promise<void>>(async () => undefined);
@@ -94,14 +94,16 @@ export function useDraftSync(
     (result: LoadResult) => {
       if (result.kind !== "ok") return enterPhase(result.kind);
       const { draft } = result;
-      const reviewStatus = reviewStatusOf(draft.status);
+      const reviewStatus = reviewStatusFromServer(draft.status);
+      const readOnly = isReadOnly(reviewStatus);
       versionRef.current = draft.version;
       syncedRef.current = stableKey(draft.answers);
-      blockedRef.current = reviewStatus === "submitted";
+      blockedRef.current = readOnly;
+      submittableRef.current = allowsSubmit(reviewStatus);
       hydrate(draft.answers, reviewStatus);
       const at = draft.updated_at ? new Date(draft.updated_at) : null;
-      setSave(reviewStatus === "submitted" ? { kind: "submitted", at } : at ? { kind: "saved", at } : { kind: "idle" });
-      setSubmit(reviewStatus === "submitted" ? { kind: "submitted" } : { kind: "idle" });
+      setSave(readOnly ? { kind: "submitted", at } : at ? { kind: "saved", at } : { kind: "idle" });
+      setSubmit(readOnly ? { kind: "submitted" } : { kind: "idle" });
       enterPhase("ready");
     },
     [enterPhase, hydrate],
@@ -164,7 +166,7 @@ export function useDraftSync(
   // Officieel indienen. Stopt eerst de debounce, wacht een lopende PUT af en stuurt dan de nieuwste
   // lokale antwoorden mee in de submit zelf; zo kan geen autosave tussendoor de versie verschuiven.
   const submitNow = useCallback(async () => {
-    if (phaseRef.current !== "ready" || blockedRef.current) return;
+    if (phaseRef.current !== "ready" || blockedRef.current || !submittableRef.current) return;
     blockedRef.current = true;
     pendingRef.current = false;
     clearTimeout(timerRef.current);

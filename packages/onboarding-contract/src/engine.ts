@@ -17,8 +17,10 @@ export type RepeaterItem = Readonly<Record<string, string>>;
 export type AnswerValue = string | readonly string[] | readonly RepeaterItem[] | readonly FileMeta[];
 export type Answers = Readonly<Record<string, AnswerValue>>;
 
-// Status van de indiening door de klant; goedkeuring is altijd een aparte, menselijke Westend-stap.
-export type ReviewStatus = "draft" | "submitted";
+// Client-side status of the client's submission; approval is always a separate, human Westend step.
+// review_needed: Westend asked for additions and the Owner may edit and save drafts. Only "submitted"
+// means submitted for review (see buildProjectBrief).
+export type ReviewStatus = "draft" | "review_needed" | "submitted";
 
 export function isEmpty(value: AnswerValue | undefined): boolean {
   if (value === undefined) return true;

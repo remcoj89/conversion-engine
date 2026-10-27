@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, type Dispatch, type RefObject } from "react";
-import { buildProjectBrief, onboardingSchema, phaseProgress, steps, type ReviewFlag } from "../../../../packages/onboarding-contract/src/index";
-import type { FlowAction, FlowState } from "../../lib/onboarding/flow";
+import { buildProjectBrief, onboardingSchema, phaseProgress, steps, type ReviewFlag, type ReviewStatus } from "../../../../packages/onboarding-contract/src/index";
+import { allowsSubmit, isReadOnly, type FlowAction, type FlowState } from "../../lib/onboarding/flow";
 import type { SubmitState } from "./use-draft-sync";
 
 type Props = Readonly<{
@@ -32,9 +32,10 @@ export default function ReviewPanel({ state, dispatch, headingRef, submit, canSu
   const brief = useMemo(() => buildProjectBrief(state.answers, { reviewStatus: state.reviewStatus }), [state.answers, state.reviewStatus]);
   const missing = brief.review.required_fields_missing;
   const flags = brief.review.flags;
-  const submitted = state.reviewStatus === "submitted";
+  const submitted = isReadOnly(state.reviewStatus);
+  const changesRequested = state.reviewStatus === "review_needed";
   const submitting = submit.kind === "submitting";
-  const submitMessage = submitStatusMessage(submit, submitted, missing.length, canSubmitNow);
+  const submitMessage = submitStatusMessage(submit, state.reviewStatus, missing.length, canSubmitNow);
 
   return (
     <div className="review-stack">
@@ -130,11 +131,11 @@ export default function ReviewPanel({ state, dispatch, headingRef, submit, canSu
           <button
             type="button"
             className="button button-primary"
-            disabled={missing.length > 0 || submitted || submitting || !canSubmitNow}
+            disabled={missing.length > 0 || !allowsSubmit(state.reviewStatus) || submitting || !canSubmitNow}
             aria-describedby="submit-status"
             onClick={onSubmit}
           >
-            {submitted ? "Ingediend ✓" : submitting ? "Bezig met indienen…" : "Ter review indienen"}
+            {submitted ? "Ingediend ✓" : changesRequested ? "Opnieuw indienen" : submitting ? "Bezig met indienen…" : "Ter review indienen"}
           </button>
         </div>
         <div
@@ -169,7 +170,7 @@ export default function ReviewPanel({ state, dispatch, headingRef, submit, canSu
           </div>
           <div>
             <dt>Indiening</dt>
-            <dd>{submitted ? <code>submitted</code> : "Concept"}</dd>
+            <dd>{submitted ? <code>submitted</code> : changesRequested ? "Aanvullingen gevraagd" : "Concept"}</dd>
           </div>
           <div>
             <dt>Antwoorden met bron</dt>
@@ -234,12 +235,16 @@ export default function ReviewPanel({ state, dispatch, headingRef, submit, canSu
 
 type SubmitMessage = Readonly<{ tone: "note" | "success" | "warning"; text: string }>;
 
-function submitStatusMessage(submit: SubmitState, submitted: boolean, missingCount: number, canSubmitNow: boolean): SubmitMessage {
-  if (submitted) {
+function submitStatusMessage(submit: SubmitState, reviewStatus: ReviewStatus, missingCount: number, canSubmitNow: boolean): SubmitMessage {
+  if (isReadOnly(reviewStatus)) {
     return {
       tone: "success",
       text: "Je onboarding is ingediend. Westend controleert je antwoorden; wijzigen is niet meer mogelijk zonder dat Westend de intake heropent.",
     };
+  }
+  // Resubmitting from review_needed is a later slice; the submit button stays disabled.
+  if (reviewStatus === "review_needed") {
+    return { tone: "note", text: "Je kunt de gevraagde aanvullingen opslaan. Opnieuw indienen volgt in een volgende stap." };
   }
   switch (submit.kind) {
     case "submitting":

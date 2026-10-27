@@ -37,6 +37,17 @@ export type FlowAction =
   // Alleen na een geslaagde server-indiening.
   | Readonly<{ type: "submitted" }>;
 
+// Maps the server status to the client review status. Only draft and review_needed are editable;
+// submitted, blocked, approved and any unknown status fall back to the safe read-only "submitted".
+export function reviewStatusFromServer(serverStatus: string): ReviewStatus {
+  return serverStatus === "draft" || serverStatus === "review_needed" ? serverStatus : "submitted";
+}
+
+export const isReadOnly = (reviewStatus: ReviewStatus): boolean => reviewStatus === "submitted";
+
+// Only a draft can be submitted; resubmitting from review_needed is a later slice.
+export const allowsSubmit = (reviewStatus: ReviewStatus): boolean => reviewStatus === "draft";
+
 export const initialFlowState: FlowState = {
   answers: {},
   current: 0,
@@ -58,8 +69,8 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
     case "hydrate":
       return { ...state, answers: clearHidden(action.answers), errors: {}, reviewStatus: action.reviewStatus };
     case "answer":
-      // Na indienen is de onboarding alleen-lezen; de server weigert wijzigingen ook (409 not_editable).
-      if (state.reviewStatus === "submitted") return state;
+      // Read-only after submitting; the server refuses changes as well (409 not_editable).
+      if (isReadOnly(state.reviewStatus)) return state;
       return {
         ...state,
         answers: setAnswer(state.answers, action.fieldId, action.value),

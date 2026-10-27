@@ -21,6 +21,7 @@ Legenda: `[x]` afgerond · `[~]` gebouwd, wacht op controle of acceptatie · `[ 
 - [x] **Wijzigingen aanvragen (`submitted` → `review_needed`):** `onboarding_review_requests` met reden en notitie, een aparte member- en reviewer-actor in audit-events (precies één per event), het `review_requested`-event en `POST /v1/review/onboarding/request-changes`, alles in één transactie (migratie `0010`). Alle kwaliteitschecks groen.
 - [x] **Reparatie review requests:** de repository controleert opnieuw de actieve toewijzing en zelfreview binnen de transactie (`FOR SHARE`, vóór de projectlock), en `version` in review requests en audit-events heeft een FK naar `onboarding_versions(project_id, version)` (migratie `0011`). Alle kwaliteitschecks groen.
 - [x] **Concept opslaan in `review_needed`:** de Owner kan een nieuwe onveranderlijke versie opslaan; de status blijft `review_needed`, stale `base_version` geeft conflict en conceptopslag maakt geen audit-event. API- en databasetests groen.
+- [x] **Dashboardondersteuning voor `review_needed`:** de status blijft in de clientstate behouden, de Owner kan antwoorden wijzigen en automatisch opslaan via de bestaande BFF/PUT-flow, `submitted` blijft alleen-lezen en resubmission doet geen POST. Dashboardtests, lint, typecheck, build en desktop-/mobiele screenshotcontrole groen.
 - [ ] `review_needed` → `submitted` (`resubmitted`), inclusief de benodigde validatie en het aparte audit-event.
 - [ ] Overige reviewstatusovergangen: `blocked`, `approved`, `reopened`.
 - [ ] Reviewnotities tonen aan de klant.

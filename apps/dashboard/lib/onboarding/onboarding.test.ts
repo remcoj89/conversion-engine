@@ -23,7 +23,7 @@ import {
   steps,
 } from "../../../../packages/onboarding-contract/src/index";
 import { completeAnswers } from "../../../../packages/onboarding-contract/src/testFixtures";
-import { flowReducer, initialFlowState, type FlowAction, type FlowState } from "./flow";
+import { allowsSubmit, flowReducer, initialFlowState, isReadOnly, reviewStatusFromServer, type FlowAction, type FlowState } from "./flow";
 
 // ---------- Hulpfuncties ----------
 
@@ -356,4 +356,45 @@ test("hervatten: hydrate laadt opgeslagen antwoorden, wist verborgen waarden en 
   assert.deepEqual(hydrated.answers, { company_name: "Opgeslagen BV", domain_status: "new" });
   assert.deepEqual(hydrated.errors, {});
   assert.equal(hydrated.reviewStatus, "draft");
+});
+
+// ---------- Aanvullingen gevraagd (review_needed) ----------
+
+test("brief: review_needed gebruikt de gewone briefstatus en is niet submitted_for_review", () => {
+  const complete = buildProjectBrief(completeAnswers(), { reviewStatus: "review_needed" });
+  assert.equal(complete.status, "ready_for_westend_review");
+  assert.equal(complete.submitted_for_review, false);
+  const partial = buildProjectBrief({ company_name: "Concept BV" }, { reviewStatus: "review_needed" });
+  assert.equal(partial.status, "incomplete_draft");
+  assert.equal(partial.submitted_for_review, false);
+});
+
+test("serverstatus: draft en review_needed blijven bewerkbaar; submitted, blocked, approved en onbekend worden alleen-lezen", () => {
+  const cases: [string, FlowState["reviewStatus"]][] = [
+    ["draft", "draft"],
+    ["review_needed", "review_needed"],
+    ["submitted", "submitted"],
+    ["blocked", "submitted"],
+    ["approved", "submitted"],
+    ["iets_nieuws", "submitted"],
+  ];
+  for (const [server, client] of cases) {
+    assert.equal(reviewStatusFromServer(server), client, server);
+  }
+});
+
+test("indienen per status: alleen draft kan indienen; review_needed is bewerkbaar maar nog niet opnieuw indienbaar", () => {
+  assert.deepEqual([isReadOnly("draft"), allowsSubmit("draft")], [false, true]);
+  assert.deepEqual([isReadOnly("review_needed"), allowsSubmit("review_needed")], [false, false]);
+  assert.deepEqual([isReadOnly("submitted"), allowsSubmit("submitted")], [true, false]);
+});
+
+test("na refresh: review_needed wordt geladen met status en antwoorden, en antwoorden blijven wijzigbaar", () => {
+  const hydrated = flowReducer(initialFlowState, { type: "hydrate", answers: completeAnswers(), reviewStatus: "review_needed" });
+  assert.equal(hydrated.reviewStatus, "review_needed");
+  assert.deepEqual(hydrated.answers, completeAnswers());
+
+  const changed = flowReducer(hydrated, { type: "answer", fieldId: "company_name", value: "Aangevulde naam BV" });
+  assert.equal(changed.answers.company_name, "Aangevulde naam BV");
+  assert.equal(changed.reviewStatus, "review_needed", "bewerken laat de status ongemoeid");
 });

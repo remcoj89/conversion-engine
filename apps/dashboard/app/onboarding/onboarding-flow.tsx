@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { onboardingSchema, phaseProgress, stepErrors, stepProgress, steps, visibleFields } from "../../../../packages/onboarding-contract/src/index";
-import { flowReducer, initialFlowState, type FlowAction, type FlowState } from "../../lib/onboarding/flow";
+import { flowReducer, initialFlowState, isReadOnly, type FlowAction, type FlowState } from "../../lib/onboarding/flow";
 import OnboardingField from "./onboarding-field";
 import ReviewPanel from "./review-panel";
 import SaveStatus from "./save-status";
@@ -20,7 +20,8 @@ export default function OnboardingFlow() {
   );
   const markSubmitted = useCallback(() => dispatch({ type: "submitted" }), []);
   const sync = useDraftSync(state.answers, hydrate, markSubmitted);
-  const readOnly = state.reviewStatus === "submitted";
+  const readOnly = isReadOnly(state.reviewStatus);
+  const changesRequested = state.reviewStatus === "review_needed";
   const headingRef = useRef<HTMLHeadingElement>(null);
   const isFirstRender = useRef(true);
   const { current: currentStep, mode } = state;
@@ -127,7 +128,7 @@ export default function OnboardingFlow() {
                 </span>
                 <span className="phase-text">
                   <span className="phase-title">Controle & Project Brief</span>
-                  <span className="phase-meta">{readOnly ? "Ingediend" : "Eindcontrole en output"}</span>
+                  <span className="phase-meta">{readOnly ? "Ingediend" : changesRequested ? "Aanvullingen gevraagd" : "Eindcontrole en output"}</span>
                 </span>
               </button>
             </li>
@@ -207,6 +208,8 @@ export default function OnboardingFlow() {
                 </div>
               )}
 
+              {changesRequested && <ChangesRequestedNotice />}
+
               {/* Na indienen alleen-lezen: een uitgeschakelde fieldset blokkeert alle velden tegelijk. */}
               <fieldset className="onboarding-fields" disabled={readOnly}>
                 <legend className="visually-hidden">{step.section.title}</legend>
@@ -245,5 +248,15 @@ export default function OnboardingFlow() {
         </div>
       </div>
     </>
+  );
+}
+
+// Shown while Westend has asked for additions: answers stay editable and are saved as a draft.
+function ChangesRequestedNotice() {
+  return (
+    <div className="notice notice-warning" role="status">
+      <strong>Westend heeft aanvullingen gevraagd.</strong> Pas je antwoorden aan; wijzigingen worden automatisch opgeslagen. Opnieuw
+      indienen volgt in een volgende stap.
+    </div>
   );
 }

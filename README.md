@@ -64,7 +64,7 @@ ZITADEL beheert identiteit en authenticatie. De eigen PostgreSQL-database blijft
 - Onveranderlijke audit-events bij het officieel indienen van een onboarding via migraties `0007` en `0008`.
 - Westend-reviewer-toewijzingen per tenant (migratie `0009`) en het read-only metadata-endpoint `GET /v1/review/onboarding`.
 - Eerste reviewactie `submitted` → `review_needed` via `POST /v1/review/onboarding/request-changes`, met een review request en een `review_requested`-audit-event in één transactie (migraties `0010` en `0011`).
-- Een Owner kan in `review_needed` een concept opslaan: iedere opslag maakt een nieuwe immutable versie, de status blijft `review_needed` en er komt geen audit-event. Opnieuw indienen blijft een aparte open slice.
+- Een Owner kan in `review_needed` een concept opslaan: iedere opslag maakt een nieuwe immutable versie, de status blijft `review_needed` en er komt geen audit-event. Het dashboard maakt deze status bewerkbaar en slaat wijzigingen automatisch op; opnieuw indienen blijft een aparte open slice.
 - `/api/onboarding` in de Next.js BFF met server-side sessie, token refresh en conflictcontrole; alleen een Owner heeft `onboarding:manage`.
 - Dashboard-onboarding hervat concepten na refresh en slaat antwoorden automatisch op; bestanden zijn voorlopig metadata-only.
 - Zelfstandige demowebsite in `apps/demo-site`; zie [het implementatierecord](docs/demo-site-implementation-record-v1.0.md).
@@ -227,7 +227,7 @@ Een Owner kan een onboarding met status `review_needed` aanvullen en als concept
 - `submitted`, `blocked` en `approved` blijven niet bewerkbaar via deze route.
 - `review_needed` → `submitted` (`resubmitted`) is bewust niet onderdeel van deze slice.
 
-De API- en databasetests controleren de onveranderlijkheid van versies, statusbehoud, tenantisolatie, Owner-autorisatie, stale-version-conflicten en het ontbreken van een audit-event. De dashboardflow behandelt deze status nog niet als bewerkbaar; een aparte frontend/BFF-slice is nodig voordat dit gedrag in de UI beschikbaar is.
+De API- en databasetests controleren de onveranderlijkheid van versies, statusbehoud, tenantisolatie, Owner-autorisatie, stale-version-conflicten en het ontbreken van een audit-event. Het dashboard herkent `review_needed` als bewerkbaar, bewaart wijzigingen via de bestaande BFF/PUT-flow en houdt `submitted` alleen-lezen. Opnieuw indienen is in deze slice bewust uitgeschakeld. De dashboard- en API-tests, lint, typecheck, build en visuele controle op desktop en mobiel zijn groen; de browsercontrole gebruikte synthetische data.
 
 **Nog niet gebouwd:**
 
