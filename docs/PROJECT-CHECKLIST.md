@@ -16,11 +16,12 @@ Legenda: `[x]` afgerond · `[~]` gebouwd, wacht op controle of acceptatie · `[ 
 - [x] **Ontwerpnotitie:** `docs/reviewworkflow-foundation-decision.md` (27 oktober 2026). Alleen ontwerp, geen code.
 - [x] **Autorisatiebesluit:** richting B (reviewer-toewijzing per tenant, los van memberships), zelfreview verboden, klantrollen blijven `owner` en `team_member`.
 - [ ] Open beslissingen O-2 en O-3: wie toewijzingen beheert, en de ZITADEL-inrichting voor Westend-accounts.
-- [ ] Open beslissingen O-5 t/m O-10: gedrag na `approved`, bewerken in `review_needed`, uitweg uit `blocked`, reviewnotities, inzage-logging en de verhouding tot Gate A.
+- [ ] Open beslissingen O-5 t/m O-10: gedrag na `approved`, opnieuw indienen vanuit `review_needed`, uitweg uit `blocked`, reviewnotities, inzage-logging en de verhouding tot Gate A.
 - [x] **Reviewer foundation:** tabel `onboarding_reviewer_assignments` (migratie `0009`), `findActiveReviewerAssignments`, een aparte `/v1/review`-scope met `ReviewerContext` en de zelfreviewcontrole, en `GET /v1/review/onboarding` met alleen metadata. Alle API- en databasetests groen.
 - [x] **Wijzigingen aanvragen (`submitted` → `review_needed`):** `onboarding_review_requests` met reden en notitie, een aparte member- en reviewer-actor in audit-events (precies één per event), het `review_requested`-event en `POST /v1/review/onboarding/request-changes`, alles in één transactie (migratie `0010`). Alle kwaliteitschecks groen.
 - [x] **Reparatie review requests:** de repository controleert opnieuw de actieve toewijzing en zelfreview binnen de transactie (`FOR SHARE`, vóór de projectlock), en `version` in review requests en audit-events heeft een FK naar `onboarding_versions(project_id, version)` (migratie `0011`). Alle kwaliteitschecks groen.
-- [ ] Bewerken door de Owner in `review_needed`, en `review_needed` → `submitted` (`resubmitted`).
+- [x] **Concept opslaan in `review_needed`:** de Owner kan een nieuwe onveranderlijke versie opslaan; de status blijft `review_needed`, stale `base_version` geeft conflict en conceptopslag maakt geen audit-event. API- en databasetests groen.
+- [ ] `review_needed` → `submitted` (`resubmitted`), inclusief de benodigde validatie en het aparte audit-event.
 - [ ] Overige reviewstatusovergangen: `blocked`, `approved`, `reopened`.
 - [ ] Reviewnotities tonen aan de klant.
 - [ ] Beheer van toewijzingen (endpoint, script of UI), na besluit over O-2.

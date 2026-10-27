@@ -64,6 +64,7 @@ ZITADEL beheert identiteit en authenticatie. De eigen PostgreSQL-database blijft
 - Onveranderlijke audit-events bij het officieel indienen van een onboarding via migraties `0007` en `0008`.
 - Westend-reviewer-toewijzingen per tenant (migratie `0009`) en het read-only metadata-endpoint `GET /v1/review/onboarding`.
 - Eerste reviewactie `submitted` → `review_needed` via `POST /v1/review/onboarding/request-changes`, met een review request en een `review_requested`-audit-event in één transactie (migraties `0010` en `0011`).
+- Een Owner kan in `review_needed` een concept opslaan: iedere opslag maakt een nieuwe immutable versie, de status blijft `review_needed` en er komt geen audit-event. Opnieuw indienen blijft een aparte open slice.
 - `/api/onboarding` in de Next.js BFF met server-side sessie, token refresh en conflictcontrole; alleen een Owner heeft `onboarding:manage`.
 - Dashboard-onboarding hervat concepten na refresh en slaat antwoorden automatisch op; bestanden zijn voorlopig metadata-only.
 - Zelfstandige demowebsite in `apps/demo-site`; zie [het implementatierecord](docs/demo-site-implementation-record-v1.0.md).
@@ -215,9 +216,21 @@ Een toegewezen reviewer kan een ingediende onboarding terugzetten naar `review_n
 
   Indienen legt voortaan ook de versie vast. Oudere `submitted`-events zonder versie blijven geldig. De immutability-trigger is ongewijzigd.
 
+## Owner-conceptopslag in `review_needed` — 27 oktober 2026
+
+Een Owner kan een onboarding met status `review_needed` aanvullen en als concept opslaan via `PUT /v1/onboarding/current`.
+
+- Elke opslag maakt een nieuwe onveranderlijke onboardingversie.
+- De status blijft `review_needed`.
+- Dezelfde `base_version`-controle voorkomt overschrijven van gelijktijdige wijzigingen; een conflict geeft `409 version_conflict`.
+- Conceptopslag maakt geen audit-event. De opslag is wel herleidbaar via de onboardingversie en `created_by`.
+- `submitted`, `blocked` en `approved` blijven niet bewerkbaar via deze route.
+- `review_needed` → `submitted` (`resubmitted`) is bewust niet onderdeel van deze slice.
+
+De API- en databasetests controleren de onveranderlijkheid van versies, statusbehoud, tenantisolatie, Owner-autorisatie, stale-version-conflicten en het ontbreken van een audit-event. De dashboardflow behandelt deze status nog niet als bewerkbaar; een aparte frontend/BFF-slice is nodig voordat dit gedrag in de UI beschikbaar is.
+
 **Nog niet gebouwd:**
 
-- bewerken door de Owner in `review_needed`;
 - `review_needed` → `submitted` (`resubmitted`), `blocked`, `approved` en `reopened`;
 - het tonen van reviewnotities aan de klant;
 - beheer van toewijzingen (O-2) en de ZITADEL-inrichting voor Westend-medewerkers (O-3);

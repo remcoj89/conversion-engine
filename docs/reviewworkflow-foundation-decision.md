@@ -1,7 +1,7 @@
 # Reviewworkflow — technische ontwerpnotitie (fundament)
 
 **Datum:** 27 oktober 2026
-**Status:** richting B geaccepteerd; reviewerfundament en eerste reviewactie gebouwd. O-2, O-3 en O-5 t/m O-10 blijven open.
+**Status:** richting B geaccepteerd; reviewerfundament, eerste reviewactie en Owner-conceptopslag in `review_needed` gebouwd. O-2, O-3, O-5 en O-7 t/m O-10 blijven open; resubmission uit O-6 blijft open.
 **Fase:** Fase 5 — technische implementatie met kleine verticale slices
 **Auteur:** Claude Code (junior developer), ter review door de projectleider
 
@@ -53,7 +53,7 @@ Deze notitie beschrijft hoe een Westend-review van onboardings veilig kan worden
   - `draft`: bij opslaan;
   - `submitted`: bij officieel indienen, na server-side validatie van alle zichtbare verplichte velden.
   - `review_needed`: wanneer een toegewezen reviewer wijzigingen aanvraagt.
-- Een nieuwe versie kan alleen ontstaan als het project op `draft` staat. Anders volgt `409 not_editable`.
+- Een nieuwe versie kan ontstaan bij conceptopslag vanuit `draft` of `review_needed`, en bij indienen vanuit `draft`. Vanuit `submitted`, `blocked` en `approved` volgt `409 not_editable`.
 - Alles gebeurt onder een rijlock (`FOR UPDATE`) met optimistic concurrency via `base_version`.
 - Per tenant kan maar één lopend project bestaan: een unieke index op `tenant_id` waar de status niet `approved` is.
 - **Belangrijk voor dit ontwerp:** `findCurrentOnboarding` en de opslaglogica negeren projecten met status `approved`. Na een goedkeuring kan een Owner met `base_version: 0` dus direct een **nieuw** project starten. Dat moet eerst besloten worden, zie §4.3.
@@ -173,7 +173,7 @@ Richting B kost één extra tabel en een eigen hook. Daar staat tegenover dat ee
 
 - **Vóór indienen:** de server weigert onvolledige antwoorden met `400 incomplete_answers`. Dat bestaat al.
 - **Na indienen:** de reviewer zet `review_needed`, met een reden-code (bijvoorbeeld `missing_information`, `rights_unclear` of `out_of_scope`), een korte notitie voor de klant en eventueel de betrokken veld-ID's.
-- **Voorstel:** in `review_needed` mag de Owner weer concepten opslaan. De status blijft dan `review_needed`, totdat de Owner opnieuw indient. Daarvoor moet de regel "alleen bewerkbaar in `draft`" later uitgebreid worden naar "bewerkbaar in `draft` en `review_needed`". Dat zit **niet** in de eerste slice.
+- **Gebouwd:** in `review_needed` mag de Owner concepten opslaan. De status blijft `review_needed`, totdat de Owner opnieuw indient. Opnieuw indienen zelf, inclusief volledige validatie en het aparte `resubmitted`-event, blijft een volgende slice.
 - Bij een kritisch tekort, bijvoorbeeld geen bestaande branding binnen het standaardpakket, gebruikt de reviewer `blocked`. Die blokkade lost de klant niet zelf op via de vragenlijst. Westend heft hem op.
 
 ### 4.3 Wijzigingen nadat een project al beoordeeld is
@@ -216,11 +216,10 @@ De reviewer foundation uit deze slice is gebouwd en onafhankelijk gecontroleerd.
 
 **Wat er nog niet in hoort:**
 
-- statusovergangen (`review_needed`, `blocked`, `approved`, `resubmitted` en `reopened`);
+- statusovergangen (`blocked`, `approved`, `resubmitted` en `reopened`); de overgang naar `review_needed` en conceptopslag in `review_needed` zijn inmiddels gebouwd;
 - reviewnotities en reden-codes;
 - inzage in antwoorden of de Project Brief, en het loggen daarvan;
 - wijzigingen aan `onboarding_audit_events`, inclusief de oplossing voor de membership-FK uit §6.2;
-- bewerken in `review_needed`;
 - een beheer-endpoint of UI voor toewijzingen;
 - een Platform Admin-rol;
 - dashboard- of BFF-wijzigingen;
@@ -275,7 +274,7 @@ Migratie `0008` borgt dat een `submitted`-event alleen vanuit `NULL` of `draft` 
 | O-3 | Identiteit van Westend-medewerkers in ZITADEL | Zelfde issuer (de single-issuer-aanname blijft gelden), aparte ZITADEL-organisatie, MFA verplicht |
 | O-4 | Mag een reviewer ook membership hebben in dezelfde tenant? | **Besloten: nee** — geen zelfreview; de hook en repository weigeren dit |
 | O-5 | Na `approved` een nieuw project toestaan? | Nee, tenzij er een product-reden is. Goedgekeurd betekent dan "niet bewerkbaar" |
-| O-6 | Bewerken in `review_needed` | Ja, als concept; opnieuw indienen geeft `resubmitted` |
+| O-6 | Bewerken in `review_needed` | Conceptopslag gebouwd; opnieuw indienen geeft `resubmitted` en blijft open voor implementatie |
 | O-7 | Uitweg uit `blocked` | Alleen de reviewer: `blocked` naar `review_needed` |
 | O-8 | Opslag, zichtbaarheid en bewaartermijn van reviewnotities | Aparte tenantgebonden tabel; zichtbaar voor de Owner; bewaartermijn vaststellen vóór livegang |
 | O-9 | Inzage-logging | Elke opvraag van antwoorden of Project Brief door een reviewer logt een access-event |
@@ -327,7 +326,7 @@ Richting B geeft een Westend-reviewer precies de toegang die de taak vraagt: de 
 
 ### 6. Welke informatie ontbreekt nog voordat volgende slices veilig gebouwd kunnen worden?
 
-Voor de eerste slices zijn **O-1** en **O-4** besloten. **O-2**, **O-3** en **O-5 t/m O-10** blijven nodig vóór de bijbehorende beheer-, status- en inzageslices. Concreet:
+Voor de eerste slices zijn **O-1** en **O-4** besloten. Conceptopslag in `review_needed` uit **O-6** is gebouwd; de resubmission uit die beslissing blijft open. **O-2**, **O-3**, **O-5** en **O-7 t/m O-10** blijven nodig vóór de bijbehorende beheer-, status- en inzageslices. Concreet:
 
 - de keuze voor richting B — besloten en gebouwd;
 - wie toewijzingen maakt, en hoe;
