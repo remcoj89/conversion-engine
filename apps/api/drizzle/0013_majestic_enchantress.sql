@@ -1,0 +1,2 @@
+ALTER TABLE "onboarding_audit_events" DROP CONSTRAINT "onboarding_audit_events_review_requested_check";--> statement-breakpoint
+ALTER TABLE "onboarding_audit_events" ADD CONSTRAINT "onboarding_audit_events_review_requested_check" CHECK ("onboarding_audit_events"."event_type" <> 'review_requested' or ("onboarding_audit_events"."from_status" is not null and "onboarding_audit_events"."from_status" = 'submitted' and "onboarding_audit_events"."to_status" = 'review_needed' and "onboarding_audit_events"."version" is not null));

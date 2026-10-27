@@ -1056,6 +1056,17 @@ textarea.field-control {
   color: var(--success);
 }
 
+/* Reviewer note: keep the reviewer's line breaks and never let long words or URLs overflow. */
+.review-request-note {
+  justify-self: stretch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.review-request-meta {
+  font-size: 13px;
+}
+
 .badge-warning {
   background: var(--warning-soft);
   color: var(--warning);

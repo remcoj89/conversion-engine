@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, type Dispatch, type RefObject } from "react";
-import { buildProjectBrief, onboardingSchema, phaseProgress, steps, type ReviewFlag, type ReviewStatus } from "../../../../packages/onboarding-contract/src/index";
-import { allowsSubmit, isReadOnly, type FlowAction, type FlowState } from "../../lib/onboarding/flow";
+import { buildProjectBrief, onboardingSchema, phaseProgress, steps, type ReviewFlag } from "../../../../packages/onboarding-contract/src/index";
+import { allowsSubmit, isReadOnly, onboardingStatusLabel, readOnlyStatusMessage, type FlowAction, type FlowState } from "../../lib/onboarding/flow";
 import type { SubmitState } from "./use-draft-sync";
 
 type Props = Readonly<{
@@ -29,7 +29,8 @@ const statusLabels = {
 
 // Eindcontrole: status per vragenlijst, ontbrekende velden, reviewflags, Project Brief-preview en officiële indiening.
 export default function ReviewPanel({ state, dispatch, headingRef, submit, canSubmitNow, onSubmit }: Props) {
-  const brief = useMemo(() => buildProjectBrief(state.answers, { reviewStatus: state.reviewStatus }), [state.answers, state.reviewStatus]);
+  const briefReviewStatus = state.reviewStatus === "blocked" || state.reviewStatus === "approved" ? "submitted" : state.reviewStatus;
+  const brief = useMemo(() => buildProjectBrief(state.answers, { reviewStatus: briefReviewStatus }), [state.answers, briefReviewStatus]);
   const missing = brief.review.required_fields_missing;
   const flags = brief.review.flags;
   const submitted = isReadOnly(state.reviewStatus);
@@ -135,7 +136,7 @@ export default function ReviewPanel({ state, dispatch, headingRef, submit, canSu
             aria-describedby="submit-status"
             onClick={onSubmit}
           >
-            {submitted ? "Ingediend ✓" : changesRequested ? "Opnieuw indienen" : submitting ? "Bezig met indienen…" : "Ter review indienen"}
+            {submitted ? `${onboardingStatusLabel(state.reviewStatus)} ✓` : submitting ? "Bezig met indienen…" : changesRequested ? "Opnieuw indienen" : "Ter review indienen"}
           </button>
         </div>
         <div
@@ -235,16 +236,10 @@ export default function ReviewPanel({ state, dispatch, headingRef, submit, canSu
 
 type SubmitMessage = Readonly<{ tone: "note" | "success" | "warning"; text: string }>;
 
-function submitStatusMessage(submit: SubmitState, reviewStatus: ReviewStatus, missingCount: number, canSubmitNow: boolean): SubmitMessage {
-  if (isReadOnly(reviewStatus)) {
-    return {
-      tone: "success",
-      text: "Je onboarding is ingediend. Westend controleert je antwoorden; wijzigen is niet meer mogelijk zonder dat Westend de intake heropent.",
-    };
-  }
-  // Resubmitting from review_needed is a later slice; the submit button stays disabled.
-  if (reviewStatus === "review_needed") {
-    return { tone: "note", text: "Je kunt de gevraagde aanvullingen opslaan. Opnieuw indienen volgt in een volgende stap." };
+function submitStatusMessage(submit: SubmitState, reviewStatus: FlowState["reviewStatus"], missingCount: number, canSubmitNow: boolean): SubmitMessage {
+  const readOnlyMessage = readOnlyStatusMessage(reviewStatus);
+  if (readOnlyMessage) {
+    return { tone: readOnlyMessage.tone, text: `${readOnlyMessage.title} ${readOnlyMessage.body}` };
   }
   switch (submit.kind) {
     case "submitting":
@@ -264,8 +259,9 @@ function submitStatusMessage(submit: SubmitState, reviewStatus: ReviewStatus, mi
       return { tone: "warning", text: "Indienen is niet gelukt. Je antwoorden staan nog hier; probeer het opnieuw." };
     default:
       if (!canSubmitNow) return { tone: "note", text: "Indienen kan zodra je ingelogd bent en je concept is opgeslagen." };
-      return missingCount > 0
-        ? { tone: "note", text: "Indienen kan zodra alle zichtbare verplichte vragen geldig zijn ingevuld." }
+      if (missingCount > 0) return { tone: "note", text: "Indienen kan zodra alle zichtbare verplichte vragen geldig zijn ingevuld." };
+      return reviewStatus === "review_needed"
+        ? { tone: "note", text: "Na opnieuw indienen worden je antwoorden weer vergrendeld en beoordeelt Westend je aanvullingen." }
         : { tone: "note", text: "Na indienen worden je antwoorden vergrendeld en beoordeelt Westend de intake." };
   }
 }

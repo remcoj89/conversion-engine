@@ -1,7 +1,7 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "../db/schema.js";
-import type { OnboardingStatus, Tx } from "./onboardingRepository.js";
+import { currentProjectOrder, type OnboardingStatus, type Tx } from "./onboardingRepository.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -20,27 +20,47 @@ export type ReviewableOnboarding = Readonly<{
 
 export type ReviewReasonCode = (typeof schema.reviewRequestReasonCodes)[number];
 
-export type RequestChangesInput = Readonly<{
+export type BlockReasonCode = (typeof schema.blockReasonCodes)[number];
+export type UnblockReasonCode = (typeof schema.unblockReasonCodes)[number];
+export type ReopenReasonCode = (typeof schema.reopenReasonCodes)[number];
+
+// Who acts on which version; shared by every reviewer status action.
+export type ReviewerTarget = Readonly<{
   // Both come from the ReviewerContext, never from the request body.
   tenantId: string;
   reviewerUserId: string;
   // Version the reviewer looked at; must still be the current version.
   baseVersion: number;
-  reasonCode: ReviewReasonCode;
-  note: string;
 }>;
 
-export type RequestChangesResult =
-  | Readonly<{ status: "review_needed"; version: number }>
+// Input of a reviewer status action with a reason; each action has its own reason codes.
+export type ReviewActionInput<ReasonCode extends string> = ReviewerTarget &
+  Readonly<{
+    reasonCode: ReasonCode;
+    note: string;
+  }>;
+
+export type RequestChangesInput = ReviewActionInput<ReviewReasonCode>;
+export type BlockInput = ReviewActionInput<BlockReasonCode>;
+export type UnblockInput = ReviewActionInput<UnblockReasonCode>;
+export type ReopenInput = ReviewActionInput<ReopenReasonCode>;
+// Approval has no reason or note in this slice.
+export type ApproveInput = ReviewerTarget;
+
+// Outcome of a reviewer status action; on success it carries the new status and the (unchanged) version.
+export type ReviewTransitionResult<NewStatus extends OnboardingStatus> =
+  | Readonly<{ status: NewStatus; version: number }>
   | Readonly<{ status: "reviewer_forbidden" }>
   | Readonly<{ status: "self_review_forbidden" }>
   | Readonly<{ status: "not_found" }>
   | Readonly<{ status: "not_reviewable" }>
   | Readonly<{ status: "conflict"; currentVersion: number }>;
 
-// "Current" project of a tenant: the open (non-approved) project when one exists, otherwise the most
-// recently approved one. Shared by every review query so they always look at the same project.
-const currentProjectOrder = [sql`${schema.onboardingProjects.status} = 'approved'`, desc(schema.onboardingProjects.updatedAt)];
+export type RequestChangesResult = ReviewTransitionResult<"review_needed">;
+export type BlockResult = ReviewTransitionResult<"blocked">;
+export type UnblockResult = ReviewTransitionResult<"review_needed">;
+export type ApproveResult = ReviewTransitionResult<"approved">;
+export type ReopenResult = ReviewTransitionResult<"review_needed">;
 
 // The tenant's current onboarding project, if a reviewer may see it. A draft yields null.
 export async function findReviewableOnboarding(db: Db, tenantId: string): Promise<ReviewableOnboarding | null> {
@@ -96,18 +116,29 @@ async function authorizeReviewerInTransaction(tx: Tx, tenantId: string, reviewer
   return "allowed";
 }
 
-// submitted → review_needed: review request, status change and audit event in one transaction.
-export async function requestOnboardingChanges(db: Db, input: RequestChangesInput): Promise<RequestChangesResult> {
-  return db.transaction((tx) => requestOnboardingChangesInTransaction(tx, input));
-}
+// One reviewer status transition: the allowed starting status, the new status, its audit event type and,
+// when the action has one, how the reason and note are stored (tenant-bound, outside the audit log).
+type ReviewTransition<NewStatus extends OnboardingStatus> = Readonly<{
+  from: OnboardingStatus;
+  to: NewStatus;
+  eventType: "review_requested" | "blocked" | "unblocked" | "approved" | "reopened";
+  saveReason?: (tx: Tx, projectId: string, version: number) => Promise<unknown>;
+}>;
 
-// Same, inside a transaction managed by the caller (e.g. a test's rollback transaction).
-export async function requestOnboardingChangesInTransaction(tx: Tx, input: RequestChangesInput): Promise<RequestChangesResult> {
+// Runs a reviewer status transition inside the caller's transaction, in this fixed order: re-check the
+// reviewer, lock the current project, check status and version, store the reason, change the status and
+// write the audit event. Any failure rolls everything back. No new onboarding version is created.
+async function performReviewTransition<NewStatus extends OnboardingStatus>(
+  tx: Tx,
+  input: ReviewerTarget,
+  transition: ReviewTransition<NewStatus>,
+): Promise<ReviewTransitionResult<NewStatus>> {
   // Re-check reviewer authorization inside the transaction, before any lock on the project or any write.
   const authorization = await authorizeReviewerInTransaction(tx, input.tenantId, input.reviewerUserId);
-  if (authorization !== "allowed") return { status: authorization };
+  if (authorization === "reviewer_forbidden") return { status: "reviewer_forbidden" };
+  if (authorization === "self_review_forbidden") return { status: "self_review_forbidden" };
 
-  // The row lock serializes concurrent review actions: a second request waits and then sees review_needed.
+  // The row lock serializes concurrent review actions: a second action waits and then sees the new status.
   const [project] = await tx
     .select({ id: schema.onboardingProjects.id, status: schema.onboardingProjects.status, currentVersion: schema.onboardingProjects.currentVersion })
     .from(schema.onboardingProjects)
@@ -117,43 +148,110 @@ export async function requestOnboardingChangesInTransaction(tx: Tx, input: Reque
     .limit(1);
 
   if (!project) return { status: "not_found" };
-  if (project.status !== "submitted") return { status: "not_reviewable" };
+  if (project.status !== transition.from) return { status: "not_reviewable" };
   if (project.currentVersion !== input.baseVersion) return { status: "conflict", currentVersion: project.currentVersion };
 
-  // The database checks that project and reviewer assignment both belong to this tenant.
-  await tx.insert(schema.onboardingReviewRequests).values({
-    tenantId: input.tenantId,
-    projectId: project.id,
-    reviewerUserId: input.reviewerUserId,
-    version: project.currentVersion,
-    reasonCode: input.reasonCode,
-    note: input.note,
-  });
+  // The database checks that project, version and reviewer assignment all belong to this tenant.
+  await transition.saveReason?.(tx, project.id, project.currentVersion);
 
   // The status guard in the WHERE clause is a second line of defence next to the row lock.
   const [updated] = await tx
     .update(schema.onboardingProjects)
-    .set({ status: "review_needed", updatedAt: sql`now()` })
+    .set({ status: transition.to, updatedAt: sql`now()` })
     .where(
       and(
         eq(schema.onboardingProjects.id, project.id),
         eq(schema.onboardingProjects.tenantId, input.tenantId),
-        eq(schema.onboardingProjects.status, "submitted"),
+        eq(schema.onboardingProjects.status, transition.from),
       ),
     )
     .returning({ id: schema.onboardingProjects.id });
   if (!updated) throw new Error("Onboarding project status update returned no row");
 
-  // No note in the audit log: free text may contain client content. The review request holds it.
+  // No note in the audit log: free text may contain client content. The reason storage holds it.
   await tx.insert(schema.onboardingAuditEvents).values({
     tenantId: input.tenantId,
     projectId: project.id,
     reviewerUserId: input.reviewerUserId,
-    eventType: "review_requested",
-    fromStatus: "submitted",
-    toStatus: "review_needed",
+    eventType: transition.eventType,
+    fromStatus: transition.from,
+    toStatus: transition.to,
     version: project.currentVersion,
   });
 
-  return { status: "review_needed", version: project.currentVersion };
+  return { status: transition.to, version: project.currentVersion };
+}
+
+// Stores a block, unblock or reopen decision with its reason and note.
+const saveReviewAction =
+  (input: ReviewActionInput<BlockReasonCode | UnblockReasonCode | ReopenReasonCode>, action: (typeof schema.reviewActionTypes)[number]) =>
+  (tx: Tx, projectId: string, version: number) =>
+    tx.insert(schema.onboardingReviewActions).values({
+      tenantId: input.tenantId,
+      projectId,
+      reviewerUserId: input.reviewerUserId,
+      action,
+      version,
+      reasonCode: input.reasonCode,
+      note: input.note,
+    });
+
+// submitted → review_needed: review request, status change and audit event in one transaction.
+export async function requestOnboardingChanges(db: Db, input: RequestChangesInput): Promise<RequestChangesResult> {
+  return db.transaction((tx) => requestOnboardingChangesInTransaction(tx, input));
+}
+
+// Same, inside a transaction managed by the caller (e.g. a test's rollback transaction).
+export function requestOnboardingChangesInTransaction(tx: Tx, input: RequestChangesInput): Promise<RequestChangesResult> {
+  return performReviewTransition(tx, input, {
+    from: "submitted",
+    to: "review_needed",
+    eventType: "review_requested",
+    saveReason: (tx, projectId, version) =>
+      tx.insert(schema.onboardingReviewRequests).values({
+        tenantId: input.tenantId,
+        projectId,
+        reviewerUserId: input.reviewerUserId,
+        version,
+        reasonCode: input.reasonCode,
+        note: input.note,
+      }),
+  });
+}
+
+// submitted → blocked: a critical basis is missing; only Westend can lift the block again.
+export async function blockOnboarding(db: Db, input: BlockInput): Promise<BlockResult> {
+  return db.transaction((tx) => blockOnboardingInTransaction(tx, input));
+}
+
+export function blockOnboardingInTransaction(tx: Tx, input: BlockInput): Promise<BlockResult> {
+  return performReviewTransition(tx, input, { from: "submitted", to: "blocked", eventType: "blocked", saveReason: saveReviewAction(input, "blocked") });
+}
+
+// blocked → review_needed: the block is lifted and the Owner can add information and resubmit.
+export async function unblockOnboarding(db: Db, input: UnblockInput): Promise<UnblockResult> {
+  return db.transaction((tx) => unblockOnboardingInTransaction(tx, input));
+}
+
+export function unblockOnboardingInTransaction(tx: Tx, input: UnblockInput): Promise<UnblockResult> {
+  return performReviewTransition(tx, input, { from: "blocked", to: "review_needed", eventType: "unblocked", saveReason: saveReviewAction(input, "unblocked") });
+}
+
+// submitted → approved: the reviewed version becomes the approved one; the Owner can no longer change it.
+export async function approveOnboarding(db: Db, input: ApproveInput): Promise<ApproveResult> {
+  return db.transaction((tx) => approveOnboardingInTransaction(tx, input));
+}
+
+export function approveOnboardingInTransaction(tx: Tx, input: ApproveInput): Promise<ApproveResult> {
+  return performReviewTransition(tx, input, { from: "submitted", to: "approved", eventType: "approved" });
+}
+
+// approved → review_needed: a controlled reopen after a material change. The approval stays in the audit
+// log and the approved version is kept; the Owner then adds information and resubmits as usual.
+export async function reopenOnboarding(db: Db, input: ReopenInput): Promise<ReopenResult> {
+  return db.transaction((tx) => reopenOnboardingInTransaction(tx, input));
+}
+
+export function reopenOnboardingInTransaction(tx: Tx, input: ReopenInput): Promise<ReopenResult> {
+  return performReviewTransition(tx, input, { from: "approved", to: "review_needed", eventType: "reopened", saveReason: saveReviewAction(input, "reopened") });
 }

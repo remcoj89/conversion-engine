@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { getAuthContext } from "../auth/authHook.js";
 import { authorize } from "../auth/authorization.js";
 import type { RequestContext } from "../auth/requestContext.js";
-import type { OnboardingDraft, SaveDraftInput, SaveDraftResult } from "../onboarding/onboardingRepository.js";
+import type { CurrentOnboarding, SaveDraftInput, SaveDraftResult } from "../onboarding/onboardingRepository.js";
 import {
   buildProjectBrief,
   missingFields,
@@ -14,7 +14,7 @@ import {
 
 // Houdt de HTTP-laag los van Drizzle/PostgreSQL. Wordt altijd aangeroepen met context.tenantId.
 export type OnboardingStore = Readonly<{
-  findCurrent: (tenantId: string) => Promise<OnboardingDraft | null>;
+  findCurrent: (tenantId: string) => Promise<CurrentOnboarding | null>;
   saveDraft: (input: SaveDraftInput) => Promise<SaveDraftResult>;
   // Nieuwe versie + status "submitted" in één transactie.
   submit: (input: SaveDraftInput) => Promise<SaveDraftResult>;
@@ -31,7 +31,7 @@ const BODY_KEYS = ["answers", "base_version", "schema_id", "schema_version"];
 
 const noStore = { "cache-control": "no-store" };
 
-function draftResponse(draft: OnboardingDraft) {
+function draftResponse(draft: CurrentOnboarding) {
   return {
     status: draft.status,
     version: draft.version,
@@ -40,6 +40,20 @@ function draftResponse(draft: OnboardingDraft) {
     answers: draft.answers,
     project_brief: draft.projectBrief,
     updated_at: draft.updatedAt.toISOString(),
+    review_request: reviewRequestResponse(draft.reviewRequest),
+  };
+}
+
+// Only the fields the Owner needs; null keeps the response shape stable when there is no open request.
+// "kind" tells a change request apart from a reopen of an approved onboarding.
+function reviewRequestResponse(request: CurrentOnboarding["reviewRequest"]) {
+  if (!request) return null;
+  return {
+    kind: request.kind,
+    reason_code: request.reasonCode,
+    note: request.note,
+    version: request.version,
+    created_at: request.createdAt.toISOString(),
   };
 }
 
@@ -62,6 +76,7 @@ export function registerOnboardingRoutes(app: FastifyInstance, { onboardingStore
       answers: {},
       project_brief: buildProjectBrief({}, { reviewStatus: "draft", now: now() }),
       updated_at: null,
+      review_request: null,
     };
   });
 

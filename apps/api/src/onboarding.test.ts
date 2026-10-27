@@ -5,14 +5,23 @@ import { buildApp, type AppDependencies } from "./app.js";
 import type { AuthAdapter, Membership, ReviewerAssignment } from "./auth/types.js";
 import {
   statusAfterSave,
+  submissionEventType,
   type OnboardingDraft,
   type OnboardingStatus,
+  type ReviewRequestSummary,
   type SaveDraftInput,
   type SaveDraftResult,
   type SaveTarget,
 } from "./onboarding/onboardingRepository.js";
 import type { OnboardingStore } from "./routes/onboarding.js";
-import type { RequestChangesInput, RequestChangesResult, ReviewableOnboarding } from "./onboarding/onboardingReviewRepository.js";
+import type {
+  ApproveInput,
+  RequestChangesInput,
+  RequestChangesResult,
+  ReviewableOnboarding,
+  ReviewActionInput,
+  ReviewTransitionResult,
+} from "./onboarding/onboardingReviewRepository.js";
 import { fieldById, missingFields, onboardingSchema } from "../../../packages/onboarding-contract/src/index.ts";
 import { completeAnswers } from "../../../packages/onboarding-contract/src/testFixtures.ts";
 
@@ -49,10 +58,16 @@ const membershipsBySubject: Record<string, readonly Membership[]> = {
 function memoryStore() {
   const drafts = new Map<string, OnboardingDraft>();
   const calls: { method: string; tenantId: string; input?: SaveDraftInput }[] = [];
+  // Audit events the repository would write on (re)submit; same shared event-type rule.
+  const reviewRequests = new Map<string, ReviewRequestSummary>();
+  const auditEvents: { tenantId: string; memberUserId: string; eventType: string; fromStatus: OnboardingStatus | null; toStatus: OnboardingStatus; version: number }[] = [];
   const store: OnboardingStore = {
     findCurrent: async (tenantId) => {
       calls.push({ method: "findCurrent", tenantId });
-      return drafts.get(tenantId) ?? null;
+      const draft = drafts.get(tenantId);
+      if (!draft) return null;
+      // Same rule as the repository: the open change request is only returned in review_needed.
+      return { ...draft, reviewRequest: draft.status === "review_needed" ? (reviewRequests.get(tenantId) ?? null) : null };
     },
     saveDraft: async (input) => save("saveDraft", input, "draft"),
     submit: async (input) => save("submit", input, "submitted"),
@@ -76,9 +91,13 @@ function memoryStore() {
       updatedAt: new Date("2026-10-23T12:00:00Z"),
     };
     drafts.set(input.tenantId, draft);
+    if (target === "submitted") {
+      const fromStatus = current?.status ?? null;
+      auditEvents.push({ tenantId: input.tenantId, memberUserId: input.userId, eventType: submissionEventType(fromStatus), fromStatus, toStatus: draft.status, version: draft.version });
+    }
     return { status: "saved", draft };
   }
-  return { store, calls, drafts };
+  return { store, calls, drafts, auditEvents, reviewRequests };
 }
 
 type ReviewDependencies = Partial<Pick<AppDependencies, "reviewerAssignmentResolver" | "reviewStore">>;
@@ -98,6 +117,18 @@ function setup(t: TestContext, onboardingStore: OnboardingStore = memoryStore().
       reviewStore: {
         findReviewable: async () => null,
         requestChanges: async () => {
+          throw new Error("not used in these tests");
+        },
+        block: async () => {
+          throw new Error("not used in these tests");
+        },
+        unblock: async () => {
+          throw new Error("not used in these tests");
+        },
+        approve: async () => {
+          throw new Error("not used in these tests");
+        },
+        reopen: async () => {
           throw new Error("not used in these tests");
         },
       },
@@ -569,22 +600,96 @@ test("review_needed: een verouderde base_version geeft 409 en wijzigt niets", as
   assert.deepEqual([current.status, current.version, current.answers.company_name], ["review_needed", 1, "Versie 1"]);
 });
 
-test("review_needed: opnieuw indienen is nog niet mogelijk; submitted, blocked en approved blijven niet bewerkbaar", async (t) => {
-  for (const status of ["review_needed", "submitted", "blocked", "approved"] as const) {
-    const { store, drafts } = memoryStore();
+test("review_needed: submitted, blocked en approved blijven niet bewerkbaar voor opslaan en indienen", async (t) => {
+  for (const status of ["submitted", "blocked", "approved"] as const) {
+    const { store, drafts, auditEvents } = memoryStore();
     const app = setup(t, store);
     seedStatus(drafts, status);
-    const put = { method: "PUT", url: URL_, payload: body({ company_name: "Wijziging" }, 1) } as const;
-    const submit = { method: "POST", url: SUBMIT_URL, payload: body(completeAnswers(), 1) } as const;
-    // review_needed accepts draft saves (tested above) but not a resubmit yet.
-    const requests = status === "review_needed" ? [submit] : [put, submit];
+    const requests = [
+      { method: "PUT", url: URL_, payload: body({ company_name: "Wijziging" }, 1) },
+      { method: "POST", url: SUBMIT_URL, payload: body(completeAnswers(), 1) },
+    ] as const;
     for (const request of requests) {
       const response = await app.inject({ ...request, headers: as("owner") });
       assert.equal(response.statusCode, 409, `${status} ${request.method}`);
       assert.deepEqual(response.json(), { error: "not_editable" });
     }
     assert.deepEqual([drafts.get(tenantA)!.status, drafts.get(tenantA)!.version], [status, 1], status);
+    assert.deepEqual(auditEvents, [], status);
   }
+});
+
+// ---------- Opnieuw indienen vanuit review_needed ----------
+
+test("resubmit: complete review_needed wordt opnieuw ingediend als nieuwe versie met een resubmitted-event zonder klantdata", async (t) => {
+  const { store, drafts, auditEvents, calls } = memoryStore();
+  const app = setup(t, store);
+  seedStatus(drafts, "review_needed");
+  await app.inject({ method: "PUT", url: URL_, headers: as("owner"), payload: body({ company_name: "Aangevuld" }, 1) });
+
+  const answers = { ...completeAnswers(), company_name: "Geheime Aanvulling BV" };
+  const response = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body(answers, 2) });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { status: "submitted", version: 3, updated_at: "2026-10-23T12:00:00.000Z" });
+
+  const current = drafts.get(tenantA)!;
+  assert.deepEqual([current.status, current.version], ["submitted", 3]);
+  const brief = current.projectBrief as { submitted_for_review: boolean };
+  assert.equal(brief.submitted_for_review, true, "Project Brief is built with reviewStatus submitted");
+  assert.deepEqual(auditEvents, [
+    { tenantId: tenantA, memberUserId: "user-owner", eventType: "resubmitted", fromStatus: "review_needed", toStatus: "submitted", version: 3 },
+  ]);
+  assert.ok(!JSON.stringify(auditEvents).includes("Geheime Aanvulling"));
+  assert.equal(calls.filter((call) => call.method === "submit").at(-1)?.tenantId, tenantA);
+
+  // A second submit from submitted stays blocked.
+  const again = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body(completeAnswers(), 3) });
+  assert.deepEqual([again.statusCode, again.json()], [409, { error: "not_editable" }]);
+  assert.equal(auditEvents.length, 1);
+});
+
+test("resubmit: onvolledige of ongeldige antwoorden en een verouderde base_version wijzigen niets", async (t) => {
+  const { store, drafts, auditEvents } = memoryStore();
+  const app = setup(t, store);
+  seedStatus(drafts, "review_needed");
+  const incomplete: Record<string, unknown> = { ...completeAnswers() };
+  delete incomplete.contact_email;
+
+  const missing = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body(incomplete, 1) });
+  assert.equal(missing.statusCode, 400);
+  assert.equal(missing.json().error, "incomplete_answers");
+  assert.deepEqual(missing.json().missing.map((item: { field_id: string }) => item.field_id), ["contact_email"]);
+
+  const invalid = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body({ ...completeAnswers(), brand_status: "rebranding" }, 1) });
+  assert.deepEqual([invalid.statusCode, invalid.json().error], [400, "invalid_answers"]);
+
+  const stale = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner"), payload: body(completeAnswers(), 0) });
+  assert.deepEqual([stale.statusCode, stale.json()], [409, { error: "version_conflict", current_version: 1 }]);
+
+  assert.deepEqual([drafts.get(tenantA)!.status, drafts.get(tenantA)!.version], ["review_needed", 1]);
+  assert.deepEqual(auditEvents, []);
+});
+
+test("resubmit: Team Member, reviewer zonder membership, andere tenant en anoniem worden geweigerd", async (t) => {
+  const { store, drafts, auditEvents } = memoryStore();
+  const app = setup(t, store, { reviewerAssignmentResolver: async ({ subject }) => (subject === "reviewer" ? [{ userId: "user-reviewer", tenantId: tenantA }] : []) });
+  seedStatus(drafts, "review_needed");
+  const cases: [Record<string, string>, number][] = [
+    [{}, 401],
+    [as("team-member"), 403],
+    [as("reviewer", { "x-tenant-id": tenantA }), 403],
+    [as("owner-b", { "x-tenant-id": tenantA }), 403],
+  ];
+  for (const [headers, status] of cases) {
+    const response = await app.inject({ method: "POST", url: SUBMIT_URL, headers, payload: body(completeAnswers(), 1) });
+    assert.equal(response.statusCode, status, JSON.stringify(headers));
+  }
+  // Owner of B submits for B, never for A.
+  const ownB = await app.inject({ method: "POST", url: SUBMIT_URL, headers: as("owner-b"), payload: body(completeAnswers(), 1) });
+  assert.deepEqual([ownB.statusCode, ownB.json()], [409, { error: "version_conflict", current_version: 0 }]);
+
+  assert.deepEqual([drafts.get(tenantA)!.status, drafts.get(tenantA)!.version], ["review_needed", 1]);
+  assert.deepEqual(auditEvents, []);
 });
 
 test("review_needed: Team Member, reviewer zonder membership en tenantwaarden uit body of query wijzigen niets", async (t) => {
@@ -603,6 +708,82 @@ test("review_needed: Team Member, reviewer zonder membership en tenantwaarden ui
   assert.deepEqual([queryTenant.statusCode, queryTenant.json()], [409, { error: "version_conflict", current_version: 0 }]);
 
   assert.deepEqual([drafts.get(tenantA)!.version, drafts.get(tenantA)!.answers.company_name], [1, "Versie 1"]);
+});
+
+// ---------- Reviewnotitie voor de Owner ----------
+
+const reviewRequestFixture: ReviewRequestSummary = {
+  kind: "changes_requested",
+  reasonCode: "rights_unclear",
+  note: "Wie heeft de teamfoto gemaakt? Graag de bron en toestemming aanvullen.",
+  version: 1,
+  createdAt: new Date("2026-10-27T09:30:00Z"),
+};
+
+test("GET review_needed: Owner krijgt reden, notitie, versie en datum van de open review request, zonder reviewer-ID", async (t) => {
+  const { store, drafts, reviewRequests } = memoryStore();
+  const app = setup(t, store);
+  seedStatus(drafts, "review_needed");
+  reviewRequests.set(tenantA, reviewRequestFixture);
+
+  const response = await app.inject({ method: "GET", url: URL_, headers: as("owner") });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().review_request, {
+    kind: "changes_requested",
+    reason_code: "rights_unclear",
+    note: "Wie heeft de teamfoto gemaakt? Graag de bron en toestemming aanvullen.",
+    version: 1,
+    created_at: "2026-10-27T09:30:00.000Z",
+  });
+  assert.ok(!response.body.includes("reviewer"));
+});
+
+test("GET review_needed na een reopen: Owner krijgt kind reopened met reden, notitie, versie en datum, zonder reviewer-ID", async (t) => {
+  const { store, drafts, reviewRequests } = memoryStore();
+  const app = setup(t, store);
+  seedStatus(drafts, "review_needed");
+  reviewRequests.set(tenantA, {
+    kind: "reopened",
+    reasonCode: "scope_or_strategy_change",
+    note: "Het aanbod en de CTA zijn gewijzigd; graag opnieuw controleren.",
+    version: 1,
+    createdAt: new Date("2026-10-27T14:05:00Z"),
+  });
+
+  const response = await app.inject({ method: "GET", url: URL_, headers: as("owner") });
+  assert.deepEqual(response.json().review_request, {
+    kind: "reopened",
+    reason_code: "scope_or_strategy_change",
+    note: "Het aanbod en de CTA zijn gewijzigd; graag opnieuw controleren.",
+    version: 1,
+    created_at: "2026-10-27T14:05:00.000Z",
+  });
+  assert.ok(!response.body.includes("reviewer"));
+  assert.ok(!response.body.includes(tenantA), "no tenant ID in the response");
+});
+
+test("GET: geen review_request bij draft, submitted, zonder project of bij een andere tenant", async (t) => {
+  for (const status of ["draft", "submitted"] as const) {
+    const { store, drafts, reviewRequests } = memoryStore();
+    const app = setup(t, store);
+    seedStatus(drafts, status);
+    reviewRequests.set(tenantA, reviewRequestFixture);
+    const response = await app.inject({ method: "GET", url: URL_, headers: as("owner") });
+    assert.equal(response.json().review_request, null, status);
+    assert.ok(!response.body.includes("teamfoto"), status);
+  }
+
+  const { store, drafts, reviewRequests } = memoryStore();
+  const app = setup(t, store);
+  const empty = await app.inject({ method: "GET", url: URL_, headers: as("owner") });
+  assert.equal(empty.json().review_request, null, "no project yet");
+
+  // Tenant A is in review_needed with a request; the Owner of B never sees it.
+  seedStatus(drafts, "review_needed");
+  reviewRequests.set(tenantA, reviewRequestFixture);
+  const other = await app.inject({ method: "GET", url: URL_, headers: as("owner-b") });
+  assert.equal(other.json().review_request, null);
+  assert.ok(!other.body.includes("teamfoto"));
 });
 
 // ---------- Westend-review: reviewer-scope en metadata ----------
@@ -627,9 +808,12 @@ function reviewSetup(
   t: TestContext,
   onboarding: ReviewableOnboarding | null = defaultReviewable,
   requestChangesResult?: RequestChangesResult,
+  actionResult?: ReviewTransitionResult<OnboardingStatus>,
 ) {
   const loaderCalls: string[] = [];
   const changeCalls: RequestChangesInput[] = [];
+  const actionCalls: { action: "block" | "unblock" | "reopen"; input: ReviewActionInput<string> }[] = [];
+  const approveCalls: ApproveInput[] = [];
   const { store, calls: storeCalls } = memoryStore();
   const app = setup(t, store, {
     reviewerAssignmentResolver: async ({ subject }) => assignmentsBySubject[subject] ?? [],
@@ -642,9 +826,25 @@ function reviewSetup(
         changeCalls.push(input);
         return requestChangesResult ?? { status: "review_needed", version: input.baseVersion };
       },
+      block: async (input) => {
+        actionCalls.push({ action: "block", input });
+        return (actionResult ?? { status: "blocked", version: input.baseVersion }) as ReviewTransitionResult<"blocked">;
+      },
+      unblock: async (input) => {
+        actionCalls.push({ action: "unblock", input });
+        return (actionResult ?? { status: "review_needed", version: input.baseVersion }) as ReviewTransitionResult<"review_needed">;
+      },
+      approve: async (input) => {
+        approveCalls.push(input);
+        return (actionResult ?? { status: "approved", version: input.baseVersion }) as ReviewTransitionResult<"approved">;
+      },
+      reopen: async (input) => {
+        actionCalls.push({ action: "reopen", input });
+        return (actionResult ?? { status: "review_needed", version: input.baseVersion }) as ReviewTransitionResult<"review_needed">;
+      },
     },
   });
-  return { app, loaderCalls, changeCalls, storeCalls };
+  return { app, loaderCalls, changeCalls, actionCalls, approveCalls, storeCalls };
 }
 
 test("review: toegewezen reviewer krijgt alleen de vier metadatavelden van de eigen toegewezen tenant", async (t) => {
@@ -744,11 +944,15 @@ test("review: een storefout geeft 500 zonder interne details, ook bij request-ch
   };
   const app = setup(t, undefined, {
     reviewerAssignmentResolver: async ({ subject }) => assignmentsBySubject[subject] ?? [],
-    reviewStore: { findReviewable: failure, requestChanges: failure },
+    reviewStore: { findReviewable: failure, requestChanges: failure, block: failure, unblock: failure, approve: failure, reopen: failure },
   });
   const requests = [
     { method: "GET", url: REVIEW_URL },
     { method: "POST", url: REQUEST_CHANGES_URL, payload: changesBody() },
+    { method: "POST", url: BLOCK_URL, payload: changesBody({ reason_code: "critical_basis_missing" }) },
+    { method: "POST", url: UNBLOCK_URL, payload: changesBody({ reason_code: "basis_provided" }) },
+    { method: "POST", url: APPROVE_URL, payload: { base_version: 1 } },
+    { method: "POST", url: REOPEN_URL, payload: changesBody({ reason_code: "material_input_change" }) },
   ] as const;
   for (const request of requests) {
     const response = await app.inject({ ...request, headers: as("reviewer", { "x-tenant-id": tenantA }) });
@@ -761,6 +965,10 @@ test("review: een storefout geeft 500 zonder interne details, ook bij request-ch
 // ---------- Westend-review: wijzigingen aanvragen (submitted → review_needed) ----------
 
 const REQUEST_CHANGES_URL = "/v1/review/onboarding/request-changes";
+const BLOCK_URL = "/v1/review/onboarding/block";
+const UNBLOCK_URL = "/v1/review/onboarding/unblock";
+const APPROVE_URL = "/v1/review/onboarding/approve";
+const REOPEN_URL = "/v1/review/onboarding/reopen";
 const changesBody = (overrides: Record<string, unknown> = {}) => ({
   base_version: 1,
   reason_code: "missing_information",
@@ -849,4 +1057,251 @@ test("request-changes: anoniem, zonder tenant, Owner, Team Member, andere tenant
   }
   assert.deepEqual(changeCalls, []);
   assert.deepEqual(storeCalls, []);
+});
+
+// ---------- Westend-review: blokkeren en blokkade opheffen ----------
+
+const blockBody = (overrides: Record<string, unknown> = {}) => changesBody({ reason_code: "critical_basis_missing", note: "  Bestaande branding ontbreekt binnen het standaardpakket.  ", ...overrides });
+const unblockBody = (overrides: Record<string, unknown> = {}) => changesBody({ reason_code: "basis_provided", note: "Branding is alsnog aangeleverd.", ...overrides });
+
+test("block en unblock: toegewezen reviewer voert de actie uit; tenant en reviewer komen uit de context", async (t) => {
+  const { app, actionCalls } = reviewSetup(t);
+  const headers = as("reviewer", { "x-tenant-id": tenantA });
+
+  const blocked = await app.inject({ method: "POST", url: BLOCK_URL, headers, payload: blockBody() });
+  assert.deepEqual([blocked.statusCode, blocked.json()], [200, { status: "blocked", version: 1 }]);
+  assert.equal(blocked.headers["cache-control"], "no-store");
+  const unblocked = await app.inject({ method: "POST", url: UNBLOCK_URL, headers, payload: unblockBody() });
+  assert.deepEqual([unblocked.statusCode, unblocked.json()], [200, { status: "review_needed", version: 1 }]);
+
+  assert.deepEqual(actionCalls, [
+    { action: "block", input: { tenantId: tenantA, reviewerUserId: "user-reviewer", baseVersion: 1, reasonCode: "critical_basis_missing", note: "Bestaande branding ontbreekt binnen het standaardpakket." } },
+    { action: "unblock", input: { tenantId: tenantA, reviewerUserId: "user-reviewer", baseVersion: 1, reasonCode: "basis_provided", note: "Branding is alsnog aangeleverd." } },
+  ]);
+});
+
+test("block en unblock: elke actie accepteert alleen haar eigen redencodes en het strikte body-contract", async (t) => {
+  const { app, actionCalls } = reviewSetup(t);
+  const headers = as("reviewer", { "x-tenant-id": tenantA });
+  const cases: [string, unknown][] = [
+    // Reason codes are not interchangeable between actions.
+    [BLOCK_URL, blockBody({ reason_code: "basis_provided" })],
+    [BLOCK_URL, blockBody({ reason_code: "missing_information" })],
+    [UNBLOCK_URL, unblockBody({ reason_code: "critical_basis_missing" })],
+    [UNBLOCK_URL, unblockBody({ reason_code: "rights_unclear" })],
+    [BLOCK_URL, blockBody({ reason_code: "onbekend" })],
+  ];
+  for (const url of [BLOCK_URL, UNBLOCK_URL]) {
+    const body = url === BLOCK_URL ? blockBody : unblockBody;
+    cases.push(
+      [url, { ...body(), tenant_id: tenantB }],
+      [url, { ...body(), project_id: randomUUID() }],
+      [url, body({ note: "   " })],
+      [url, body({ note: "x".repeat(2001) })],
+      [url, body({ base_version: 0 })],
+      [url, { base_version: 1, note: "Zonder reden" }],
+    );
+  }
+  for (const [url, payload] of cases) {
+    const response = await app.inject({ method: "POST", url, headers, payload: payload as object });
+    assert.deepEqual([response.statusCode, response.json()], [400, { error: "invalid_body" }], `${url} ${JSON.stringify(payload).slice(0, 80)}`);
+  }
+  assert.deepEqual(actionCalls, []);
+});
+
+test("block en unblock: anoniem, Owner, Team Member, andere tenant en zelfreview worden geweigerd", async (t) => {
+  const { app, actionCalls, storeCalls } = reviewSetup(t);
+  const cases: [Record<string, string>, number, string][] = [
+    [{}, 401, "unauthorized"],
+    [as("owner", { "x-tenant-id": tenantA }), 403, "forbidden"],
+    [as("team-member", { "x-tenant-id": tenantA }), 403, "forbidden"],
+    [as("reviewer", { "x-tenant-id": tenantB }), 403, "forbidden"],
+    [as("reviewer-self", { "x-tenant-id": tenantA }), 403, "self_review_forbidden"],
+  ];
+  for (const [url, payload] of [[BLOCK_URL, blockBody()], [UNBLOCK_URL, unblockBody()]] as const) {
+    for (const [headers, status, error] of cases) {
+      const response = await app.inject({ method: "POST", url, headers, payload });
+      assert.deepEqual([response.statusCode, response.json()], [status, { error }], `${url} ${JSON.stringify(headers)}`);
+    }
+  }
+  assert.deepEqual(actionCalls, []);
+  assert.deepEqual(storeCalls, []);
+});
+
+test("block en unblock: repositoryresultaten worden vertaald naar 403, 404 en 409", async (t) => {
+  const cases: [ReviewTransitionResult<OnboardingStatus>, number, Record<string, unknown>][] = [
+    [{ status: "reviewer_forbidden" }, 403, { error: "forbidden" }],
+    [{ status: "self_review_forbidden" }, 403, { error: "self_review_forbidden" }],
+    [{ status: "not_found" }, 404, { error: "onboarding_not_found" }],
+    [{ status: "not_reviewable" }, 409, { error: "not_reviewable" }],
+    [{ status: "conflict", currentVersion: 4 }, 409, { error: "version_conflict", current_version: 4 }],
+  ];
+  for (const [result, status, json] of cases) {
+    const { app } = reviewSetup(t, defaultReviewable, undefined, result);
+    for (const [url, payload] of [[BLOCK_URL, blockBody()], [UNBLOCK_URL, unblockBody()]] as const) {
+      const response = await app.inject({ method: "POST", url, headers: as("reviewer", { "x-tenant-id": tenantA }), payload });
+      assert.deepEqual([response.statusCode, response.json()], [status, json], `${url} ${result.status}`);
+    }
+  }
+});
+
+// ---------- Westend-review: goedkeuren (submitted → approved) en besluit O-5 ----------
+
+test("approve: toegewezen reviewer keurt goed; tenant en reviewer komen uit de context", async (t) => {
+  const { app, approveCalls } = reviewSetup(t);
+  const response = await app.inject({ method: "POST", url: APPROVE_URL, headers: as("reviewer", { "x-tenant-id": tenantA }), payload: { base_version: 1 } });
+  assert.deepEqual([response.statusCode, response.json()], [200, { status: "approved", version: 1 }]);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.deepEqual(approveCalls, [{ tenantId: tenantA, reviewerUserId: "user-reviewer", baseVersion: 1 }]);
+});
+
+test("approve: alleen base_version; ontbrekend, ongeldig of extra velden geven 400 zonder repositoryaanroep", async (t) => {
+  const { app, approveCalls } = reviewSetup(t);
+  const payloads: unknown[] = [
+    {},
+    { base_version: 0 },
+    { base_version: -1 },
+    { base_version: 1.5 },
+    { base_version: "1" },
+    { base_version: 1, note: "Goedgekeurd" },
+    { base_version: 1, tenant_id: tenantB },
+    { base_version: 1, project_id: randomUUID() },
+    [],
+  ];
+  for (const payload of payloads) {
+    const response = await app.inject({ method: "POST", url: APPROVE_URL, headers: as("reviewer", { "x-tenant-id": tenantA }), payload: payload as object });
+    assert.deepEqual([response.statusCode, response.json()], [400, { error: "invalid_body" }], JSON.stringify(payload));
+  }
+  assert.deepEqual(approveCalls, []);
+});
+
+test("approve: anoniem, Owner, Team Member, andere tenant en zelfreview worden geweigerd", async (t) => {
+  const { app, approveCalls, storeCalls } = reviewSetup(t);
+  const cases: [Record<string, string>, number, string][] = [
+    [{}, 401, "unauthorized"],
+    [as("owner", { "x-tenant-id": tenantA }), 403, "forbidden"],
+    [as("team-member", { "x-tenant-id": tenantA }), 403, "forbidden"],
+    [as("reviewer", { "x-tenant-id": tenantB }), 403, "forbidden"],
+    [as("reviewer-self", { "x-tenant-id": tenantA }), 403, "self_review_forbidden"],
+  ];
+  for (const [headers, status, error] of cases) {
+    const response = await app.inject({ method: "POST", url: APPROVE_URL, headers, payload: { base_version: 1 } });
+    assert.deepEqual([response.statusCode, response.json()], [status, { error }], JSON.stringify(headers));
+  }
+  assert.deepEqual(approveCalls, []);
+  assert.deepEqual(storeCalls, []);
+});
+
+test("approve: verouderde versie, tweede goedkeuring of verkeerde bronstatus geven 409; overige resultaten 403 en 404", async (t) => {
+  const cases: [ReviewTransitionResult<OnboardingStatus>, number, Record<string, unknown>][] = [
+    [{ status: "conflict", currentVersion: 2 }, 409, { error: "version_conflict", current_version: 2 }],
+    [{ status: "not_reviewable" }, 409, { error: "not_reviewable" }],
+    [{ status: "reviewer_forbidden" }, 403, { error: "forbidden" }],
+    [{ status: "not_found" }, 404, { error: "onboarding_not_found" }],
+  ];
+  for (const [result, status, json] of cases) {
+    const { app } = reviewSetup(t, defaultReviewable, undefined, result);
+    const response = await app.inject({ method: "POST", url: APPROVE_URL, headers: as("reviewer", { "x-tenant-id": tenantA }), payload: { base_version: 1 } });
+    assert.deepEqual([response.statusCode, response.json()], [status, json], result.status);
+  }
+});
+
+test("O-5: Owner leest een goedgekeurde onboarding, maar opslaan of indienen geeft altijd 409 not_editable", async (t) => {
+  const { store, drafts, auditEvents } = memoryStore();
+  const app = setup(t, store);
+  seedStatus(drafts, "approved");
+
+  const current = await app.inject({ method: "GET", url: URL_, headers: as("owner") });
+  assert.deepEqual([current.statusCode, current.json().status, current.json().version, current.json().answers.company_name], [200, "approved", 1, "Versie 1"]);
+
+  const requests = [
+    { method: "PUT", url: URL_, payload: body({ company_name: "Wijziging" }, 1) },
+    // base_version 0 must not start a second project next to the approved one.
+    { method: "PUT", url: URL_, payload: body({ company_name: "Nieuw project" }, 0) },
+    { method: "POST", url: SUBMIT_URL, payload: body(completeAnswers(), 1) },
+    { method: "POST", url: SUBMIT_URL, payload: body(completeAnswers(), 0) },
+  ] as const;
+  for (const request of requests) {
+    const response = await app.inject({ ...request, headers: as("owner") });
+    assert.deepEqual([response.statusCode, response.json()], [409, { error: "not_editable" }], `${request.method} ${request.payload.base_version}`);
+  }
+  assert.deepEqual([drafts.get(tenantA)!.status, drafts.get(tenantA)!.version], ["approved", 1]);
+  assert.deepEqual(auditEvents, []);
+});
+
+// ---------- Westend-review: gecontroleerd heropenen (approved → review_needed) ----------
+
+const reopenBody = (overrides: Record<string, unknown> = {}) =>
+  changesBody({ reason_code: "material_input_change", note: "  De intake bevat een materiële wijziging die opnieuw beoordeeld moet worden.  ", ...overrides });
+
+test("reopen: toegewezen reviewer heropent; tenant en reviewer komen uit de context, de notitie wordt getrimd", async (t) => {
+  const { app, actionCalls } = reviewSetup(t);
+  const response = await app.inject({ method: "POST", url: REOPEN_URL, headers: as("reviewer", { "x-tenant-id": tenantA }), payload: reopenBody() });
+  assert.deepEqual([response.statusCode, response.json()], [200, { status: "review_needed", version: 1 }]);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.deepEqual(actionCalls, [
+    {
+      action: "reopen",
+      input: { tenantId: tenantA, reviewerUserId: "user-reviewer", baseVersion: 1, reasonCode: "material_input_change", note: "De intake bevat een materiële wijziging die opnieuw beoordeeld moet worden." },
+    },
+  ]);
+});
+
+test("reopen: alleen eigen redencodes en het strikte body-contract; anders 400 zonder repositoryaanroep", async (t) => {
+  const { app, actionCalls } = reviewSetup(t);
+  const payloads: unknown[] = [
+    { reason_code: "material_input_change", note: "Zonder versie" },
+    reopenBody({ base_version: 0 }),
+    reopenBody({ base_version: "1" }),
+    { base_version: 1, note: "Zonder reden" },
+    // Reason codes of other actions are not accepted.
+    reopenBody({ reason_code: "missing_information" }),
+    reopenBody({ reason_code: "critical_basis_missing" }),
+    reopenBody({ reason_code: "basis_provided" }),
+    reopenBody({ reason_code: "onbekend" }),
+    { base_version: 1, reason_code: "scope_or_strategy_change" },
+    reopenBody({ note: "" }),
+    reopenBody({ note: " \n " }),
+    reopenBody({ note: "x".repeat(2001) }),
+    { ...reopenBody(), tenant_id: tenantB },
+    { ...reopenBody(), project_id: randomUUID() },
+  ];
+  for (const payload of payloads) {
+    const response = await app.inject({ method: "POST", url: REOPEN_URL, headers: as("reviewer", { "x-tenant-id": tenantA }), payload: payload as object });
+    assert.deepEqual([response.statusCode, response.json()], [400, { error: "invalid_body" }], JSON.stringify(payload).slice(0, 80));
+  }
+  assert.deepEqual(actionCalls, []);
+});
+
+test("reopen: anoniem, Owner, Team Member, andere tenant en zelfreview worden geweigerd", async (t) => {
+  const { app, actionCalls, storeCalls } = reviewSetup(t);
+  const cases: [Record<string, string>, number, string][] = [
+    [{}, 401, "unauthorized"],
+    [as("owner", { "x-tenant-id": tenantA }), 403, "forbidden"],
+    [as("team-member", { "x-tenant-id": tenantA }), 403, "forbidden"],
+    [as("reviewer", { "x-tenant-id": tenantB }), 403, "forbidden"],
+    [as("reviewer-self", { "x-tenant-id": tenantA }), 403, "self_review_forbidden"],
+  ];
+  for (const [headers, status, error] of cases) {
+    const response = await app.inject({ method: "POST", url: REOPEN_URL, headers, payload: reopenBody() });
+    assert.deepEqual([response.statusCode, response.json()], [status, { error }], JSON.stringify(headers));
+  }
+  assert.deepEqual(actionCalls, []);
+  assert.deepEqual(storeCalls, []);
+});
+
+test("reopen: verouderde versie, verkeerde bronstatus of tweede reopen geven 409; overige resultaten 403 en 404", async (t) => {
+  const cases: [ReviewTransitionResult<OnboardingStatus>, number, Record<string, unknown>][] = [
+    [{ status: "conflict", currentVersion: 2 }, 409, { error: "version_conflict", current_version: 2 }],
+    // Repository result for draft, submitted, review_needed, blocked and a second reopen.
+    [{ status: "not_reviewable" }, 409, { error: "not_reviewable" }],
+    [{ status: "reviewer_forbidden" }, 403, { error: "forbidden" }],
+    [{ status: "self_review_forbidden" }, 403, { error: "self_review_forbidden" }],
+    [{ status: "not_found" }, 404, { error: "onboarding_not_found" }],
+  ];
+  for (const [result, status, json] of cases) {
+    const { app } = reviewSetup(t, defaultReviewable, undefined, result);
+    const response = await app.inject({ method: "POST", url: REOPEN_URL, headers: as("reviewer", { "x-tenant-id": tenantA }), payload: reopenBody() });
+    assert.deepEqual([response.statusCode, response.json()], [status, json], result.status);
+  }
 });

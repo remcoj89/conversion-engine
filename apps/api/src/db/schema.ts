@@ -204,7 +204,7 @@ export const onboardingReviewerAssignments = pgTable(
 );
 
 // Event types and their transitions are enforced per type by the check constraints below.
-export const onboardingAuditEventTypes = ["submitted", "review_requested"] as const;
+export const onboardingAuditEventTypes = ["submitted", "review_requested", "resubmitted", "blocked", "unblocked", "approved", "reopened"] as const;
 
 // Onveranderlijk auditlog van statusovergangen. Bevat bewust geen antwoorden, Project Brief-inhoud
 // of reviewnotities, alleen wie (actor), waar (tenant + project), wat (eventtype) en de statusovergang.
@@ -256,7 +256,10 @@ export const onboardingAuditEvents = pgTable(
       foreignColumns: [onboardingVersions.projectId, onboardingVersions.version],
     }),
     index("onboarding_audit_events_tenant_project_idx").on(table.tenantId, table.projectId),
-    check("onboarding_audit_events_event_type_check", sql`${table.eventType} in ('submitted', 'review_requested')`),
+    check(
+      "onboarding_audit_events_event_type_check",
+      sql`${table.eventType} in ('submitted', 'review_requested', 'resubmitted', 'blocked', 'unblocked', 'approved', 'reopened')`,
+    ),
     check(
       "onboarding_audit_events_from_status_check",
       sql`${table.fromStatus} is null or ${table.fromStatus} in ('draft', 'submitted', 'review_needed', 'blocked', 'approved')`,
@@ -264,10 +267,11 @@ export const onboardingAuditEvents = pgTable(
     check("onboarding_audit_events_to_status_check", sql`${table.toStatus} in ('draft', 'submitted', 'review_needed', 'blocked', 'approved')`),
     check("onboarding_audit_events_version_check", sql`${table.version} is null or ${table.version} >= 1`),
     check("onboarding_audit_events_one_actor_check", sql`num_nonnulls(${table.memberUserId}, ${table.reviewerUserId}) = 1`),
-    // Each event type has a fixed kind of actor: clients submit, reviewers request changes.
+    // Each event type has a fixed kind of actor: clients (re)submit; reviewers request changes, block, unblock,
+    // approve and reopen.
     check(
       "onboarding_audit_events_actor_kind_check",
-      sql`(${table.eventType} = 'submitted' and ${table.memberUserId} is not null) or (${table.eventType} = 'review_requested' and ${table.reviewerUserId} is not null)`,
+      sql`(${table.eventType} in ('submitted', 'resubmitted') and ${table.memberUserId} is not null) or (${table.eventType} in ('review_requested', 'blocked', 'unblocked', 'approved', 'reopened') and ${table.reviewerUserId} is not null)`,
     ),
     // Een submitted-event beschrijft altijd een overgang naar "submitted".
     check("onboarding_audit_events_submitted_check", sql`${table.eventType} <> 'submitted' or ${table.toStatus} = 'submitted'`),
@@ -277,9 +281,36 @@ export const onboardingAuditEvents = pgTable(
       sql`${table.eventType} <> 'submitted' or ${table.fromStatus} is null or ${table.fromStatus} = 'draft'`,
     ),
     // A change request always moves a submitted onboarding to review_needed, for a known version.
+    // The explicit "is not null" matters: a NULL comparison would make the check pass instead of fail.
     check(
       "onboarding_audit_events_review_requested_check",
-      sql`${table.eventType} <> 'review_requested' or (${table.fromStatus} = 'submitted' and ${table.toStatus} = 'review_needed' and ${table.version} is not null)`,
+      sql`${table.eventType} <> 'review_requested' or (${table.fromStatus} is not null and ${table.fromStatus} = 'submitted' and ${table.toStatus} = 'review_needed' and ${table.version} is not null)`,
+    ),
+    // A resubmission always moves review_needed back to submitted, for a known version. The explicit
+    // "is not null" matters: a NULL comparison would make the check pass instead of fail.
+    check(
+      "onboarding_audit_events_resubmitted_check",
+      sql`${table.eventType} <> 'resubmitted' or (${table.fromStatus} is not null and ${table.fromStatus} = 'review_needed' and ${table.toStatus} = 'submitted' and ${table.version} is not null)`,
+    ),
+    // Blocking only happens on a submitted onboarding; the explicit "is not null" keeps NULL from passing.
+    check(
+      "onboarding_audit_events_blocked_check",
+      sql`${table.eventType} <> 'blocked' or (${table.fromStatus} is not null and ${table.fromStatus} = 'submitted' and ${table.toStatus} = 'blocked' and ${table.version} is not null)`,
+    ),
+    // Lifting a block always returns the onboarding to review_needed for the Owner to add information.
+    check(
+      "onboarding_audit_events_unblocked_check",
+      sql`${table.eventType} <> 'unblocked' or (${table.fromStatus} is not null and ${table.fromStatus} = 'blocked' and ${table.toStatus} = 'review_needed' and ${table.version} is not null)`,
+    ),
+    // Approval only happens on the submitted version; the explicit "is not null" keeps NULL from passing.
+    check(
+      "onboarding_audit_events_approved_check",
+      sql`${table.eventType} <> 'approved' or (${table.fromStatus} is not null and ${table.fromStatus} = 'submitted' and ${table.toStatus} = 'approved' and ${table.version} is not null)`,
+    ),
+    // A controlled reopen always returns an approved onboarding to review_needed; the approval stays in the log.
+    check(
+      "onboarding_audit_events_reopened_check",
+      sql`${table.eventType} <> 'reopened' or (${table.fromStatus} is not null and ${table.fromStatus} = 'approved' and ${table.toStatus} = 'review_needed' and ${table.version} is not null)`,
     ),
   ],
 );
@@ -333,6 +364,64 @@ export const onboardingReviewRequests = pgTable(
     ),
     check("onboarding_review_requests_note_not_blank_check", sql`char_length(btrim(${table.note})) > 0`),
     check("onboarding_review_requests_note_length_check", sql`char_length(${table.note}) <= ${sql.raw(String(REVIEW_NOTE_MAX_LENGTH))}`),
+  ],
+);
+
+export const reviewActionTypes = ["blocked", "unblocked", "reopened"] as const;
+// Why a reviewer blocks a submitted onboarding: a critical basis is missing that the client cannot simply add.
+export const blockReasonCodes = ["critical_basis_missing", "rights_not_cleared", "requires_extra_work"] as const;
+// Why a reviewer lifts a block again; each mirrors one of the block reasons.
+export const unblockReasonCodes = ["basis_provided", "rights_cleared", "extra_work_agreed"] as const;
+// Why a reviewer reopens an approved onboarding: a material change needs a new review.
+export const reopenReasonCodes = ["material_input_change", "rights_or_asset_change", "scope_or_strategy_change"] as const;
+
+// A reviewer's block, unblock or reopen decision with its reason and note. Kept apart from review requests, which
+// are the client-facing change requests; the free-text note stays out of the audit log.
+export const onboardingReviewActions = pgTable(
+  "onboarding_review_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    projectId: uuid("project_id").notNull(),
+    reviewerUserId: uuid("reviewer_user_id").notNull(),
+    action: text("action", { enum: reviewActionTypes }).notNull(),
+    // Project version the decision refers to (these actions create no new version).
+    version: integer("version").notNull(),
+    reasonCode: text("reason_code").notNull(),
+    note: text("note").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Tenant-safe: the action belongs to a project of the same tenant.
+    foreignKey({
+      name: "onboarding_review_actions_project_tenant_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [onboardingProjects.tenantId, onboardingProjects.id],
+    }),
+    // Tenant-safe: the reviewer is assigned to the same tenant.
+    foreignKey({
+      name: "onboarding_review_actions_reviewer_assignment_fk",
+      columns: [table.tenantId, table.reviewerUserId],
+      foreignColumns: [onboardingReviewerAssignments.tenantId, onboardingReviewerAssignments.userId],
+    }),
+    // The version must exist for this project.
+    foreignKey({
+      name: "onboarding_review_actions_project_version_fk",
+      columns: [table.projectId, table.version],
+      foreignColumns: [onboardingVersions.projectId, onboardingVersions.version],
+    }),
+    index("onboarding_review_actions_tenant_project_idx").on(table.tenantId, table.projectId),
+    check("onboarding_review_actions_action_check", sql`${table.action} in ('blocked', 'unblocked', 'reopened')`),
+    // Each action has its own reason codes, so reasons of different actions cannot be mixed up.
+    check(
+      "onboarding_review_actions_reason_code_check",
+      sql`(${table.action} = 'blocked' and ${table.reasonCode} in ('critical_basis_missing', 'rights_not_cleared', 'requires_extra_work')) or (${table.action} = 'unblocked' and ${table.reasonCode} in ('basis_provided', 'rights_cleared', 'extra_work_agreed')) or (${table.action} = 'reopened' and ${table.reasonCode} in ('material_input_change', 'rights_or_asset_change', 'scope_or_strategy_change'))`,
+    ),
+    check("onboarding_review_actions_version_check", sql`${table.version} >= 1`),
+    check("onboarding_review_actions_note_not_blank_check", sql`char_length(btrim(${table.note})) > 0`),
+    check("onboarding_review_actions_note_length_check", sql`char_length(${table.note}) <= ${sql.raw(String(REVIEW_NOTE_MAX_LENGTH))}`),
   ],
 );
 

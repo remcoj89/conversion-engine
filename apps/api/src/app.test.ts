@@ -127,6 +127,18 @@ function setup(t: TestContext, dependencies: Partial<AppDependencies> = {}) {
         requestChanges: async () => {
           throw new Error("not used in these tests");
         },
+        block: async () => {
+          throw new Error("not used in these tests");
+        },
+        unblock: async () => {
+          throw new Error("not used in these tests");
+        },
+        approve: async () => {
+          throw new Error("not used in these tests");
+        },
+        reopen: async () => {
+          throw new Error("not used in these tests");
+        },
       },
       ...dependencies,
     },
@@ -335,6 +347,18 @@ function setupWithLogs(t: TestContext, dependencies: Partial<AppDependencies>) {
       reviewStore: {
         findReviewable: async () => null,
         requestChanges: async () => {
+          throw new Error("not used in these tests");
+        },
+        block: async () => {
+          throw new Error("not used in these tests");
+        },
+        unblock: async () => {
+          throw new Error("not used in these tests");
+        },
+        approve: async () => {
+          throw new Error("not used in these tests");
+        },
+        reopen: async () => {
           throw new Error("not used in these tests");
         },
       },

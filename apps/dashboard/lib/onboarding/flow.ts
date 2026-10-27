@@ -13,18 +13,20 @@ import {
   steps,
 } from "../../../../packages/onboarding-contract/src/index";
 
+export type DashboardReviewStatus = ReviewStatus | "blocked" | "approved";
+
 export type FlowState = Readonly<{
   answers: Answers;
   current: number;
   mode: "form" | "review";
-  reviewStatus: ReviewStatus;
+  reviewStatus: DashboardReviewStatus;
   // Zichtbare foutmeldingen van het huidige scherm.
   errors: Readonly<Record<string, string>>;
 }>;
 
 export type FlowAction =
   // Antwoorden en status van de server; navigatie blijft waar die is.
-  | Readonly<{ type: "hydrate"; answers: Answers; reviewStatus: ReviewStatus }>
+  | Readonly<{ type: "hydrate"; answers: Answers; reviewStatus: DashboardReviewStatus }>
   | Readonly<{ type: "answer"; fieldId: string; value: AnswerValue }>
   | Readonly<{ type: "blur"; fieldId: string }>
   | Readonly<{ type: "fieldError"; fieldId: string; error: string }>
@@ -37,16 +39,89 @@ export type FlowAction =
   // Alleen na een geslaagde server-indiening.
   | Readonly<{ type: "submitted" }>;
 
-// Maps the server status to the client review status. Only draft and review_needed are editable;
-// submitted, blocked, approved and any unknown status fall back to the safe read-only "submitted".
-export function reviewStatusFromServer(serverStatus: string): ReviewStatus {
-  return serverStatus === "draft" || serverStatus === "review_needed" ? serverStatus : "submitted";
+// Maps the server status to the client status. Only draft and review_needed are editable; unknown statuses
+// fall back to the safe read-only submitted state.
+export function reviewStatusFromServer(serverStatus: string): DashboardReviewStatus {
+  if (serverStatus === "draft" || serverStatus === "review_needed" || serverStatus === "submitted") return serverStatus;
+  if (serverStatus === "blocked" || serverStatus === "approved") return serverStatus;
+  return "submitted";
 }
 
-export const isReadOnly = (reviewStatus: ReviewStatus): boolean => reviewStatus === "submitted";
+export const isReadOnly = (reviewStatus: DashboardReviewStatus): boolean => reviewStatus !== "draft" && reviewStatus !== "review_needed";
 
-// Only a draft can be submitted; resubmitting from review_needed is a later slice.
-export const allowsSubmit = (reviewStatus: ReviewStatus): boolean => reviewStatus === "draft";
+// A draft can be submitted, and review_needed can be resubmitted after the Owner added the requested changes.
+export const allowsSubmit = (reviewStatus: DashboardReviewStatus): boolean => reviewStatus === "draft" || reviewStatus === "review_needed";
+
+export function onboardingStatusLabel(reviewStatus: DashboardReviewStatus): string {
+  if (reviewStatus === "blocked") return "Geblokkeerd";
+  if (reviewStatus === "approved") return "Goedgekeurd";
+  if (reviewStatus === "submitted") return "Ingediend";
+  return reviewStatus === "review_needed" ? "Aanvullingen gevraagd" : "Concept";
+}
+
+export type ReadOnlyStatusMessage = Readonly<{
+  tone: "success" | "warning";
+  title: string;
+  body: string;
+}>;
+
+export function readOnlyStatusMessage(reviewStatus: DashboardReviewStatus): ReadOnlyStatusMessage | null {
+  if (reviewStatus === "blocked") {
+    return {
+      tone: "warning",
+      title: "Deze onboarding is tijdelijk geblokkeerd door Westend.",
+      body: "Je antwoorden zijn zichtbaar maar niet bewerkbaar. Opnieuw indienen is niet mogelijk; Westend moet eerst verdere actie ondernemen.",
+    };
+  }
+  if (reviewStatus === "approved") {
+    return {
+      tone: "success",
+      title: "Deze onboarding is goedgekeurd door Westend.",
+      body: "Je antwoorden zijn alleen-lezen; nieuwe wijzigingen kunnen niet worden opgeslagen.",
+    };
+  }
+  if (reviewStatus === "submitted") {
+    return {
+      tone: "success",
+      title: "Deze onboarding is ingediend.",
+      body: "Je kunt je antwoorden nog bekijken, maar niet meer wijzigen.",
+    };
+  }
+  return null;
+}
+
+// Open reviewer feedback as returned by GET /api/onboarding; only the fields the Owner needs.
+// kind: a change request, a reopen of an approved onboarding, or an unblock (absent from older API responses).
+export type ReviewRequest = Readonly<{ kind?: string; reason_code: string; note: string; version: number; created_at: string }>;
+
+const reviewReasonLabels: Readonly<Record<string, string>> = {
+  missing_information: "Ontbrekende informatie",
+  rights_unclear: "Rechten of bron onduidelijk",
+  out_of_scope: "Buiten de standaard scope",
+  material_input_change: "Materiële wijziging in de intake",
+  rights_or_asset_change: "Wijziging in rechten of beeldmateriaal",
+  scope_or_strategy_change: "Wijziging in scope of strategie",
+  basis_provided: "Basis aangevuld",
+  rights_cleared: "Rechten opgehelderd",
+  extra_work_agreed: "Meerwerk afgestemd",
+};
+
+// Dutch label for a reason code; an unknown future code still gets a neutral label.
+export function reviewReasonLabel(reasonCode: string): string {
+  return Object.hasOwn(reviewReasonLabels, reasonCode) ? reviewReasonLabels[reasonCode]! : "Aanvulling gevraagd";
+}
+
+// Title of the feedback notice: a reopened approval reads differently from a change request.
+export function reviewFeedbackTitle(reviewRequest: ReviewRequest | null): string {
+  if (reviewRequest?.kind === "reopened") return "Westend heeft je goedgekeurde onboarding heropend.";
+  if (reviewRequest?.kind === "unblocked") return "Westend heeft de blokkade opgeheven.";
+  return "Westend heeft aanvullingen gevraagd.";
+}
+
+// The reviewer's note is only shown while Westend's request is open (review_needed).
+export function visibleReviewRequest(reviewStatus: DashboardReviewStatus, reviewRequest: ReviewRequest | null): ReviewRequest | null {
+  return reviewStatus === "review_needed" ? reviewRequest : null;
+}
 
 export const initialFlowState: FlowState = {
   answers: {},

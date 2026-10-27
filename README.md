@@ -8,6 +8,8 @@ Dit document is bewust groeiend. Nieuwe technische keuzes, gerealiseerde stappen
 
 De applicatie brengt de belangrijkste commerciële en operationele informatie van een klantomgeving samen in één dashboard. De applicatie wordt multi-tenant opgezet: iedere klantomgeving heeft eigen gebruikers, leden en gegevens.
 
+De actuele volgorde voor de resterende onboarding-, review- en productiehand-off-slices staat in [de roadmap onboarding en review](docs/ONBOARDING-REVIEW-ROADMAP.md).
+
 ## Huidige stack
 
 - Frontend: Next.js, React en TypeScript
@@ -64,10 +66,24 @@ ZITADEL beheert identiteit en authenticatie. De eigen PostgreSQL-database blijft
 - Onveranderlijke audit-events bij het officieel indienen van een onboarding via migraties `0007` en `0008`.
 - Westend-reviewer-toewijzingen per tenant (migratie `0009`) en het read-only metadata-endpoint `GET /v1/review/onboarding`.
 - Eerste reviewactie `submitted` → `review_needed` via `POST /v1/review/onboarding/request-changes`, met een review request en een `review_requested`-audit-event in één transactie (migraties `0010` en `0011`).
-- Een Owner kan in `review_needed` een concept opslaan: iedere opslag maakt een nieuwe immutable versie, de status blijft `review_needed` en er komt geen audit-event. Het dashboard maakt deze status bewerkbaar en slaat wijzigingen automatisch op; opnieuw indienen blijft een aparte open slice.
+- Een Owner kan in `review_needed` een concept opslaan: iedere opslag maakt een nieuwe immutable versie, de status blijft `review_needed` en er komt geen audit-event. Het dashboard maakt deze status bewerkbaar en slaat wijzigingen automatisch op.
+- Een Owner kan een aangevulde onboarding vanuit `review_needed` opnieuw indienen: de API maakt een nieuwe versie, zet de status op `submitted` en schrijft in dezelfde transactie een `resubmitted`-audit-event (migratie `0012`). Migratie `0013` maakt daarnaast de `review_requested`-statuscheck expliciet null-veilig.
+- Een toegewezen reviewer kan `submitted` transactioneel blokkeren (`POST /v1/review/onboarding/block`) en een blokkade opheffen naar `review_needed` (`POST /v1/review/onboarding/unblock`). Migratie `0014` voegt de tenantgebonden reviewacties, aparte reden-codes en de immutable audit-events `blocked` en `unblocked` toe.
+- Een toegewezen reviewer kan een actuele `submitted` onboarding goedkeuren via `POST /v1/review/onboarding/approve`. Migratie `0015` voegt het immutable `approved`-audit-event toe. Een goedgekeurd project blijft het huidige project; de Owner kan het lezen maar niet wijzigen.
+- Een toegewezen reviewer kan een goedgekeurde onboarding gecontroleerd heropenen via `POST /v1/review/onboarding/reopen`. Migratie `0016` voegt de tenantgebonden `reopened`-reviewactie en het immutable `reopened`-audit-event toe. De Owner kan daarna aanvullen en opnieuw indienen.
+- Bij `review_needed` ziet de Owner de actieve reviewfeedback van het huidige project. Een wijzigingsverzoek, reopen of unblock geeft alleen reden, notitie, beoordeelde versie, datum en feedbacktype terug; reviewer- en interne gegevens blijven verborgen. Na resubmission wordt de feedback niet meer getoond.
+- Het dashboard toont voor `submitted`, `blocked` en `approved` aparte statuslabels en meldingen. `blocked` en `approved` blijven volledig alleen-lezen; onbekende statussen vallen fail-closed terug naar de veilige ingediende weergave.
 - `/api/onboarding` in de Next.js BFF met server-side sessie, token refresh en conflictcontrole; alleen een Owner heeft `onboarding:manage`.
 - Dashboard-onboarding hervat concepten na refresh en slaat antwoorden automatisch op; bestanden zijn voorlopig metadata-only.
 - Zelfstandige demowebsite in `apps/demo-site`; zie [het implementatierecord](docs/demo-site-implementation-record-v1.0.md).
+
+## Architectuurbesluit websiteproductie — 27 oktober 2026
+
+De Conversion Engine is de control plane voor websiteproductie. Zij beheert en versioneert de goedgekeurde Project Brief, de Demo Design Baseline voor Process A, de Design Change Set en het Production Prompt Package. De daadwerkelijke websitebouw gebeurt voorlopig in een geïsoleerd klantproject met eigen code, content, assets, tests, screenshots en deploymentflow.
+
+Process A gebruikt de bestaande demo-pagina als design-startpunt; Process B gebruikt een goedgekeurde branchetemplate of designreferentie. Nieuwe, bevestigde onboardinginformatie en de goedgekeurde Project Brief hebben voorrang op oude demo-copy, onbevestigde prospect research en AI-afleidingen. Productie start pas na Gate A en publicatie pas na staging/QA, klantakkoord en Gate B. Een promptpakket is versioned en herleidbaar; de promptgenerator publiceert nooit zelfstandig.
+
+Een volledig geïntegreerde websitegenerator/runner wordt uitgesteld totdat de promptcontracten en pilotworkflow zich in meerdere geïsoleerde klantprojecten hebben bewezen. Deze keuze voorkomt dat een nog veranderende AI-productieworkflow direct onderdeel wordt van de centrale SaaS-runtime.
 
 ## Security foundation — 22 oktober 2026
 
@@ -136,15 +152,15 @@ De handmatige submit-smoketest met een echte ZITADEL-sessie is geslaagd: de onbo
 
 Het officieel indienen van een onboarding wordt vastgelegd in een onveranderlijk auditlog.
 
-- De eerste audit-event-slice introduceerde `onboarding_audit_events` (migratie `0007`, aangescherpt in `0008`) met `member_user_id` als actor voor klantacties. Migratie `0010` voegde `reviewer_user_id`, `version` en het eventtype `review_requested` toe; migratie `0011` koppelde versies aan echte onboardingversies.
-- Een `submitted`-event gaat altijd naar status `submitted`, en de database staat als vorige status alleen `draft` toe, of leeg als het project bij het indienen zelf is aangemaakt. Een `review_requested`-event gaat altijd van `submitted` naar `review_needed`.
+- De eerste audit-event-slice introduceerde `onboarding_audit_events` (migratie `0007`, aangescherpt in `0008`) met `member_user_id` als actor voor klantacties. Migratie `0010` voegde `reviewer_user_id`, `version` en het eventtype `review_requested` toe; migratie `0011` koppelde versies aan echte onboardingversies; migratie `0012` voegde `resubmitted` toe; migratie `0013` repareerde de null-veiligheid van de `review_requested`-statuscheck; migratie `0014` voegde `blocked` en `unblocked` toe; migratie `0015` voegde `approved` toe; migratie `0016` voegde `reopened` toe.
+- Een `submitted`-event gaat altijd naar status `submitted`, en de database staat als vorige status alleen `draft` toe, of leeg als het project bij het indienen zelf is aangemaakt. Een `review_requested`-event gaat altijd van `submitted` naar `review_needed`; een `resubmitted`-event gaat altijd van `review_needed` naar `submitted`; een `blocked`-event gaat van `submitted` naar `blocked`; een `unblocked`-event van `blocked` naar `review_needed`; een `approved`-event van `submitted` naar `approved`.
 - Het event wordt geschreven in dezelfde transactie als de nieuwe onboardingversie en de statusovergang. Bij een fout of rollback blijft er geen event achter.
 - Tenant en actor komen uitsluitend uit de auth-context. Samengestelde foreign keys borgen dit ook in de database: `(tenant_id, project_id)` verwijst naar een project van dezelfde tenant, `(tenant_id, member_user_id)` naar een membership van dezelfde tenant en `(tenant_id, reviewer_user_id)` naar een reviewer assignment van dezelfde tenant.
 - Het event bevat geen antwoorden, Project Brief-inhoud, tokens of andere klantdata.
 - Een databasetrigger weigert `UPDATE` en `DELETE` op de tabel. Deze trigger is handmatig aan de gegenereerde migratie toegevoegd, omdat Drizzle triggers niet modelleert.
 - Database- en API-tests dekken het geslaagde event en de foutpaden: onvolledige of ongeldige antwoorden, verouderde `base_version`, tweede submit, submit na een eerdere statusovergang, een fout tijdens de transactie, een mismatch tussen tenant en project, een actor uit een andere tenant en een ongeldige vorige status.
 
-Een audit-endpoint of audit-dashboard bestaat nog niet. De migraties `0007` t/m `0011` zijn alleen op de lokale testdatabase toegepast; de ontwikkeldatabase is nog niet gemigreerd. De audit- en review-slices zijn onafhankelijk gecontroleerd.
+Een audit-endpoint of audit-dashboard bestaat nog niet. De migraties `0007` t/m `0015` zijn alleen op de lokale testdatabase toegepast; de ontwikkeldatabase is nog niet gemigreerd. De audit- en review-slices zijn onafhankelijk gecontroleerd.
 
 ## Westend-reviewer foundation — 27 oktober 2026
 
@@ -171,7 +187,7 @@ Gebouwd volgens richting B uit [`docs/reviewworkflow-foundation-decision.md`](do
 **Nog niet gebouwd in deze slice** (`submitted` → `review_needed` en reviewnotities zijn daarna toegevoegd, zie hieronder):
 
 - reviewstatusovergangen;
-- reviewnotities;
+- status- en redenovergangen buiten `review_requested`;
 - beheer van toewijzingen (geen endpoint, script of UI; O-2 en O-3 staan open);
 - inzage in antwoorden door reviewers, en het loggen daarvan;
 - MFA/AAL-handhaving en PostgreSQL-RLS.
@@ -204,6 +220,8 @@ Een toegewezen reviewer kan een ingediende onboarding terugzetten naar `review_n
   - samengestelde FK's naar het project van dezelfde tenant en naar de reviewer-toewijzing van dezelfde tenant;
   - checks op de reden-code, `version` ≥ 1, een niet-lege notitie en maximaal 2.000 tekens.
 
+- **Owner-weergave van reviewfeedback:** `GET /v1/onboarding/current` geeft bij `review_needed` alleen de reden, notitie, beoordeelde versie en datum van het laatste verzoek van het huidige project terug. De reviewer-ID en andere tenantgegevens worden niet teruggegeven. Na conceptopslag blijft het verzoek zichtbaar; na resubmission en bij andere statussen is `review_request` `null`.
+
   De **reviewnotitie staat alleen in deze tabel**, niet in het auditlog.
 - **Audit-events kennen nu twee soorten actor:**
   - `member_user_id` voor klantacties: de voormalige `actor_user_id`, hernoemd zodat bestaande events en de membership-FK intact blijven;
@@ -225,18 +243,74 @@ Een Owner kan een onboarding met status `review_needed` aanvullen en als concept
 - Dezelfde `base_version`-controle voorkomt overschrijven van gelijktijdige wijzigingen; een conflict geeft `409 version_conflict`.
 - Conceptopslag maakt geen audit-event. De opslag is wel herleidbaar via de onboardingversie en `created_by`.
 - `submitted`, `blocked` en `approved` blijven niet bewerkbaar via deze route.
-- `review_needed` → `submitted` (`resubmitted`) is bewust niet onderdeel van deze slice.
+- `review_needed` → `submitted` (`resubmitted`) is in een daaropvolgende backend-slice gebouwd; zie hieronder.
 
-De API- en databasetests controleren de onveranderlijkheid van versies, statusbehoud, tenantisolatie, Owner-autorisatie, stale-version-conflicten en het ontbreken van een audit-event. Het dashboard herkent `review_needed` als bewerkbaar, bewaart wijzigingen via de bestaande BFF/PUT-flow en houdt `submitted` alleen-lezen. Opnieuw indienen is in deze slice bewust uitgeschakeld. De dashboard- en API-tests, lint, typecheck, build en visuele controle op desktop en mobiel zijn groen; de browsercontrole gebruikte synthetische data.
+De API- en databasetests controleren de onveranderlijkheid van versies, statusbehoud, tenantisolatie, Owner-autorisatie, stale-version-conflicten en het ontbreken van een audit-event. Het dashboard herkent `review_needed` als bewerkbaar, bewaart wijzigingen via de bestaande BFF/PUT-flow en houdt `submitted` alleen-lezen. De dashboard- en API-tests, lint, typecheck, build en visuele controle op desktop en mobiel zijn groen; de browsercontrole gebruikte synthetische data.
 
-**Nog niet gebouwd:**
+**Nog niet gebouwd op het moment van deze oorspronkelijke slice:**
 
-- `review_needed` → `submitted` (`resubmitted`), `blocked`, `approved` en `reopened`;
-- het tonen van reviewnotities aan de klant;
+- `reopened`;
+- het bewaartermijn- en beheerbeleid voor reviewnotities;
 - beheer van toewijzingen (O-2) en de ZITADEL-inrichting voor Westend-medewerkers (O-3);
 - MFA/AAL en RLS.
 
-Migraties `0010` en `0011` zijn alleen op de lokale testdatabase toegepast, handmatig (de testworkflow migreert niet automatisch). De ontwikkeldatabase is niet gemigreerd.
+## Gate 0 — bevestigde productbesluiten reviewworkflow
+
+De resterende reviewworkflow is uitgewerkt in [`docs/reviewworkflow-foundation-decision.md`](docs/reviewworkflow-foundation-decision.md). Gate 0 is bevestigd: `approved` blijft niet-bewerkbaar, alleen een toegewezen reviewer kan `blocked` opheffen of een onboarding heropenen, reviewerinzage wordt gelogd en `approved` betekent geen automatische publicatie. Er is voor Gate 0 geen code gewijzigd.
+
+Migraties `0010` t/m `0015` zijn alleen op de lokale testdatabase toegepast, handmatig (de testworkflow migreert niet automatisch). De ontwikkeldatabase is niet gemigreerd.
+
+## Opnieuw indienen vanuit `review_needed` — 27 oktober 2026
+
+Een Owner kan een aangevulde onboarding vanuit `review_needed` opnieuw indienen via `POST /v1/onboarding/current/submit`.
+
+- De bestaande volledige server-side validatie blijft verplicht; onvolledige of ongeldige antwoorden wijzigen niets.
+- De API gebruikt dezelfde rijlock en `base_version`-controle als conceptopslag en maakt een nieuwe immutable versie.
+- De status gaat transactioneel van `review_needed` naar `submitted`.
+- De API schrijft precies één `resubmitted`-audit-event met `member_user_id`, `from_status = review_needed`, `to_status = submitted` en de nieuwe versie; antwoorden en Project Brief-inhoud worden niet in het event opgeslagen.
+- Team Members, reviewers, andere tenants en stale versies worden geweigerd; een fout tijdens de versie- of eventopslag rolt de hele transactie terug.
+- Migratie `0012` voegt het eventtype en de bijbehorende databasechecks toe; migratie `0013` maakt de bestaande `review_requested`-statuscheck expliciet null-veilig. Audit-events blijven onveranderlijk.
+- Het dashboard wacht op een lopende autosave voordat het indient. Als die PUT een conflict, blokkade, validatiefout of netwerkfout geeft, wordt geen submit-POST verstuurd en blijft de onboarding bewerkbaar of wacht deze op een expliciete conflictkeuze.
+
+De onafhankelijke controle is groen: `npm run api:lint`, `npm run api:typecheck`, `npm run api:build`, 115 API-tests, 86 database-tests, de dashboardlint/typecheck/build, 132 dashboardtests en `git diff --check`. De browsercontrole met synthetische data bevestigde desktop en mobiel: een autosave-conflict resulteert in 0 submit-POSTs. De ontwikkel- en productiedatabase zijn niet gemigreerd.
+
+## Reopen-feedback voor de Owner — 27 oktober 2026
+
+Een Owner ziet bij een heropende onboarding met status `review_needed` dat Westend de goedkeuring heeft heropend, inclusief de reden, volledige notitie, beoordeelde versie en datum/tijd.
+
+- De API combineert alleen de feedbackbronnen van het huidige project: een wijzigingsverzoek of een reopenactie.
+- De actieve feedback wordt deterministisch gekozen op basis van de beoordeelde onboardingversie; de tijd ordent alleen gelijke versies.
+- `GET /v1/onboarding/current` geeft alleen `kind`, `reason_code`, `note`, `version` en `created_at` terug.
+- Feedback is tenant- en projectgebonden, wordt alleen bij `review_needed` getoond en verdwijnt na resubmission.
+- De bestaande BFF, autosaveflow en resubmissionflow zijn niet inhoudelijk gewijzigd.
+- De dashboardweergave is gecontroleerd op desktop en mobiel, inclusief loading, ontbrekende feedback, lange notities en resubmission.
+
+De onafhankelijke controle is groen: API-lint, API-typecheck, API-build, 131 API-tests, 117 databasetests, dashboardlint, dashboardtypecheck, dashboardbuild, 140 dashboardtests en `git diff --check`. Migratie `0016` is alleen lokaal op de testdatabase toegepast.
+
+## Dashboardstatussen voor `blocked` en `approved` — 27 oktober 2026
+
+De Owner ziet voor `blocked` en `approved` een expliciete statusmelding in plaats van de generieke tekst `Ingediend`.
+
+- `blocked` toont dat de onboarding tijdelijk is geblokkeerd en dat opnieuw indienen niet mogelijk is.
+- `approved` toont dat de onboarding is goedgekeurd en dat nieuwe wijzigingen niet kunnen worden opgeslagen.
+- De vragen en Project Brief blijven zichtbaar maar niet-bewerkbaar.
+- `submitted` behoudt de bestaande melding.
+- Onbekende statussen blijven alleen-lezen en vallen terug naar een veilige standaardweergave.
+- API, database en statusovergangen zijn niet gewijzigd.
+- Desktop en mobiel zijn gecontroleerd met synthetische data.
+
+De onafhankelijke controle is groen: lint, typecheck, build, 140 dashboardtests, 131 API-tests, 117 databasetests en `git diff --check`.
+
+## Unblock-feedback voor de Owner — 27 oktober 2026
+
+Een Owner ziet bij een onboarding die van `blocked` naar `review_needed` is teruggezet dat Westend de blokkade heeft opgeheven, inclusief reden, volledige notitie, beoordeelde versie en datum/tijd.
+
+- De feedback gebruikt dezelfde tenant- en projectgebonden response als wijzigingsverzoeken en reopen-acties.
+- `GET /v1/onboarding/current` geeft alleen `kind`, `reason_code`, `note`, `version` en `created_at` terug.
+- Voor unblock is `kind` gelijk aan `unblocked`; de drie bestaande redencodes krijgen Nederlandse labels.
+- De actieve feedback wordt deterministisch gekozen op beoordeelde versie, tijd en een stabiele tiebreaker.
+- De feedback wordt alleen bij `review_needed` getoond en verdwijnt na resubmission.
+- Er is geen migratie toegevoegd; de bestaande `onboarding_review_actions`-opslag wordt hergebruikt.
 
 ## Authenticatiebesluit — 21 oktober 2026
 

@@ -52,6 +52,16 @@ Het huidige systeem is volgens de opdrachtgever te complex geworden. Een increme
 - Checklist voor ontbrekende configuratie; niet publiceren als essentiële velden ontbreken.
 **Acceptatie:** nieuwe tenant heeft eigen afgeschermde workspace, één bruikbare pipeline en aantoonbare testflow zonder toegang tot data van andere klanten.
 
+### M1A. Onboarding → websiteproductie
+**Doel:** de klantinformatie uit de onboarding gecontroleerd gebruiken als basis voor de productie van de klantwebsite.
+- Process A (koude outreach) start met een bestaande demo-pagina. De demo wordt als versioned **Demo Design Baseline** vastgelegd: structuur, componenten, design tokens, responsive gedrag, assets, bronherkomst, rechtenstatus en onzekerheden.
+- Process B (warme lead) heeft geen demo-baseline; daarvoor gebruikt Westend een goedgekeurde branchetemplate of designreferentie.
+- De Conversion Engine beheert de Project Brief, Demo Design Baseline, **Design Change Set** en het versioned **Production Prompt Package**. Het promptpakket beschrijft wat uit de demo behouden, aangepast, verwijderd of nog gecontroleerd moet worden.
+- De Project Brief en bevestigde onboardinginformatie hebben voorrang op oude demo-copy, prospect research en AI-afleidingen. Onbevestigde feiten, claims en assets worden niet als productie-instructie behandeld.
+- De Conversion Engine is de control plane; de websitecode, content, tests en screenshots worden voorlopig in een geïsoleerd klantproject gebouwd. Het klantproject ontvangt alleen het goedgekeurde en tenantgebonden productie-inputpakket.
+- Productie start pas na Gate A. Staging, QA en klantakkoord zijn vereist vóór Gate B en publicatie; de promptgenerator publiceert nooit zelfstandig.
+**Acceptatie:** Process A en Process B kunnen hetzelfde productionele contract gebruiken; een wijziging in de goedgekeurde Project Brief maakt een nieuwe promptpakketversie; twee klantprojecten kunnen onafhankelijk worden gebouwd, getest, teruggedraaid en gepubliceerd zonder data- of contextvermenging.
+
 ### M2. Website & Lead Capture
 **Doel:** elke aanvraag correct ontvangen en aan de juiste tenant koppelen. **Productiedoel:** een standaardwebsite met AI in maximaal 3 uur menselijke bouw-/QA-tijd realiseren (los van 1,5 uur onboarding en commerciële tijd); de pilot moet dit meten en bewijzen.
 - Gestandaardiseerde website- en formuliercomponenten; configureerbare maar beperkte secties.
@@ -214,7 +224,7 @@ Gevoelige tenantdata, CRM-data en autorisatiebeslissingen worden niet onbeperkt 
 **Klaar als:** er een scherpe productdefinitie ligt, hergebruikbeslissingen zijn genomen, kritieke regels getest kunnen worden en er nog geen onbewezen stackkeuze is ingebouwd.
 
 ### Fase 1 — Salesproces & site-delivery
-**Werk:** outreachadministratie (mag aanvankelijk handmatig), demo-template, VSL-flow, lead→intake→checkout/onboarding, gestandaardiseerde website- en formulierdelivery.
+**Werk:** outreachadministratie (mag aanvankelijk handmatig), demo-template, VSL-flow, lead→intake→checkout/onboarding, gestandaardiseerde website- en formulierdelivery, Demo Design Baseline en overdracht van het Production Prompt Package naar een geïsoleerd klantproject.
 **Klaar als:** een pilotklant een realistisch voorbeeld ziet, kan besluiten, onboarden en een functionerende website met formulier krijgt binnen vastgestelde scope.
 
 ### Fase 1B — Next.js dashboard- en PWA-fundament

@@ -85,6 +85,41 @@
       "when": 1793095899845,
       "tag": "0011_reflective_exiles",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793099169544,
+      "tag": "0012_lazy_quentin_quire",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793099877025,
+      "tag": "0013_majestic_enchantress",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793105347566,
+      "tag": "0014_breezy_scourge",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1793106197076,
+      "tag": "0015_bitter_chimera",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793107355792,
+      "tag": "0016_special_prism",
+      "breakpoints": true
     }
   ]
 }

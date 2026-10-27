@@ -23,7 +23,21 @@ import {
   steps,
 } from "../../../../packages/onboarding-contract/src/index";
 import { completeAnswers } from "../../../../packages/onboarding-contract/src/testFixtures";
-import { allowsSubmit, flowReducer, initialFlowState, isReadOnly, reviewStatusFromServer, type FlowAction, type FlowState } from "./flow";
+import {
+  allowsSubmit,
+  flowReducer,
+  initialFlowState,
+  isReadOnly,
+  onboardingStatusLabel,
+  reviewFeedbackTitle,
+  reviewReasonLabel,
+  reviewStatusFromServer,
+  readOnlyStatusMessage,
+  visibleReviewRequest,
+  type FlowAction,
+  type FlowState,
+  type ReviewRequest,
+} from "./flow";
 
 // ---------- Hulpfuncties ----------
 
@@ -374,8 +388,8 @@ test("serverstatus: draft en review_needed blijven bewerkbaar; submitted, blocke
     ["draft", "draft"],
     ["review_needed", "review_needed"],
     ["submitted", "submitted"],
-    ["blocked", "submitted"],
-    ["approved", "submitted"],
+    ["blocked", "blocked"],
+    ["approved", "approved"],
     ["iets_nieuws", "submitted"],
   ];
   for (const [server, client] of cases) {
@@ -383,10 +397,39 @@ test("serverstatus: draft en review_needed blijven bewerkbaar; submitted, blocke
   }
 });
 
-test("indienen per status: alleen draft kan indienen; review_needed is bewerkbaar maar nog niet opnieuw indienbaar", () => {
+test("indienen per status: draft en review_needed kunnen indienen; submitted, blocked en approved zijn alleen-lezen", () => {
   assert.deepEqual([isReadOnly("draft"), allowsSubmit("draft")], [false, true]);
-  assert.deepEqual([isReadOnly("review_needed"), allowsSubmit("review_needed")], [false, false]);
+  assert.deepEqual([isReadOnly("review_needed"), allowsSubmit("review_needed")], [false, true]);
   assert.deepEqual([isReadOnly("submitted"), allowsSubmit("submitted")], [true, false]);
+  assert.deepEqual([isReadOnly("blocked"), allowsSubmit("blocked")], [true, false]);
+  assert.deepEqual([isReadOnly("approved"), allowsSubmit("approved")], [true, false]);
+});
+
+test("dashboardmeldingen: blocked en approved zijn duidelijk, submitted blijft bestaand", () => {
+  assert.deepEqual(readOnlyStatusMessage("blocked"), {
+    tone: "warning",
+    title: "Deze onboarding is tijdelijk geblokkeerd door Westend.",
+    body: "Je antwoorden zijn zichtbaar maar niet bewerkbaar. Opnieuw indienen is niet mogelijk; Westend moet eerst verdere actie ondernemen.",
+  });
+  assert.deepEqual(readOnlyStatusMessage("approved"), {
+    tone: "success",
+    title: "Deze onboarding is goedgekeurd door Westend.",
+    body: "Je antwoorden zijn alleen-lezen; nieuwe wijzigingen kunnen niet worden opgeslagen.",
+  });
+  assert.deepEqual(readOnlyStatusMessage("submitted"), {
+    tone: "success",
+    title: "Deze onboarding is ingediend.",
+    body: "Je kunt je antwoorden nog bekijken, maar niet meer wijzigen.",
+  });
+  assert.deepEqual([onboardingStatusLabel("blocked"), onboardingStatusLabel("approved"), onboardingStatusLabel("submitted")], ["Geblokkeerd", "Goedgekeurd", "Ingediend"]);
+});
+
+test("blocked en approved blijven onveranderlijk in de reducer", () => {
+  for (const reviewStatus of ["blocked", "approved"] as const) {
+    const state = flowReducer(initialFlowState, { type: "hydrate", answers: completeAnswers(), reviewStatus });
+    assert.equal(flowReducer(state, { type: "answer", fieldId: "company_name", value: "Nieuwe synthetische waarde" }), state, reviewStatus);
+    assert.equal(allowsSubmit(state.reviewStatus), false, reviewStatus);
+  }
 });
 
 test("na refresh: review_needed wordt geladen met status en antwoorden, en antwoorden blijven wijzigbaar", () => {
@@ -397,4 +440,82 @@ test("na refresh: review_needed wordt geladen met status en antwoorden, en antwo
   const changed = flowReducer(hydrated, { type: "answer", fieldId: "company_name", value: "Aangevulde naam BV" });
   assert.equal(changed.answers.company_name, "Aangevulde naam BV");
   assert.equal(changed.reviewStatus, "review_needed", "bewerken laat de status ongemoeid");
+});
+
+test("opnieuw indienen: review_needed wordt na de serverbevestiging submitted en daarna alleen-lezen", () => {
+  let state = flowReducer(initialFlowState, { type: "hydrate", answers: completeAnswers(), reviewStatus: "review_needed" });
+  state = flowReducer(state, { type: "answer", fieldId: "company_name", value: "Aangevulde naam BV" });
+  assert.equal(state.reviewStatus, "review_needed", "wijzigen dient niets in");
+
+  state = flowReducer(state, { type: "submitted" });
+  assert.equal(state.reviewStatus, "submitted");
+  assert.equal(state.answers.company_name, "Aangevulde naam BV", "de ingediende antwoorden blijven zichtbaar");
+  assert.deepEqual([isReadOnly(state.reviewStatus), allowsSubmit(state.reviewStatus)], [true, false]);
+  assert.equal(flowReducer(state, { type: "answer", fieldId: "company_name", value: "Na indienen" }), state, "alleen-lezen na indienen");
+});
+
+// ---------- Reviewnotitie voor de Owner ----------
+
+test("reviewnotitie: redenlabels zijn Nederlands, een onbekende code krijgt een neutraal label", () => {
+  assert.equal(reviewReasonLabel("missing_information"), "Ontbrekende informatie");
+  assert.equal(reviewReasonLabel("rights_unclear"), "Rechten of bron onduidelijk");
+  assert.equal(reviewReasonLabel("out_of_scope"), "Buiten de standaard scope");
+  assert.equal(reviewReasonLabel("basis_provided"), "Basis aangevuld");
+  assert.equal(reviewReasonLabel("rights_cleared"), "Rechten opgehelderd");
+  assert.equal(reviewReasonLabel("extra_work_agreed"), "Meerwerk afgestemd");
+  assert.equal(reviewReasonLabel("toekomstige_code"), "Aanvulling gevraagd");
+  assert.equal(reviewReasonLabel("toString"), "Aanvulling gevraagd", "no prototype keys");
+});
+
+test("reviewnotitie: alleen zichtbaar in review_needed, verborgen bij draft en submitted", () => {
+  const request: ReviewRequest = { reason_code: "rights_unclear", note: "Graag de fotobron aanvullen.", version: 2, created_at: "2026-10-27T09:30:00.000Z" };
+  assert.equal(visibleReviewRequest("review_needed", request), request);
+  assert.equal(visibleReviewRequest("draft", request), null);
+  // submitted also covers blocked, approved and unknown server statuses (see reviewStatusFromServer).
+  for (const server of ["submitted", "blocked", "approved"]) {
+    assert.equal(visibleReviewRequest(reviewStatusFromServer(server), request), null, server);
+  }
+  assert.equal(visibleReviewRequest("review_needed", null), null, "no request: nothing to show");
+});
+
+// ---------- Reopen-feedback voor de Owner ----------
+
+test("reopen-feedback: Nederlandse labels voor de reopen-redenen en een eigen titel", () => {
+  assert.equal(reviewReasonLabel("material_input_change"), "Materiële wijziging in de intake");
+  assert.equal(reviewReasonLabel("rights_or_asset_change"), "Wijziging in rechten of beeldmateriaal");
+  assert.equal(reviewReasonLabel("scope_or_strategy_change"), "Wijziging in scope of strategie");
+
+  const reopened: ReviewRequest = { kind: "reopened", reason_code: "material_input_change", note: "Graag opnieuw controleren.", version: 2, created_at: "2026-10-27T14:05:00.000Z" };
+  assert.equal(reviewFeedbackTitle(reopened), "Westend heeft je goedgekeurde onboarding heropend.");
+  assert.equal(reviewFeedbackTitle({ ...reopened, kind: "changes_requested" }), "Westend heeft aanvullingen gevraagd.");
+  // Older responses without kind, or no feedback at all, keep the existing title.
+  const withoutKind: ReviewRequest = { reason_code: "missing_information", note: "Ouder antwoord.", version: 1, created_at: "2026-10-27T14:05:00.000Z" };
+  assert.equal(reviewFeedbackTitle(withoutKind), "Westend heeft aanvullingen gevraagd.");
+  assert.equal(reviewFeedbackTitle(null), "Westend heeft aanvullingen gevraagd.");
+});
+
+test("unblock-feedback: duidelijke Nederlandse titel en veilige redenlabels", () => {
+  const unblocked: ReviewRequest = { kind: "unblocked", reason_code: "rights_cleared", note: "De rechten zijn opgehelderd.", version: 3, created_at: "2026-10-27T15:05:00.000Z" };
+  assert.equal(reviewFeedbackTitle(unblocked), "Westend heeft de blokkade opgeheven.");
+  assert.equal(reviewFeedbackTitle({ ...unblocked, kind: "future_kind" }), "Westend heeft aanvullingen gevraagd.");
+  assert.equal(reviewReasonLabel("future_unblock_reason"), "Aanvulling gevraagd");
+});
+
+test("reopen-feedback: alleen zichtbaar in review_needed, niet bij draft, submitted, blocked of approved", () => {
+  const reopened: ReviewRequest = { kind: "reopened", reason_code: "scope_or_strategy_change", note: "Het aanbod is gewijzigd.", version: 1, created_at: "2026-10-27T14:05:00.000Z" };
+  assert.equal(visibleReviewRequest("review_needed", reopened), reopened);
+  for (const server of ["draft", "submitted", "blocked", "approved"]) {
+    assert.equal(visibleReviewRequest(reviewStatusFromServer(server), reopened), null, server);
+  }
+});
+
+test("unblock-feedback: alleen zichtbaar in review_needed en verdwijnt na resubmission", () => {
+  const unblocked: ReviewRequest = { kind: "unblocked", reason_code: "extra_work_agreed", note: "Meerwerk is afgestemd.", version: 4, created_at: "2026-10-27T15:05:00.000Z" };
+  assert.equal(visibleReviewRequest("review_needed", unblocked), unblocked);
+  for (const server of ["draft", "submitted", "blocked", "approved"]) {
+    assert.equal(visibleReviewRequest(reviewStatusFromServer(server), unblocked), null, server);
+  }
+  let state = flowReducer(initialFlowState, { type: "hydrate", answers: completeAnswers(), reviewStatus: "review_needed" });
+  state = flowReducer(state, { type: "submitted" });
+  assert.equal(visibleReviewRequest(state.reviewStatus, unblocked), null);
 });

@@ -67,7 +67,7 @@ flowchart TD
 | Lead → eerste AI-antwoord | Classificeer, policycheck, streng outputcontract, max één inhoudelijke AI-reply | Geen toolbevoegdheid om bedragen, tenant, ontvanger of webhooks te wijzigen |
 | Follow-up → menselijke overname | Max één toegestane vooraf goedgekeurde reminder na 48 uur als aantoonbaar geen antwoord; na verdere 48 uur menselijke taak | Bij onbekende reply-status geen automatische reminder; geen mailboxbreed uitlezen |
 | Commerciële conversie → onboarding | Overeenkomst → tenant/Owner uitnodigen met MFA → Q1–Q4 met 39 directe kernvragen plus gerichte vervolgvragen | Onboarding niet vóór verkoop; geen verlies van de 123 bewaarde datavelden |
-| Project Brief → site | Broncontrole/intake → Gate A → sandboxed AI-productie → staging/QA → klantinhoud akkoord + Gate B → deployment | Geen automatische productie zonder Gate A, geen publicatie zonder Gate B |
+| Project Brief → site | Conversion Engine control plane: Project Brief + Demo Design Baseline + Design Change Set + Production Prompt Package → geïsoleerd klantproject voor sandboxed AI-productie → staging/QA → klantinhoud akkoord + Gate B → deployment | Geen automatische productie zonder Gate A, geen publicatie zonder Gate B; klantproject ontvangt alleen goedgekeurde tenantdata |
 | Formuliermonitoring | UI-check elke 30 min **zonder** backend-submit; veilige volledige synthetische test iedere 3 dagen | Geen testleads in salesstatistiek; geen commerciële AI/e-mail/reminderflow |
 | Website Intelligence | GA4, GSC, Clarity, DataForSEO snapshots → brongebonden maandadvies → Westend-review | Geen niet-bestaande demografie, identificatie van onbekende bezoekers of auto-publicatie |
 | Financiële rapportage | Dealprojectie ≠ gewonnen contract ≠ handmatig vastgelegde ontvangst; auditbare correcties | Geen betaalverwerking, facturatie of boekhoudvervanging in Basis |
@@ -131,7 +131,7 @@ flowchart TD
 | F5-01 Identity & multi-tenancy | Auth/MFA alle rollen, memberships, permissions, PostgreSQL-DDL + RLS, tests voor A/B-tenant | Cross-tenant attempts geblokkeerd onder runtime-rol |
 | F5-02 Lead capture & CRM-kern | Websites/formconfig, submission+outbox, contacten, leads, taken, deals, financiële events | Geldige aanvraag blijft bestaan bij AI-/mailuitval; correcte audit |
 | F5-03 Automation & e-mail | AI Gateway, intenties, policy-engine, één antwoord, reply-router, reminderregels en menselijke fallback | Attack-, duplicate-, unknown- en reply-tests geslaagd |
-| F5-04 Onboarding → websiteproductie | Q1–Q4 + Project Brief, Gate A, componentbibliotheek, Sanity-content, staging, Gate B | Twee klantprojecten gescheiden bouwen en terugrollen |
+| F5-04 Onboarding → websiteproductie | Q1–Q4 + Project Brief, Demo Design Baseline, Design Change Set, Production Prompt Package, Gate A, geïsoleerd klantproject, componentbibliotheek, Sanity-content, staging, Gate B | Twee klantprojecten gescheiden bouwen, testen en terugrollen; promptinput en provenance zijn herleidbaar |
 | F5-05 Monitoring & website-intelligence | Veilige Playwright-paden, GA4/GSC/Clarity/DataForSEO ingest, rapportreview | Synthetische tests zijn commercieel inert; bronherkomst traceerbaar |
 | F5-06 Pilot-readiness | WAL/PITR, offsite backups, restore/tenant recovery, incidenten, privacycheck, load-test, supportprocedures | Alle P0-releasegates aantoonbaar groen; daarna beperkte productielancering |
 

@@ -7,7 +7,14 @@ import { createZitadelAdapter } from "./auth/zitadelAdapter.js";
 import { createDb } from "./db.js";
 import { createLead } from "./leads/leadRepository.js";
 import { findCurrentOnboarding, saveOnboardingDraft, submitOnboarding } from "./onboarding/onboardingRepository.js";
-import { findReviewableOnboarding, requestOnboardingChanges } from "./onboarding/onboardingReviewRepository.js";
+import {
+  approveOnboarding,
+  blockOnboarding,
+  findReviewableOnboarding,
+  reopenOnboarding,
+  requestOnboardingChanges,
+  unblockOnboarding,
+} from "./onboarding/onboardingReviewRepository.js";
 import { findTenant } from "./tenants/tenantLoader.js";
 
 const HOST = "127.0.0.1";
@@ -45,6 +52,10 @@ const app = buildApp({
   reviewStore: {
     findReviewable: (tenantId) => findReviewableOnboarding(db, tenantId),
     requestChanges: (input) => requestOnboardingChanges(db, input),
+    block: (input) => blockOnboarding(db, input),
+    unblock: (input) => unblockOnboarding(db, input),
+    approve: (input) => approveOnboarding(db, input),
+    reopen: (input) => reopenOnboarding(db, input),
   },
 });
 

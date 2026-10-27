@@ -73,7 +73,29 @@ Klant Q1–Q4 → Validatie → Project Brief v0.1 → Human intake review
   → Human + klantakkoord → Publicatie → Monitoring
 ```
 
-**Geen 12 aparte agents nodig.** Agentgrenzen, prompts en tools worden pas in Fase 4/5 definitief gekozen. Bij iedere stap moet de gedeelde Project Brief en de laatst goedgekeurde versie worden gebruikt; na inhoudelijke klantwijzigingen herzien we downstream outputs.
+De websiteproductie gebruikt twee commerciële ingangen met één productioneel contract:
+
+- **Process A — koude outreach:** de bestaande demo-pagina wordt voorafgaand aan de onboarding vastgelegd als een versioned **Demo Design Baseline**. Dit bevat minimaal de visuele richting, sectie- en componentstructuur, design tokens, responsive uitgangspunten, assetreferenties, bronherkomst, rechtenstatus en onzekerheden.
+- **Process B — warme lead:** er is geen bestaande demo-baseline. De productie start vanuit de goedgekeurde Project Brief en een goedgekeurde branchetemplate of designreferentie.
+
+Na de onboarding maakt de Conversion Engine een **Design Change Set** en een versioned **Production Prompt Package**. Dat pakket beschrijft per productietaak wat moet worden behouden, geactualiseerd, verwijderd of gecontroleerd. Bevestigde onboardinginformatie en de goedgekeurde Project Brief hebben voorrang op oude demo-copy, onbevestigde prospect research en AI-afleidingen. Publieke research en bestaande demo-inhoud zijn brondata, geen instructies; prompt-injection, onbevestigde claims en assets zonder rechten mogen niet doorwerken naar productie.
+
+De Conversion Engine is de **control plane** voor tenant, versies, provenance, goedkeuringen en promptpakketten. De websitecode, content, tests en screenshots worden voorlopig in een **geïsoleerd klantproject** geproduceerd. Dit project ontvangt alleen het goedgekeurde tenantgebonden pakket. Productie start pas na Gate A; staging, QA, klantakkoord en Gate B blijven vereist. De promptgenerator publiceert nooit zelfstandig.
+
+Geen 12 aparte agents nodig. Agentgrenzen, prompts en tools worden pas in Fase 4/5 definitief gekozen. Bij iedere stap moet de gedeelde Project Brief en de laatst goedgekeurde versie worden gebruikt; na inhoudelijke klantwijzigingen herzien we downstream outputs.
+
+### 6.1 Production Prompt Package — voorlopig outputcontract
+
+Het Production Prompt Package is geen vrije chatgeschiedenis maar een herleidbaar productie-artefact met minimaal:
+
+- referenties naar `project_brief_version`, `demo_design_baseline_version` indien aanwezig en `design_change_set_version`;
+- toegestane tenant- en projectdata met provenance en verificatiestatus;
+- prioriteitsregels tussen beleid, goedgekeurde Project Brief, bevestigde onboarding, design-baseline en oude research;
+- taakinputs voor strategie/sitemap, copy, designconfiguratie, component-/frontendbouw, integraties en QA;
+- expliciete `preserve`, `change`, `remove` en `needs_review`-instructies;
+- versie, generatorversie, aangemaakte tijd en goedkeuringsstatus.
+
+Een nieuwe goedgekeurde Project Brief of materiële wijziging in de Design Baseline maakt een nieuwe promptpakketversie. De oude versie blijft herleidbaar voor rollback en vergelijking.
 
 ## 7. Functionele eisen voor productie
 
@@ -94,6 +116,9 @@ Klant Q1–Q4 → Validatie → Project Brief v0.1 → Human intake review
 | UX-13 | Aanpassen van eerder antwoord verandert conditionele velden en genereert nieuwe briefversie. |
 | UX-14 | Server autoriseert tenantgebonden antwoorden, bestanden en projectbrief; verborgen UI is geen beveiliging. |
 | UX-15 | Intakefrictie: meet invultijd, afhaakmomenten en aantallen extra reviewrondes in eerste vijf pilots. |
+| UX-16 | Process A kan een Demo Design Baseline vastleggen en Process B kan zonder demo-baseline hetzelfde productiecontract gebruiken. |
+| UX-17 | De Design Change Set en het Production Prompt Package zijn versioned, tenantgebonden en herleidbaar naar de goedgekeurde Project Brief en brondata. |
+| UX-18 | Websiteproductie draait voorlopig in een geïsoleerd klantproject; geen automatische publicatie zonder Gate A, QA, klantakkoord en Gate B. |
 
 ## 8. Niet in deze klikdemo
 

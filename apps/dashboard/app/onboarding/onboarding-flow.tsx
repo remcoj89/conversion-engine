@@ -2,7 +2,19 @@
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { onboardingSchema, phaseProgress, stepErrors, stepProgress, steps, visibleFields } from "../../../../packages/onboarding-contract/src/index";
-import { flowReducer, initialFlowState, isReadOnly, type FlowAction, type FlowState } from "../../lib/onboarding/flow";
+import {
+  flowReducer,
+  initialFlowState,
+  isReadOnly,
+  onboardingStatusLabel,
+  readOnlyStatusMessage,
+  reviewFeedbackTitle,
+  reviewReasonLabel,
+  visibleReviewRequest,
+  type FlowAction,
+  type FlowState,
+  type ReviewRequest,
+} from "../../lib/onboarding/flow";
 import OnboardingField from "./onboarding-field";
 import ReviewPanel from "./review-panel";
 import SaveStatus from "./save-status";
@@ -128,7 +140,7 @@ export default function OnboardingFlow() {
                 </span>
                 <span className="phase-text">
                   <span className="phase-title">Controle & Project Brief</span>
-                  <span className="phase-meta">{readOnly ? "Ingediend" : changesRequested ? "Aanvullingen gevraagd" : "Eindcontrole en output"}</span>
+          <span className="phase-meta">{readOnly ? onboardingStatusLabel(state.reviewStatus) : changesRequested ? "Aanvullingen gevraagd" : "Eindcontrole en output"}</span>
                 </span>
               </button>
             </li>
@@ -202,13 +214,9 @@ export default function OnboardingFlow() {
                 </div>
               )}
 
-              {readOnly && (
-                <div className="notice notice-success" role="status">
-                  Deze onboarding is ingediend. Je kunt je antwoorden nog bekijken, maar niet meer wijzigen.
-                </div>
-              )}
+              {readOnly && <ReadOnlyStatusNotice reviewStatus={state.reviewStatus} />}
 
-              {changesRequested && <ChangesRequestedNotice />}
+              {changesRequested && <ChangesRequestedNotice reviewRequest={visibleReviewRequest(state.reviewStatus, sync.reviewRequest)} />}
 
               {/* Na indienen alleen-lezen: een uitgeschakelde fieldset blokkeert alle velden tegelijk. */}
               <fieldset className="onboarding-fields" disabled={readOnly}>
@@ -251,12 +259,40 @@ export default function OnboardingFlow() {
   );
 }
 
-// Shown while Westend has asked for additions: answers stay editable and are saved as a draft.
-function ChangesRequestedNotice() {
+function ReadOnlyStatusNotice({ reviewStatus }: Readonly<{ reviewStatus: FlowState["reviewStatus"] }>) {
+  const message = readOnlyStatusMessage(reviewStatus);
+  if (!message) return null;
+  return (
+    <div className={`notice notice-${message.tone}`} role="status">
+      <p>
+        <strong>{message.title}</strong> {message.body}
+      </p>
+    </div>
+  );
+}
+
+const reviewedAtFormat = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+// Shown while Westend has asked for additions, reopened the approval or lifted a block: answers stay editable
+// and are saved as a draft. When available, it shows the reason and note for the open feedback.
+function ChangesRequestedNotice({ reviewRequest }: Readonly<{ reviewRequest: ReviewRequest | null }>) {
   return (
     <div className="notice notice-warning" role="status">
-      <strong>Westend heeft aanvullingen gevraagd.</strong> Pas je antwoorden aan; wijzigingen worden automatisch opgeslagen. Opnieuw
-      indienen volgt in een volgende stap.
+      <p>
+        <strong>{reviewFeedbackTitle(reviewRequest)}</strong> Pas je antwoorden aan; wijzigingen worden automatisch opgeslagen. Dien de
+        onboarding daarna opnieuw in via Controle & Project Brief.
+      </p>
+      {reviewRequest && (
+        <>
+          <p>
+            <strong>Reden:</strong> {reviewReasonLabel(reviewRequest.reason_code)}
+          </p>
+          <p className="review-request-note">{reviewRequest.note}</p>
+          <p className="review-request-meta">
+            Beoordeeld op versie {reviewRequest.version} · {reviewedAtFormat.format(new Date(reviewRequest.created_at))}
+          </p>
+        </>
+      )}
     </div>
   );
 }

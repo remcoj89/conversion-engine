@@ -379,6 +379,18 @@ function httpSetup(memberships: readonly Membership[] = []) {
         requestChanges: async () => {
           throw new Error("not used in these tests");
         },
+        block: async () => {
+          throw new Error("not used in these tests");
+        },
+        unblock: async () => {
+          throw new Error("not used in these tests");
+        },
+        approve: async () => {
+          throw new Error("not used in these tests");
+        },
+        reopen: async () => {
+          throw new Error("not used in these tests");
+        },
       },
     },
     { logger: { level: "trace", stream: { write: (line: string) => logs.push(line) } } },
@@ -456,6 +468,18 @@ test("HTTP met ZITADEL-adapter: JWKS-fout geeft 500 internal_error zonder tokend
       reviewStore: {
         findReviewable: async () => null,
         requestChanges: async () => {
+          throw new Error("not used in these tests");
+        },
+        block: async () => {
+          throw new Error("not used in these tests");
+        },
+        unblock: async () => {
+          throw new Error("not used in these tests");
+        },
+        approve: async () => {
+          throw new Error("not used in these tests");
+        },
+        reopen: async () => {
           throw new Error("not used in these tests");
         },
       },

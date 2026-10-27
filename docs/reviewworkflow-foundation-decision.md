@@ -1,7 +1,7 @@
 # Reviewworkflow — technische ontwerpnotitie (fundament)
 
 **Datum:** 27 oktober 2026
-**Status:** richting B geaccepteerd; reviewerfundament, eerste reviewactie en Owner-conceptopslag in `review_needed` gebouwd. O-2, O-3, O-5 en O-7 t/m O-10 blijven open; resubmission uit O-6 blijft open.
+**Status:** richting B en Gate 0 bevestigd; reviewerfundament, eerste reviewactie, Owner-conceptopslag, reviewnotitiezichtbaarheid en resubmission vanuit `review_needed` gebouwd. De status- en beheer-slices volgen als afzonderlijke implementatieopdrachten.
 **Fase:** Fase 5 — technische implementatie met kleine verticale slices
 **Auteur:** Claude Code (junior developer), ter review door de projectleider
 
@@ -15,7 +15,7 @@ Deze notitie beschrijft hoe een Westend-review van onboardings veilig kan worden
 - `docs/fase-4-technische-architectuur-definitief-v1 (2).0/…-v1.0.md`: A-02, A-03, R-01, R-03 en SEC-01 t/m SEC-03;
 - `docs/fase-4-a04-datamodel-relaties-v0.2.md`: memberships, platformrechten, supporttoegang en audit;
 - de actuele code in `apps/api/src/auth/`, `apps/api/src/db/schema.ts`, `apps/api/src/onboarding/` en `apps/api/src/routes/onboarding.ts`;
-- de migraties `0006` t/m `0011`;
+- de migraties `0006` t/m `0015`;
 - `db.test.ts` en `onboarding.test.ts`.
 
 ---
@@ -56,7 +56,7 @@ Deze notitie beschrijft hoe een Westend-review van onboardings veilig kan worden
 - Een nieuwe versie kan ontstaan bij conceptopslag vanuit `draft` of `review_needed`, en bij indienen vanuit `draft`. Vanuit `submitted`, `blocked` en `approved` volgt `409 not_editable`.
 - Alles gebeurt onder een rijlock (`FOR UPDATE`) met optimistic concurrency via `base_version`.
 - Per tenant kan maar één lopend project bestaan: een unieke index op `tenant_id` waar de status niet `approved` is.
-- **Belangrijk voor dit ontwerp:** `findCurrentOnboarding` en de opslaglogica negeren projecten met status `approved`. Na een goedkeuring kan een Owner met `base_version: 0` dus direct een **nieuw** project starten. Dat moet eerst besloten worden, zie §4.3.
+- **Belangrijk voor dit ontwerp:** `findCurrentOnboarding` en de opslaglogica behandelen een `approved` project als het huidige, niet-bewerkbare project. De normale applicatieflow maakt na goedkeuring dus geen tweede project aan; alleen een gecontroleerde reopen door Westend kan de status opnieuw bewerkbaar maken.
 
 ### 1.5 Audit-events
 
@@ -173,7 +173,7 @@ Richting B kost één extra tabel en een eigen hook. Daar staat tegenover dat ee
 
 - **Vóór indienen:** de server weigert onvolledige antwoorden met `400 incomplete_answers`. Dat bestaat al.
 - **Na indienen:** de reviewer zet `review_needed`, met een reden-code (bijvoorbeeld `missing_information`, `rights_unclear` of `out_of_scope`), een korte notitie voor de klant en eventueel de betrokken veld-ID's.
-- **Gebouwd:** in `review_needed` mag de Owner concepten opslaan. De status blijft `review_needed`, totdat de Owner opnieuw indient. Opnieuw indienen zelf, inclusief volledige validatie en het aparte `resubmitted`-event, blijft een volgende slice.
+- **Gebouwd:** in `review_needed` mag de Owner concepten opslaan. De status blijft `review_needed`, totdat de Owner opnieuw indient. Opnieuw indienen voert opnieuw volledige validatie uit, maakt een nieuwe versie en schrijft het aparte `resubmitted`-event.
 - Bij een kritisch tekort, bijvoorbeeld geen bestaande branding binnen het standaardpakket, gebruikt de reviewer `blocked`. Die blokkade lost de klant niet zelf op via de vragenlijst. Westend heft hem op.
 
 ### 4.3 Wijzigingen nadat een project al beoordeeld is
@@ -182,13 +182,47 @@ Richting B kost één extra tabel en een eigen hook. Daar staat tegenover dat ee
 - Een materiële wijziging (UX §3.2: intake, strategie, prijs, beeldrechten of CTA) loopt via een gecontroleerde **reopen** door Westend: `approved` naar `review_needed`, met een reden.
 - De oude goedkeuring blijft zichtbaar in het auditlog en wordt niet overschreven, conform A-04 bij `approvals`.
 - Wat precies "materieel" is, en hoe dat doorwerkt naar Gate A en Gate B, is nog niet besloten.
-- **Risico in de huidige code:** omdat `approved` uit de lopende-projectlogica valt (§1.4), zou een Owner na goedkeuring nu een nieuw project kunnen starten. Vóór de slice met `approved` moet besloten worden of dat gewenst is. Zo niet, dan moet de opslaglogica een goedgekeurd project expliciet als "niet bewerkbaar" behandelen.
+- **O-5 opgelost in migratie-/repositoryslice 0015:** `approved` blijft in de current-projectlogica staan, Owner-writes geven `not_editable` en de normale applicatieflow kan geen tweede project naast het goedgekeurde project starten. Een directe database-insert van een extra `approved` project wordt nog niet door een unieke constraint uitgesloten.
 
 ### 4.4 Wat auditbaar moet zijn
 
 - Elke statusovergang die geen concept-opslag is, krijgt een audit-event. Zie de laatste kolom in §4.1.
 - Concept-opslag is via de versietabel (`onboarding_versions`, met `created_by`) al herleidbaar.
 - Daarnaast moet **inzage in klantinhoud door een reviewer** gelogd worden (UX §2.2: *"Toegang tot individuele klantinhoud is doelgebonden en gelogd"*). Dat wordt een apart soort access-event, in een latere slice.
+
+## Gate 0 — bevestigde productbesluiten
+
+Gate 0 voorkomt dat de volgende status- en reviewer-slices op impliciete aannames worden gebouwd. De onderstaande keuzes zijn op 27 oktober 2026 bevestigd als MVP-beleid.
+
+| Besluit | Voorstel voor de MVP | Consequentie voor implementatie |
+|---|---|---|
+| **O-2 Toewijzingen beheren** | Geen klant-Owner-endpoint en geen algemene reviewer-UI. Toewijzingen worden voorlopig uitgevoerd via een gecontroleerd server-side provisioningscript door een bevoegde Westend-operator. `granted_by`, `created_at`, `revoked_at` en de status blijven verplicht auditbaar. | Eerst een kleine beheer-/provisioningslice; een Platform Admin-rol en UI blijven buiten scope. |
+| **O-3 Westend-identiteit** | Westend-medewerkers gebruiken dezelfde OIDC-issuer als de applicatie, maar een afzonderlijke ZITADEL-organisatie. De lokale `users`-rij blijft de koppeling op OIDC-subject. MFA/AAL is verplicht voor reviewers vóór productiegebruik. | Geen reviewer-memberships in klanttenants; MFA/AAL wordt een release-gate, niet alleen een UI-regel. |
+| **O-5 Gedrag na `approved`** | `approved` is definitief niet-bewerkbaar voor de klant. Een goedgekeurd project mag niet stilzwijgend uit de current-project-query vallen om een nieuw lopend project te openen. Alleen een reviewer kan gecontroleerd heropenen. | **Gebouwd:** de current-project- en create-logica houdt een goedgekeurd project vast; Owner-lezen blijft toegestaan, schrijven en een tweede project via de applicatieflow niet. |
+| **O-7 Uitweg uit `blocked`** | Alleen een actieve, aan de tenant toegewezen reviewer kan `blocked → review_needed` uitvoeren. De reviewer geeft een reden en notitie; daarna kan de Owner weer aanvullen en resubmitteren. De Owner kan `blocked` niet zelf opheffen. | Nieuwe statusovergang, concurrency-check en audit-event `unblocked`; klant- en reviewerrechten blijven gescheiden. |
+| **O-8 Reviewnotities** | Reviewnotities staan in de tenantgebonden review-request-tabel, niet in het audit-event. De Owner ziet de open notitie zolang de status `review_needed` is. Voor de MVP is het voorstel: bewaren zolang het project bestaat en 24 maanden na sluiting; daarna de vrije notitietekst verwijderen of anonimiseren. Dit wordt vóór productie door privacy/legal bevestigd. | Geen inhoud in audit-events; een latere retention-slice moet purge/anonymisatie, autorisatie en herstelgedrag testen. |
+| **O-9 Inzage-logging** | Iedere reviewer-opvraag van antwoorden of Project Brief schrijft een immutable access-event met tenant, reviewer, project, versie, doel, endpoint/actie, tijdstip en request/correlation-ID. De klantinhoud zelf staat niet in het log. | Reviewerinzage en audit-dashboard mogen pas worden gebouwd met de access-eventstrategie en cross-tenant tests. |
+| **O-10 Gate A/B** | `approved` betekent: de intake en Project Brief zijn door Westend gecontroleerd en mogen als kandidaat-input naar Gate A. Het is geen automatische productie- of publicatievrijgave. Gate A-vrijgave, geïsoleerde bouw, staging/QA, klantakkoord en Gate B blijven afzonderlijke stappen. De promptgenerator publiceert nooit zelfstandig. | De productiehandoff krijgt aparte release-events en expliciete menselijke vrijgaven; `approved` start geen generator-run automatisch. |
+
+De `blocked`/`unblocked`-backend-slice bewaart de unblock-notitie veilig in `onboarding_review_actions`, maar toont die nog niet in de Owner-response. Een aparte Owner/UI-slice moet bepalen of de unblock-toelichting als actuele reviewfeedback wordt getoond, zodat een oude `review_requested`-notitie niet als actuele blokkadereden wordt gepresenteerd.
+
+### Status- en redenregels na Gate 0
+
+- Klantstatussen blijven `draft`, `submitted`, `review_needed`, `blocked` en `approved`.
+- Klantacties: `draft → submitted`, `review_needed → review_needed` en `review_needed → submitted`.
+- Revieweracties: `submitted → review_needed`, `submitted → blocked`, `blocked → review_needed`, `submitted → approved` en `approved → review_needed`.
+- Iedere reviewerstatusovergang vereist de actuele `base_version`/`current_version`, een actieve tenanttoewijzing en een transactioneel audit-event.
+- `review_requested` gebruikt de bestaande klantgerichte reden-codes. Voor `blocked`, `unblocked` en `reopened` worden aparte event-reason-codes gebruikt; de slice mag deze niet stilzwijgend gelijkstellen aan klantnotities. De gerealiseerde codes zijn `critical_basis_missing`, `rights_not_cleared` en `requires_extra_work` voor `blocked`, en `basis_provided`, `rights_cleared` en `extra_work_agreed` voor `unblocked`.
+- Geen enkele overgang geeft een reviewer het recht om antwoorden of de Project Brief rechtstreeks te wijzigen.
+
+### Gate 0-uitkomst
+
+Gate 0 is gesloten als productbesluit. De `blocked`/`unblocked`-slice en de `approved`/O-5-slice zijn gebouwd en onafhankelijk gecontroleerd. De resterende technische slices zijn:
+
+1. `reopened`;
+2. reviewerbeheer volgens O-2/O-3.
+
+MFA/AAL, RLS en access-logging blijven releasevoorwaarden voordat reviewerinzage of productiegebruik live gaat.
 
 ---
 
@@ -216,8 +250,8 @@ De reviewer foundation uit deze slice is gebouwd en onafhankelijk gecontroleerd.
 
 **Wat er nog niet in hoort:**
 
-- statusovergangen (`blocked`, `approved`, `resubmitted` en `reopened`); de overgang naar `review_needed` en conceptopslag in `review_needed` zijn inmiddels gebouwd;
-- reviewnotities en reden-codes;
+- statusovergangen (`blocked`, `approved` en `reopened`); de overgangen naar `review_needed`, conceptopslag in `review_needed` en `resubmitted` zijn inmiddels gebouwd;
+- status- en redenovergangen buiten `review_requested`;
 - inzage in antwoorden of de Project Brief, en het loggen daarvan;
 - wijzigingen aan `onboarding_audit_events`, inclusief de oplossing voor de membership-FK uit §6.2;
 - een beheer-endpoint of UI voor toewijzingen;
@@ -261,7 +295,7 @@ Zo blijft elke actor in de database aan déze tenant gekoppeld. Dit is gerealise
 
 ### 6.3 Waarom `resubmitted` een apart eventtype is
 
-Migratie `0008` borgt dat een `submitted`-event alleen vanuit `NULL` of `draft` komt. Opnieuw indienen vanuit `review_needed` zou die regel breken. Een apart eventtype houdt die regel geldig, en houdt "eerste indiening" en "aanvulling na review" onderscheidbaar in rapportages.
+Migratie `0008` borgt dat een `submitted`-event alleen vanuit `NULL` of `draft` komt. Opnieuw indienen vanuit `review_needed` zou die regel breken. Een apart eventtype houdt die regel geldig, en houdt "eerste indiening" en "aanvulling na review" onderscheidbaar in rapportages. Migratie `0013` maakt daarnaast de `review_requested`-overgang expliciet null-veilig.
 
 ---
 
@@ -270,15 +304,15 @@ Migratie `0008` borgt dat een `submitted`-event alleen vanuit `NULL` of `draft` 
 | # | Beslissing | Status / voorstel |
 |---|---|---|
 | O-1 | Richting A of B | **Besloten: B** — reviewer-toewijzing per tenant |
-| O-2 | Wie maakt toewijzingen in de MVP, en hoe? | Voorlopig server-side via een gecontroleerd script, met `granted_by` gevuld en zelf geaudit. Later via een Platform Admin |
-| O-3 | Identiteit van Westend-medewerkers in ZITADEL | Zelfde issuer (de single-issuer-aanname blijft gelden), aparte ZITADEL-organisatie, MFA verplicht |
+| O-2 | Wie maakt toewijzingen in de MVP, en hoe? | **Bevestigd Gate 0:** server-side via een gecontroleerd script, met `granted_by` gevuld en zelf geaudit. Later via een Platform Admin |
+| O-3 | Identiteit van Westend-medewerkers in ZITADEL | **Bevestigd Gate 0:** dezelfde issuer (de single-issuer-aanname blijft gelden), aparte ZITADEL-organisatie, MFA verplicht |
 | O-4 | Mag een reviewer ook membership hebben in dezelfde tenant? | **Besloten: nee** — geen zelfreview; de hook en repository weigeren dit |
-| O-5 | Na `approved` een nieuw project toestaan? | Nee, tenzij er een product-reden is. Goedgekeurd betekent dan "niet bewerkbaar" |
-| O-6 | Bewerken in `review_needed` | Conceptopslag gebouwd; opnieuw indienen geeft `resubmitted` en blijft open voor implementatie |
-| O-7 | Uitweg uit `blocked` | Alleen de reviewer: `blocked` naar `review_needed` |
-| O-8 | Opslag, zichtbaarheid en bewaartermijn van reviewnotities | Aparte tenantgebonden tabel; zichtbaar voor de Owner; bewaartermijn vaststellen vóór livegang |
-| O-9 | Inzage-logging | Elke opvraag van antwoorden of Project Brief door een reviewer logt een access-event |
-| O-10 | Verhouding tot Gate A en Gate B | `approved` is de intakecontrole binnen Gate A, nog geen formele Gate A-vrijgave (UX §3.2) |
+| O-5 | Na `approved` een nieuw project toestaan? | **Bevestigd Gate 0:** nee. Goedgekeurd betekent "niet bewerkbaar"; alleen een reviewer kan gecontroleerd heropenen |
+| O-6 | Bewerken in `review_needed` | **Gebouwd:** conceptopslag behoudt `review_needed`; opnieuw indienen zet de status op `submitted` en schrijft `resubmitted` |
+| O-7 | Uitweg uit `blocked` | **Gebouwd:** alleen een actieve toegewezen reviewer kan `blocked` naar `review_needed` zetten, met reden en notitie; de Owner kan daarna weer aanvullen |
+| O-8 | Opslag, zichtbaarheid en bewaartermijn van reviewnotities | **Bevestigd Gate 0:** tenantgebonden tabel, zichtbaar voor de Owner tijdens `review_needed`, bewaren tijdens projectlevensduur plus 24 maanden na sluiting; daarna vrije tekst verwijderen of anonimiseren, onder voorbehoud van privacy/legal |
+| O-9 | Inzage-logging | **Bevestigd Gate 0:** elke opvraag van antwoorden of Project Brief door een reviewer logt een immutable access-event zonder klantinhoud |
+| O-10 | Verhouding tot Gate A en Gate B | **Bevestigd Gate 0:** `approved` is intakecontrole binnen Gate A, geen formele Gate A-vrijgave; staging/QA, klantakkoord en Gate B blijven verplicht |
 
 ---
 
@@ -319,14 +353,14 @@ Richting B geeft een Westend-reviewer precies de toegang die de taak vraagt: de 
 
 - **MFA:** MFA/AAL wordt nog niet server-side afgedwongen (SEC-01). Reviewerroutes mogen niet naar productie zonder MFA.
 - **Geen RLS:** de tenantgrens hangt nu alleen aan applicatiecode en composiet-FK's, niet aan PostgreSQL-RLS.
-- **Gedrag na `approved`:** een Owner kan nu na goedkeuring een nieuw project starten (§4.3).
+- **Gedrag na `approved`:** de normale applicatieflow houdt het goedgekeurde project vast en weigert Owner-writes; een directe database-insert van een extra goedgekeurd project wordt nog niet door een unieke constraint uitgesloten.
 - **Audit-actor:** de aparte reviewer-actor is gebouwd; de immutability-trigger beschermt nog steeds alleen tegen runtime-updates en -deletes.
 - **Beheer van toewijzingen:** zonder beheerinterface blijft dat handwerk. Dat moet gecontroleerd en zelf auditbaar gebeuren.
 - **Grenzen van immutability:** de trigger houdt een databasebeheerder niet tegen (A-04 §6). "Onveranderlijk" geldt alleen voor de normale runtime.
 
 ### 6. Welke informatie ontbreekt nog voordat volgende slices veilig gebouwd kunnen worden?
 
-Voor de eerste slices zijn **O-1** en **O-4** besloten. Conceptopslag in `review_needed` uit **O-6** is gebouwd; de resubmission uit die beslissing blijft open. **O-2**, **O-3**, **O-5** en **O-7 t/m O-10** blijven nodig vóór de bijbehorende beheer-, status- en inzageslices. Concreet:
+Voor de eerste slices zijn **O-1**, **O-2**, **O-3**, **O-4**, **O-5**, **O-7**, **O-8**, **O-9** en **O-10** bevestigd. **O-5** en **O-6** zijn gebouwd: een goedgekeurd project blijft current en niet-bewerkbaar, en conceptopslag/resubmission vanuit `review_needed` zijn geïmplementeerd. De resterende beheer-, status- en inzageslices moeten nog worden gebouwd; privacy/legal moet de bewaartermijn vóór productie nog bevestigen.
 
 - de keuze voor richting B — besloten en gebouwd;
 - wie toewijzingen maakt, en hoe;
