@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
+import CustomerWorkspaceGate from "./customer-workspace-gate";
 import Sidebar from "./sidebar";
 import TopbarContext from "./topbar-context";
 import ServiceWorkerRegistration from "./service-worker-registration";
+import { WorkspaceContextProvider } from "./workspace-context";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -24,18 +26,20 @@ export default function RootLayout({
         <a href="#content" className="skip-link">
           Naar hoofdinhoud
         </a>
-        <div className="app-shell">
-          <Sidebar />
-          <div className="app-main">
-            <header className="topbar">
-              <TopbarContext />
-              <span className="badge">Conversion Engine</span>
-            </header>
-            <main id="content" className="content">
-              {children}
-            </main>
+        <WorkspaceContextProvider>
+          <div className="app-shell">
+            <Sidebar />
+            <div className="app-main">
+              <header className="topbar">
+                <TopbarContext />
+                <span className="badge">Conversion Engine</span>
+              </header>
+              <main id="content" className="content">
+                <CustomerWorkspaceGate>{children}</CustomerWorkspaceGate>
+              </main>
+            </div>
           </div>
-        </div>
+        </WorkspaceContextProvider>
         <ServiceWorkerRegistration />
       </body>
     </html>

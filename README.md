@@ -71,6 +71,7 @@ ZITADEL beheert identiteit en authenticatie. De eigen PostgreSQL-database blijft
 - Een toegewezen reviewer kan `submitted` transactioneel blokkeren (`POST /v1/review/onboarding/block`) en een blokkade opheffen naar `review_needed` (`POST /v1/review/onboarding/unblock`). Migratie `0014` voegt de tenantgebonden reviewacties, aparte reden-codes en de immutable audit-events `blocked` en `unblocked` toe.
 - Een toegewezen reviewer kan een actuele `submitted` onboarding goedkeuren via `POST /v1/review/onboarding/approve`. Migratie `0015` voegt het immutable `approved`-audit-event toe. Een goedgekeurd project blijft het huidige project; de Owner kan het lezen maar niet wijzigen.
 - Een toegewezen reviewer kan een goedgekeurde onboarding gecontroleerd heropenen via `POST /v1/review/onboarding/reopen`. Migratie `0016` voegt de tenantgebonden `reopened`-reviewactie en het immutable `reopened`-audit-event toe. De Owner kan daarna aanvullen en opnieuw indienen.
+- Slice 2.2 + 2.3 reviewerinzage en inzage-logging: `GET /v1/review/onboarding/content` geeft alleen de actuele reviewbare antwoorden en Project Brief terug aan de toegewezen reviewer. Dezelfde transactie controleert de reviewer opnieuw, vergrendelt de huidige projectversie en schrijft een content-vrij immutable access-event met tenant, reviewer, project, versie, doel, actie, request-ID en tijdstip (migratie `0017`). Database-FK's en een append-only trigger bewaken tenantisolatie en onveranderlijkheid; drafts, revoked assignments, self-review en ontbrekende/cross-tenant data geven geen content of event.
 - Bij `review_needed` ziet de Owner de actieve reviewfeedback van het huidige project. Een wijzigingsverzoek, reopen of unblock geeft alleen reden, notitie, beoordeelde versie, datum en feedbacktype terug; reviewer- en interne gegevens blijven verborgen. Na resubmission wordt de feedback niet meer getoond.
 - Het dashboard toont voor `submitted`, `blocked` en `approved` aparte statuslabels en meldingen. `blocked` en `approved` blijven volledig alleen-lezen; onbekende statussen vallen fail-closed terug naar de veilige ingediende weergave.
 - `/api/onboarding` in de Next.js BFF met server-side sessie, token refresh en conflictcontrole; alleen een Owner heeft `onboarding:manage`.
@@ -184,15 +185,32 @@ Gebouwd volgens richting B uit [`docs/reviewworkflow-foundation-decision.md`](do
   - Een draft of een ontbrekende onboarding geeft `404 onboarding_not_found`.
   - Antwoorden en Project Brief-inhoud komen nooit in de response.
 
-**Nog niet gebouwd in deze slice** (`submitted` → `review_needed` en reviewnotities zijn daarna toegevoegd, zie hieronder):
+Gecontroleerd reviewerbeheer is gestart met een server-side provisioning-CLI volgens O-2. `provision:reviewer` maakt een tenantgebonden assignment aan of activeert een ingetrokken assignment opnieuw. Een actieve assignment blijft volledig ongewijzigd; `created_at` blijft bij heractivatie behouden. De CLI vereist expliciete bevestiging, weigert `NODE_ENV=production` en schrijft geen identifiers of databasefouten naar de terminal. De scriptlaag valideert tenant, reviewer en `granted_by` binnen één transactie en gebruikt de bestaande samengestelde primary key zonder migratie.
+
+Slice 2.1b voegt de gecontroleerde server-side CLI `revoke:reviewer` toe. Die valideert de actieve tenant, reviewer, operator en bestaande assignment, zet een actieve assignment transactioneel op `revoked` met `revoked_at` en is idempotent voor reeds ingetrokken assignments. De CLI vereist expliciete bevestiging, weigert `NODE_ENV=production` en gebruikt geen migratie of onboarding-audit-event. De bestaande reviewscope selecteert alleen actieve assignments, waardoor revoked reviewers direct geen toegang meer hebben.
+
+**Nog niet gebouwd in de foundation-slice** (`submitted` → `review_needed` en reviewnotities zijn daarna toegevoegd, zie hieronder):
 
 - reviewstatusovergangen;
 - status- en redenovergangen buiten `review_requested`;
-- beheer van toewijzingen (geen endpoint, script of UI; O-2 en O-3 staan open);
 - inzage in antwoorden door reviewers, en het loggen daarvan;
 - MFA/AAL-handhaving en PostgreSQL-RLS.
 
+De provisioning-CLI blijft een gecontroleerd uitvoeringshulpmiddel en is geen beheer-UI. De technische Platform Admin-autorisatie is in de backendfundering toegevoegd, maar MFA/AAL en de volledige productie-hardening blijven releasevoorwaarden.
+
 Migratie `0009` is handmatig toegepast op de lokale testdatabase; de testworkflow migreert niet automatisch. De ontwikkeldatabase is niet gemigreerd. De voortgang staat in [`docs/PROJECT-CHECKLIST.md`](docs/PROJECT-CHECKLIST.md).
+
+## Platform Admin-autorisatie — 28 oktober 2026
+
+Platformbrede beheerrechten staan los van tenant-memberships en reviewerassignments. De nieuwe tabel `platform_admin_assignments` (migratie `0018`) bewaart actieve of ingetrokken `platform_admin`-rechten, inclusief `granted_by`, timestamps en databasechecks. Een disabled user wordt in geen enkele auth-resolver meer als actief behandeld.
+
+- De API heeft een aparte, fail-closed Platform Admin-hook en sibling-scope.
+- `GET /v1/platform/context` vereist authenticatie én een actieve platformgrant; tenantselectie, `x-tenant-id`, memberships en reviewerrechten zijn geen fallback.
+- Responses en logs geven geen identity-, token- of assignmentdetails terug; responses zijn `no-store`.
+- De Next.js BFF-route `/api/admin/context` gebruikt uitsluitend de server-side sessie en stuurt geen tenantheader door. De admin-layout valideert deze context server-side vóór admin-childpagina’s worden gerenderd.
+- De API-tests, lint, typecheck, build en diff-controle zijn groen. Migratie `0018` is op de lokale testdatabase toegepast; de database-suite heeft 124 geslaagde tests en alleen de bekende cleanup-check met achtergebleven lokale fixtures faalt.
+
+De huidige dashboard-beheerpagina’s blijven read-only demo-oppervlakken, maar zijn nu server-side afgeschermd. Klant- en Westend-beheer hebben daarmee afzonderlijke sessie- en navigatiepaden; live admindata en beheeracties blijven volgende functionele slices.
 
 ## Westend-review: wijzigingen aanvragen — 27 oktober 2026
 
@@ -285,7 +303,7 @@ Een Owner ziet bij een heropende onboarding met status `review_needed` dat Weste
 - De bestaande BFF, autosaveflow en resubmissionflow zijn niet inhoudelijk gewijzigd.
 - De dashboardweergave is gecontroleerd op desktop en mobiel, inclusief loading, ontbrekende feedback, lange notities en resubmission.
 
-De onafhankelijke controle is groen: API-lint, API-typecheck, API-build, 131 API-tests, 117 databasetests, dashboardlint, dashboardtypecheck, dashboardbuild, 140 dashboardtests en `git diff --check`. Migratie `0016` is alleen lokaal op de testdatabase toegepast.
+De onafhankelijke controle is groen: API-lint, API-typecheck, API-build, 139 API-tests, 117 databasetests, dashboardlint, dashboardtypecheck, dashboardbuild, 140 dashboardtests en `git diff --check`. Migratie `0016` is alleen lokaal op de testdatabase toegepast.
 
 ## Dashboardstatussen voor `blocked` en `approved` — 27 oktober 2026
 
@@ -299,7 +317,7 @@ De Owner ziet voor `blocked` en `approved` een expliciete statusmelding in plaat
 - API, database en statusovergangen zijn niet gewijzigd.
 - Desktop en mobiel zijn gecontroleerd met synthetische data.
 
-De onafhankelijke controle is groen: lint, typecheck, build, 140 dashboardtests, 131 API-tests, 117 databasetests en `git diff --check`.
+De onafhankelijke controle is groen: lint, typecheck, build, 140 dashboardtests, 139 API-tests, 117 databasetests en `git diff --check`.
 
 ## Unblock-feedback voor de Owner — 27 oktober 2026
 

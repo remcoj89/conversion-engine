@@ -1,8 +1,8 @@
 # Conversion Engine — projectcontext
 
-**Laatst bijgewerkt:** 27 oktober 2026
+**Laatst bijgewerkt:** 28 oktober 2026
 **Status:** Fase 5, technische implementatie met kleine verticale slices
-**Laatste gepushte technische commit:** `87e720a feat: support editable review-needed onboarding`
+**Laatste gepushte technische commit:** `9011b0b feat: complete onboarding review workflow foundation`
 
 Dit document is een compacte startcontext voor nieuwe Codex- en Claude-sessies. Het vervangt de leidende bron- en architectuurdocumenten niet.
 
@@ -53,6 +53,10 @@ Conversion Engine is een multi-tenant SaaS-dashboard voor leadopvolging, website
 - Dashboard-onboarding hervat server-side drafts na refresh en slaat wijzigingen automatisch op; uploads zijn voorlopig metadata-only.
 - Bij officieel indienen legt de API in dezelfde transactie een onveranderlijk `submitted`-audit-event vast (`onboarding_audit_events`, migraties `0007` en `0008`). De tabel ondersteunt inmiddels ook `review_requested`, met aparte member- en reviewer-actoren (migratie `0010`), tenantveilige versie-FK's (migratie `0011`), `resubmitted` (migratie `0012`), `blocked`/`unblocked` (migratie `0014`), `approved` (migratie `0015`) en `reopened` (migratie `0016`). Migratie `0013` maakt de `review_requested`-statuscheck expliciet null-veilig. Tenant en actor komen uit de auth-context en zijn met samengestelde foreign keys aan dezelfde tenant gekoppeld. De slices zijn onafhankelijk gecontroleerd.
 - Westend-reviewer foundation: tabel `onboarding_reviewer_assignments` (migratie `0009`), een aparte `/v1/review`-scope met eigen `ReviewerContext` (verplichte `x-tenant-id`, actieve toewijzing vereist, zelfreview geweigerd) en `GET /v1/review/onboarding` met alleen status, versie, `updated_at` en het aantal ontbrekende verplichte velden.
+- Eerste reviewerbeheer-slice: de server-side CLI `provision:reviewer` kan een assignment transactioneel aanmaken of een ingetrokken assignment heractiveren. Actieve assignments blijven ongewijzigd, heractivatie behoudt `created_at`, productie en ontbrekende bevestiging worden geweigerd en de bestaande samengestelde primary key wordt hergebruikt zonder migratie. Technische operatorautorisatie is nog niet gebouwd.
+- Slice 2.1b reviewer-revoke: de gecontroleerde server-side CLI `revoke:reviewer` valideert actieve tenant, reviewer, operator en assignment, zet een actieve assignment transactioneel op `revoked` met `revoked_at`, is idempotent voor reeds revoked assignments en weigert productie of ontbrekende bevestiging. Er is geen migratie of onboarding-audit-event; de bestaande reviewscope sluit revoked assignments direct uit. Technische operatorautorisatie blijft een aparte release-hardening-slice.
+- Slice 2.2 + 2.3 reviewerinzage en inzage-logging: `GET /v1/review/onboarding/content` geeft alleen de actuele reviewbare antwoorden en Project Brief terug aan een toegewezen reviewer. De repository herhaalt de autorisatie binnen dezelfde transactie, vergrendelt project en versie, en schrijft vóór succesvolle afronding een immutable, content-vrij access-event met tenant, reviewer, project, versie, doel, actie, request-ID en tijdstip (migratie `0017`). Drafts, ontbrekende projecten, self-review, revoked assignments en cross-tenant combinaties leveren geen content of event op. De database-FK's en append-only trigger bewaken de tenantgrens en onveranderlijkheid.
+- Platform Admin-backend- en BFF-autorisatie: platformrechten staan los van tenant-memberships en reviewerassignments in `platform_admin_assignments` (migratie `0018`). De aparte fail-closed auth-scope beschermt `GET /v1/platform/context`; revoked grants, disabled users, tenantheaders en membershipfallbacks geven geen toegang. `/api/admin/context` gebruikt alleen de server-side sessie en de admin-layout rendert childpagina’s pas na exacte contextvalidatie. De huidige admin-frontend blijft read-only demo; live admindata en beheeracties volgen in aparte slices. Migratie `0018` is op de lokale testdatabase toegepast; de ontwikkeldatabase is niet gemigreerd.
 - Eerste reviewactie `submitted` → `review_needed` (`POST /v1/review/onboarding/request-changes`, migratie `0010`). In één transactie worden een review request met reden en notitie (tabel `onboarding_review_requests`), de statusovergang en een `review_requested`-audit-event opgeslagen. Audit-events ondersteunen een aparte member- en reviewer-actor, met precies één per event. De repository controleert de reviewer-toewijzing (actief op het moment van de transactie) en zelfreview opnieuw binnen de transactie. Review requests en audit-events verwijzen via een FK naar een bestaande onboardingversie (migratie `0011`).
 - Een Owner kan een onboarding in `review_needed` als concept opslaan via `PUT /v1/onboarding/current`. Elke opslag maakt een nieuwe immutable versie, behoudt de status `review_needed` en maakt geen audit-event.
 - Een Owner kan een aangevulde onboarding vanuit `review_needed` opnieuw indienen via `POST /v1/onboarding/current/submit`. Dit maakt een nieuwe immutable versie, zet de status op `submitted` en schrijft in dezelfde transactie een `resubmitted`-audit-event (migratie `0012`).
@@ -63,7 +67,7 @@ Conversion Engine is een multi-tenant SaaS-dashboard voor leadopvolging, website
 - Het dashboard dient de onboarding in via de BFF (`POST /api/onboarding`), wacht daarbij een lopende autosave af, en toont een ingediende onboarding na refresh alleen-lezen.
 - Zelfstandige demo-site in `apps/demo-site`, visueel gecontroleerd op desktop en mobiel.
 
-De laatste gepushte technische slice is de dashboardondersteuning voor `review_needed` (`87e720a`); daarna zijn de resubmission-slice, de null-veilige `review_requested`-constraintreparatie, de dashboardreparatie voor de autosave-submit-race, de slices voor `blocked`/`unblocked`, approval/O-5, reopen, Owner-weergave van reopen-feedback, Owner-weergave van unblock-feedback en aparte dashboardlabels voor `blocked` en `approved` lokaal geaccepteerd maar nog niet gecommit. De actuele onafhankelijke controle is groen: API-lint, API-typecheck, API-build, 131 API-tests, 117 database-tests, dashboardlint, dashboardtypecheck, dashboardbuild, 140 dashboardtests en `git diff --check`. De migraties `0007` t/m `0016` zijn handmatig op de lokale testdatabase toegepast; de ontwikkeldatabase is niet gemigreerd.
+De laatste gepushte technische commit is `9011b0b`. Daarna zijn de reviewer-provisioning-slice, Slice 2.1b, Slice 2.2/2.3, de frontendcontext-slices en Platform Admin-backend/BFF-autorisatie lokaal geaccepteerd maar nog niet gecommit of gepusht. API-lint, API-typecheck, API-build, 168 API-tests, dashboard-lint, dashboard-typecheck, dashboard-build, 170 dashboardtests, visuele desktop-/mobiele smoke-check en `git diff --check` zijn groen. Migratie `0018` is op de lokale testdatabase toegepast; de database-suite heeft 124 geslaagde tests en alleen de bekende cleanup-check met achtergebleven lokale fixtures faalt. De migraties `0007` t/m `0018` zijn op de lokale testdatabase toegepast; de ontwikkeldatabase is niet gemigreerd.
 
 ## Belangrijk onderscheid: twee intakeflows
 
@@ -98,7 +102,7 @@ Antwoorden worden per tenant en project versieerbaar opgeslagen. Bij refresh wor
 
 Voor de reviewworkflow is richting B besloten (zie `docs/reviewworkflow-foundation-decision.md`): een reviewer-toewijzing per tenant, los van memberships, zonder zelfreview. Gebouwd zijn het autorisatiefundament (toewijzingen, de reviewer-scope en een read-only metadata-endpoint) en de eerste reviewactie `submitted` → `review_needed`. Die slaat een review request met notitie op en registreert de reviewer als aparte audit-actor.
 
-Nog niet gebouwd: beheer van toewijzingen (O-2 en O-3 staan als productbesluit vast maar de implementatie staat open), inzage in antwoorden door reviewers, MFA/AAL en RLS. De bewaartermijn voor reviewnotities is nog niet besloten. Migraties `0009` t/m `0016` staan alleen op de lokale testdatabase, handmatig toegepast; de ontwikkeldatabase is niet gemigreerd. De Owner-weergave van de unblock-toelichting en de dashboardlabeling van `blocked` en `approved` zijn nog aparte vervolgslices. De voortgang van slices en besluiten staat in `docs/PROJECT-CHECKLIST.md`.
+Nog niet gebouwd: het audit-dashboard, MFA/AAL en RLS. De bewaartermijn voor reviewnotities is nog niet besloten. Migraties `0009` t/m `0018` staan alleen op de lokale testdatabase, handmatig toegepast; de ontwikkeldatabase is niet gemigreerd. De voortgang van slices en besluiten staat in `docs/PROJECT-CHECKLIST.md`.
 
 De handmatige bouw en verzending van koude outreach-demo’s blijven buiten de Conversion Engine. De backend- en databasefundering wordt niet opnieuw gebouwd voor de demo-opbouw.
 
@@ -127,7 +131,7 @@ Een volledig geïntegreerde websitegenerator/runner in de Conversion Engine is u
 - Gate 0 is bevestigd en documentair gesloten in `docs/reviewworkflow-foundation-decision.md`; `reopened` en de Owner-weergave van reopen-feedback zijn lokaal geaccepteerd.
 - Productie-MFA/AAL-handhaving.
 - PostgreSQL-RLS en tenantveilige samengestelde relaties.
-- Reviewworkflow: bewaartermijn van reviewnotities, beheer van toewijzingen en inzage-logging (O-2, O-3, O-5, O-7 t/m O-10 in `docs/reviewworkflow-foundation-decision.md`), daarna het audit-dashboard en de Project Brief-goedkeuring.
+- Reviewworkflow: bewaartermijn van reviewnotities, technische operatorautorisatie, MFA/AAL en RLS (O-2, O-3, O-5, O-7 t/m O-10 in `docs/reviewworkflow-foundation-decision.md`), daarna het audit-dashboard en de Project Brief-goedkeuring.
 - Veilige uploads, scanning en private opslag.
 - Publieke lead-ingest met anti-spam, rate limiting, outbox en idempotency.
 - CRM-contacten, pipeline, taken en verdere leadopvolging.

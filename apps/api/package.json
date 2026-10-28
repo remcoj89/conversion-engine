@@ -9,11 +9,13 @@
     "start": "node dist/apps/api/src/server.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/app.test.ts src/auth.test.ts src/onboarding.test.ts src/dev/localProvisioning.test.ts",
-    "db:test": "node --env-file=.env --import tsx --test src/db.test.ts",
+    "test": "tsx --test src/app.test.ts src/auth.test.ts src/onboarding.test.ts src/sessionContext.test.ts src/auth/platformAdminAuth.test.ts src/dev/localProvisioning.test.ts src/dev/reviewerAssignmentProvisioning.test.ts src/dev/reviewerAssignmentRevocation.test.ts",
+    "db:test": "node --env-file=.env --import tsx --test src/db.test.ts src/auth/platformAdminResolver.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "provision:local": "node --env-file=.env --import tsx src/dev/provisionLocalUser.ts"
+    "provision:local": "node --env-file=.env --import tsx src/dev/provisionLocalUser.ts",
+    "provision:reviewer": "node --env-file=.env --import tsx src/dev/provisionReviewerAssignment.ts",
+    "revoke:reviewer": "node --env-file=.env --import tsx src/dev/revokeReviewerAssignment.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",

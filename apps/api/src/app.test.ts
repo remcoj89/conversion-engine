@@ -124,6 +124,7 @@ function setup(t: TestContext, dependencies: Partial<AppDependencies> = {}) {
       reviewerAssignmentResolver: async () => [],
       reviewStore: {
         findReviewable: async () => null,
+        readContent: async () => ({ status: "not_found" }),
         requestChanges: async () => {
           throw new Error("not used in these tests");
         },
@@ -346,6 +347,7 @@ function setupWithLogs(t: TestContext, dependencies: Partial<AppDependencies>) {
       reviewerAssignmentResolver: async () => [],
       reviewStore: {
         findReviewable: async () => null,
+        readContent: async () => ({ status: "not_found" }),
         requestChanges: async () => {
           throw new Error("not used in these tests");
         },

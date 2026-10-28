@@ -376,6 +376,7 @@ function httpSetup(memberships: readonly Membership[] = []) {
       reviewerAssignmentResolver: async () => [],
       reviewStore: {
         findReviewable: async () => null,
+        readContent: async () => ({ status: "not_found" }),
         requestChanges: async () => {
           throw new Error("not used in these tests");
         },
@@ -467,6 +468,7 @@ test("HTTP met ZITADEL-adapter: JWKS-fout geeft 500 internal_error zonder tokend
       reviewerAssignmentResolver: async () => [],
       reviewStore: {
         findReviewable: async () => null,
+        readContent: async () => ({ status: "not_found" }),
         requestChanges: async () => {
           throw new Error("not used in these tests");
         },

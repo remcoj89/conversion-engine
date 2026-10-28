@@ -27,10 +27,15 @@ export const tenants = pgTable("tenants", {
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   authProviderUserId: text("auth_provider_user_id").notNull().unique(),
+  status: text("status", { enum: ["active", "disabled"] })
+    .notNull()
+    .default("active"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
-});
+}, (table) => [
+  check("users_status_check", sql`${table.status} in ('active', 'disabled')`),
+]);
 
 export const memberships = pgTable(
   "memberships",
@@ -198,6 +203,45 @@ export const onboardingReviewerAssignments = pgTable(
     // revoked_at is set exactly when the assignment is revoked.
     check(
       "onboarding_reviewer_assignments_revoked_at_check",
+      sql`(${table.status} = 'active' and ${table.revokedAt} is null) or (${table.status} = 'revoked' and ${table.revokedAt} is not null)`,
+    ),
+  ],
+);
+
+export const platformAdminAssignmentPermissions = ["platform_admin"] as const;
+export const platformAdminAssignmentStatuses = ["active", "revoked"] as const;
+
+// Platform-wide rights are deliberately separate from tenant memberships and reviewer assignments.
+// Revoked rows remain available for auditability and are never treated as active access.
+export const platformAdminAssignments = pgTable(
+  "platform_admin_assignments",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    permission: text("permission", { enum: platformAdminAssignmentPermissions }).notNull(),
+    status: text("status", { enum: platformAdminAssignmentStatuses }).notNull().default("active"),
+    grantedBy: uuid("granted_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.permission] }),
+    index("platform_admin_assignments_active_user_idx")
+      .on(table.userId)
+      .where(sql`${table.status} = 'active'`),
+    check(
+      "platform_admin_assignments_permission_check",
+      sql`${table.permission} in ('platform_admin')`,
+    ),
+    check(
+      "platform_admin_assignments_status_check",
+      sql`${table.status} in ('active', 'revoked')`,
+    ),
+    check(
+      "platform_admin_assignments_revoked_at_check",
       sql`(${table.status} = 'active' and ${table.revokedAt} is null) or (${table.status} = 'revoked' and ${table.revokedAt} is not null)`,
     ),
   ],
@@ -422,6 +466,62 @@ export const onboardingReviewActions = pgTable(
     check("onboarding_review_actions_version_check", sql`${table.version} >= 1`),
     check("onboarding_review_actions_note_not_blank_check", sql`char_length(btrim(${table.note})) > 0`),
     check("onboarding_review_actions_note_length_check", sql`char_length(${table.note}) <= ${sql.raw(String(REVIEW_NOTE_MAX_LENGTH))}`),
+  ],
+);
+
+export const reviewAccessEventPurposes = ["onboarding_review"] as const;
+export const reviewAccessEventActions = ["read_onboarding_content"] as const;
+
+// Immutable, content-free access log for reviewer reads. The event is written only after the
+// current reviewable version has been read successfully, in the same transaction.
+export const onboardingReviewAccessEvents = pgTable(
+  "onboarding_review_access_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    reviewerUserId: uuid("reviewer_user_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    version: integer("version").notNull(),
+    purpose: text("purpose", { enum: reviewAccessEventPurposes }).notNull(),
+    action: text("action", { enum: reviewAccessEventActions }).notNull(),
+    requestOrCorrelationId: text("request_or_correlation_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // The project and reviewer assignment must belong to the event's tenant.
+    foreignKey({
+      name: "onboarding_review_access_events_project_tenant_fk",
+      columns: [table.tenantId, table.projectId],
+      foreignColumns: [onboardingProjects.tenantId, onboardingProjects.id],
+    }),
+    foreignKey({
+      name: "onboarding_review_access_events_reviewer_assignment_fk",
+      columns: [table.tenantId, table.reviewerUserId],
+      foreignColumns: [onboardingReviewerAssignments.tenantId, onboardingReviewerAssignments.userId],
+    }),
+    // The referenced version must belong to the referenced project. The project FK above supplies
+    // the tenant boundary because onboarding_versions keys are project-scoped.
+    foreignKey({
+      name: "onboarding_review_access_events_project_version_fk",
+      columns: [table.projectId, table.version],
+      foreignColumns: [onboardingVersions.projectId, onboardingVersions.version],
+    }),
+    index("onboarding_review_access_events_tenant_project_idx").on(table.tenantId, table.projectId),
+    check("onboarding_review_access_events_version_check", sql`${table.version} >= 1`),
+    check(
+      "onboarding_review_access_events_purpose_check",
+      sql`${table.purpose} in ('onboarding_review')`,
+    ),
+    check(
+      "onboarding_review_access_events_action_check",
+      sql`${table.action} in ('read_onboarding_content')`,
+    ),
+    check(
+      "onboarding_review_access_events_request_id_check",
+      sql`char_length(btrim(${table.requestOrCorrelationId})) > 0 and char_length(${table.requestOrCorrelationId}) <= 255`,
+    ),
   ],
 );
 

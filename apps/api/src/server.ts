@@ -2,6 +2,7 @@ import { buildApp } from "./app.js";
 import { readAuthConfig, type AuthConfig } from "./auth/authConfig.js";
 import { findActiveMemberships } from "./auth/membershipResolver.js";
 import { findActiveReviewerAssignments } from "./auth/reviewerAssignmentResolver.js";
+import { findActivePlatformAdminAssignments } from "./auth/platformAdminResolver.js";
 import { createDiscoveredKeySet } from "./auth/oidcDiscovery.js";
 import { createZitadelAdapter } from "./auth/zitadelAdapter.js";
 import { createDb } from "./db.js";
@@ -11,6 +12,7 @@ import {
   approveOnboarding,
   blockOnboarding,
   findReviewableOnboarding,
+  readReviewableOnboardingContent,
   reopenOnboarding,
   requestOnboardingChanges,
   unblockOnboarding,
@@ -42,6 +44,9 @@ const app = buildApp({
   }),
   membershipResolver: (identity) => findActiveMemberships(db, identity),
   reviewerAssignmentResolver: (identity) => findActiveReviewerAssignments(db, identity),
+  platformAdminAssignmentResolver: {
+    resolve: (identity) => findActivePlatformAdminAssignments(db, identity),
+  },
   tenantLoader: (tenantId) => findTenant(db, tenantId),
   leadCreator: (tenantId, lead) => createLead(db, tenantId, lead),
   onboardingStore: {
@@ -51,6 +56,7 @@ const app = buildApp({
   },
   reviewStore: {
     findReviewable: (tenantId) => findReviewableOnboarding(db, tenantId),
+    readContent: (input) => readReviewableOnboardingContent(db, input),
     requestChanges: (input) => requestOnboardingChanges(db, input),
     block: (input) => blockOnboarding(db, input),
     unblock: (input) => unblockOnboarding(db, input),

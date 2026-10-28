@@ -1,6 +1,6 @@
 # Conversion Engine — projectchecklist
 
-**Laatst bijgewerkt:** 27 oktober 2026
+**Laatst bijgewerkt:** 28 oktober 2026
 
 Centrale lijst met de status van de lopende slices en besluiten. Details staan in `README.md`, `docs/PROJECT-CONTEXT.md` en de genoemde besluitdocumenten.
 
@@ -18,9 +18,10 @@ Legenda: `[x]` afgerond · `[~]` gebouwd, wacht op controle of acceptatie · `[ 
 - [x] **Ontwerpnotitie:** `docs/reviewworkflow-foundation-decision.md` (27 oktober 2026). Alleen ontwerp, geen code.
 - [x] **Gate 0 productbesluiten:** statusovergangen, gedrag na `approved`, reviewnotities, inzage-logging en Gate A/B zijn bevestigd en vastgelegd in `docs/reviewworkflow-foundation-decision.md`; de technische implementatie blijft verdeeld over afzonderlijke slices.
 - [x] **Autorisatiebesluit:** richting B (reviewer-toewijzing per tenant, los van memberships), zelfreview verboden, klantrollen blijven `owner` en `team_member`.
-- [x] **Productbesluiten O-2 en O-3:** gecontroleerd server-side provisioningscript, aparte ZITADEL-organisatie voor Westend en MFA/AAL als releasevoorwaarde; implementatie blijft open.
+- [x] **Productbesluiten O-2 en O-3:** gecontroleerd server-side provisioningscript, aparte ZITADEL-organisatie voor Westend en MFA/AAL als releasevoorwaarde; provisioning en revoke/deactivatie zijn gebouwd, technische release-hardening blijft open.
 - [x] **Productbesluiten O-5, O-7, O-8, O-9 en O-10:** `approved` is niet-bewerkbaar, alleen reviewers heffen `blocked` op of heropenen, reviewnotities blijven tenantgebonden met projectduur + 24 maanden als voorstel, reviewerinzage wordt gelogd en `approved` is geen automatische publicatie; implementatie blijft open.
 - [x] **Reviewer foundation:** tabel `onboarding_reviewer_assignments` (migratie `0009`), `findActiveReviewerAssignments`, een aparte `/v1/review`-scope met `ReviewerContext` en de zelfreviewcontrole, en `GET /v1/review/onboarding` met alleen metadata. Alle API- en databasetests groen.
+- [x] **Reviewer-provisioning (eerste O-2-beheerslice):** de server-side CLI `provision:reviewer` maakt een assignment aan of heractiveert een revoked assignment transactioneel, blijft idempotent voor actieve assignments, behoudt `created_at` bij heractivatie, vereist expliciete bevestiging en weigert productie. API-lint, typecheck, build, 146 API-tests, 117 databasetests en `git diff --check` groen.
 - [x] **Wijzigingen aanvragen (`submitted` → `review_needed`):** `onboarding_review_requests` met reden en notitie, een aparte member- en reviewer-actor in audit-events (precies één per event), het `review_requested`-event en `POST /v1/review/onboarding/request-changes`, alles in één transactie (migratie `0010`). Alle kwaliteitschecks groen.
 - [x] **Reparatie review requests:** de repository controleert opnieuw de actieve toewijzing en zelfreview binnen de transactie (`FOR SHARE`, vóór de projectlock), en `version` in review requests en audit-events heeft een FK naar `onboarding_versions(project_id, version)` (migratie `0011`). Alle kwaliteitschecks groen.
 - [x] **Concept opslaan in `review_needed`:** de Owner kan een nieuwe onveranderlijke versie opslaan; de status blijft `review_needed`, stale `base_version` geeft conflict en conceptopslag maakt geen audit-event. API- en databasetests groen.
@@ -36,8 +37,9 @@ Legenda: `[x]` afgerond · `[~]` gebouwd, wacht op controle of acceptatie · `[ 
 - [x] **Owner-weergave na unblock:** bij `review_needed` ziet de Owner de actieve `unblocked`-feedback van het eigen project, inclusief reden, notitie, beoordeelde versie en datum/tijd. De bestaande feedback voor wijzigingsverzoeken en reopen-acties blijft werken; tenantisolatie, projectisolatie en resubmission zijn getest.
 - [x] **Dashboardstatussen `blocked` en `approved`:** de Owner ziet voor beide statussen een aparte duidelijke melding en statuslabel. De vragen en Project Brief blijven zichtbaar maar alleen-lezen; onbekende statussen vallen veilig terug naar de ingediende weergave. Dashboardtests, lint, typecheck, build, API-tests, database-tests en desktop-/mobiele screenshotcontrole zijn groen.
 - [ ] Retention-/anonymisatieslice voor reviewnotities uitvoeren en vóór productie privacy/legal laten bevestigen (O-8).
-- [ ] Beheer van toewijzingen (endpoint, script of UI), na besluit over O-2.
-- [ ] Inzage in antwoorden of Project Brief door reviewers, met logging van die inzage.
+- [x] **Reviewer-revoke/deactivatie (Slice 2.1b):** de gecontroleerde CLI `revoke:reviewer` valideert tenant, reviewer, operator en assignment, zet actieve assignments transactioneel op `revoked` met `revoked_at`, is idempotent, bewaart bestaande assignmentvelden en laat revoked reviewers direct uit de reviewscope verdwijnen. Tests dekken onbekende/inactieve inputs, tenantisolatie, rollback en revoked access. Technische operatorautorisatie blijft vóór productie een aparte releasevoorwaarde.
+- [x] **Reviewerinzage en inzage-logging (Slice 2.2 + 2.3):** `GET /v1/review/onboarding/content` geeft de actuele reviewbare antwoorden en Project Brief alleen aan de toegewezen reviewer terug. De toegang wordt binnen dezelfde transactie vastgelegd in `onboarding_review_access_events` (migratie `0017`) met tenant, reviewer, project, versie, doel, actie, request-ID en tijdstip, zonder klantinhoud. Tenantveilige FK's, rollback bij een logfout, revoked/self-review/draft/cross-tenant deny-paden en database-append-only gedrag zijn getest. API-lint, typecheck, build en API-tests zijn groen; de slice-specifieke database-tests zijn groen. De volledige databasesuite heeft nog één bekende, bestaande cleanup-failure door achtergebleven lokale testfixtures.
+- [x] **Platform Admin-backend- en BFF-autorisatie:** platformrechten staan in een aparte `platform_admin_assignments`-tabel (migratie `0018`) en zijn geen tenantrol, membership of reviewerassignment. De aparte auth-scope beschermt `GET /v1/platform/context` fail-closed; revoked grants, disabled users, tenantheaders en membershipfallbacks geven geen toegang. De Next.js BFF-route `/api/admin/context` gebruikt alleen de server-side sessie en de admin-layout rendert childpagina’s pas na exacte contextvalidatie. Dashboard-lint, typecheck, build, 170 dashboardtests, API-gates, visuele desktop-/mobiele smoke-check en `git diff --check` zijn groen. Migratie `0018` is op de lokale testdatabase toegepast; de database-suite heeft 124 geslaagde tests en alleen de bekende cleanup-check met achtergebleven lokale fixtures faalt.
 
 ## Websiteproductie-architectuur
 
@@ -53,6 +55,7 @@ Legenda: `[x]` afgerond · `[~]` gebouwd, wacht op controle of acceptatie · `[ 
 
 ## Databases
 
-- [x] Migraties `0007` t/m `0016` handmatig toegepast op de lokale **test**database; de testworkflow migreert niet automatisch.
-- [ ] De lokale **ontwikkel**database apart migreren (`0007` t/m `0016`); alleen na expliciete opdracht.
+- [x] Migraties `0007` t/m `0017` handmatig toegepast op de lokale **test**database; de testworkflow migreert niet automatisch.
+- [x] Migratie `0018` voor Platform Admin-rechten toegepast op de lokale **test**database; de testworkflow migreert niet automatisch.
+- [ ] De lokale **ontwikkel**database apart migreren (`0007` t/m `0018`); alleen na expliciete opdracht.
 - [ ] De **productie**database apart migreren; alleen na expliciete opdracht en na de releasegates.

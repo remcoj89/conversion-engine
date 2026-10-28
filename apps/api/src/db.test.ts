@@ -26,6 +26,7 @@ import {
   blockOnboarding,
   blockOnboardingInTransaction,
   findReviewableOnboarding,
+  readReviewableOnboardingContentInTransaction,
   reopenOnboarding,
   reopenOnboardingInTransaction,
   requestOnboardingChangesInTransaction,
@@ -148,6 +149,8 @@ const onboardingStoreFor = (tx: Tx): OnboardingStore => ({
 // Real review repository inside the test's rollback transaction.
 const reviewStoreFor = (tx: Tx): ReviewStore => ({
   findReviewable: (tenantId) => findReviewableOnboarding(tx, tenantId),
+  // The test already owns the outer rollback transaction; do not open and commit a nested top-level transaction here.
+  readContent: (input) => readReviewableOnboardingContentInTransaction(tx, input),
   requestChanges: (input) => requestOnboardingChangesInTransaction(tx, input),
   block: (input) => blockOnboardingInTransaction(tx, input),
   unblock: (input) => unblockOnboardingInTransaction(tx, input),
@@ -337,6 +340,17 @@ test("findActiveMemberships: disabled en invited memberships worden niet gevonde
 
       assert.deepEqual(await findActiveMemberships(tx, identity), [], `status ${status}`);
     }
+  });
+});
+
+test("findActiveMemberships: een disabled user krijgt geen actieve memberships", async () => {
+  await withRollback(async (tx) => {
+    const { user, identity } = await createUser(tx);
+    const tenant = await createTenant(tx);
+    await tx.update(schema.users).set({ status: "disabled" }).where(eq(schema.users.id, user.id));
+    await tx.insert(schema.memberships).values({ tenantId: tenant.id, userId: user.id, role: "owner" });
+
+    assert.deepEqual(await findActiveMemberships(tx, identity), []);
   });
 });
 
@@ -1361,6 +1375,17 @@ test("findActiveReviewerAssignments: alleen actieve assignments in actieve tenan
   });
 });
 
+test("findActiveReviewerAssignments: een disabled user krijgt geen actieve reviewer assignments", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const reviewer = await createUser(tx);
+    await tx.update(schema.users).set({ status: "disabled" }).where(eq(schema.users.id, reviewer.user.id));
+    await assignReviewer(tx, tenant.id, reviewer.user.id);
+
+    assert.deepEqual(await findActiveReviewerAssignments(tx, reviewer.identity), []);
+  });
+});
+
 test("findReviewableOnboarding: geen project of draft geeft null; submitted en latere statussen geven metadata", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
@@ -1413,6 +1438,115 @@ test("findReviewableOnboarding: een open project gaat voor een eerder goedgekeur
   });
 });
 
+const reviewAccessEvents = (tx: Tx, tenantId: string) =>
+  tx.select().from(schema.onboardingReviewAccessEvents).where(eq(schema.onboardingReviewAccessEvents.tenantId, tenantId));
+
+test("review content: leest alleen de actuele reviewbare versie en schrijft een content-vrij access-event", async () => {
+  await withRollback(async (tx, client) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    const ownerA = await createMember(tx, tenantA.id);
+    const ownerB = await createMember(tx, tenantB.id);
+    const reviewer = await createUser(tx);
+    await assignReviewer(tx, tenantA.id, reviewer.user.id);
+    await assignReviewer(tx, tenantB.id, reviewer.user.id, { status: "revoked", revokedAt: new Date() });
+
+    await submitOnboardingInTransaction(tx, draftInput(tenantA.id, ownerA.user.id, 0, { company_name: "Geheim A" }));
+    await submitOnboardingInTransaction(tx, draftInput(tenantB.id, ownerB.user.id, 0, { company_name: "Geheim B" }));
+    const projectA = await projectRow(tx, tenantA.id);
+    assert.ok(projectA);
+
+    const result = await readReviewableOnboardingContentInTransaction(tx, {
+      tenantId: tenantA.id,
+      reviewerUserId: reviewer.user.id,
+      requestId: "req-review-content-1",
+    });
+    assert.equal(result.status, "success");
+    if (result.status !== "success") return;
+    assert.deepEqual(result.content.answers, { company_name: "Geheim A" });
+    assert.deepEqual(result.content.projectBrief, { status: "incomplete_draft" });
+    assert.deepEqual([result.content.status, result.content.version], ["submitted", 1]);
+
+    const [event] = await reviewAccessEvents(tx, tenantA.id);
+    assert.ok(event);
+    assert.deepEqual(Object.keys(event).sort(), [
+      "action", "createdAt", "id", "projectId", "purpose", "requestOrCorrelationId", "reviewerUserId", "tenantId", "version",
+    ]);
+    assert.deepEqual(
+      [event.tenantId, event.projectId, event.reviewerUserId, event.version, event.purpose, event.action, event.requestOrCorrelationId],
+      [tenantA.id, projectA.id, reviewer.user.id, 1, "onboarding_review", "read_onboarding_content", "req-review-content-1"],
+    );
+    assert.ok(!JSON.stringify(event).includes("Geheim A"));
+    assert.ok(!JSON.stringify(event).includes("incomplete_draft"));
+
+    // A reviewer assignment for tenant B is revoked: the repository must fail closed without creating an event.
+    assert.deepEqual(
+      await readReviewableOnboardingContentInTransaction(tx, {
+        tenantId: tenantB.id,
+        reviewerUserId: reviewer.user.id,
+        requestId: "req-review-content-b",
+      }),
+      { status: "reviewer_forbidden" },
+    );
+    assert.equal((await reviewAccessEvents(tx, tenantB.id)).length, 0);
+
+    // A forced event constraint error rolls back the access attempt; no second event remains.
+    await client.query("savepoint access_content_attempt");
+    await assert.rejects(
+      readReviewableOnboardingContentInTransaction(tx, {
+        tenantId: tenantA.id,
+        reviewerUserId: reviewer.user.id,
+        requestId: "x".repeat(256),
+      }),
+    );
+    await client.query("rollback to savepoint access_content_attempt");
+    assert.equal((await reviewAccessEvents(tx, tenantA.id)).length, 1);
+
+    // The database trigger protects the event from UPDATE and DELETE.
+    await expectPgError(client, "23001", () =>
+      client.query("update onboarding_review_access_events set action = 'read_onboarding_content' where tenant_id = $1", [tenantA.id]),
+    );
+    await expectPgError(client, "23001", () =>
+      client.query("delete from onboarding_review_access_events where tenant_id = $1", [tenantA.id]),
+    );
+  });
+});
+
+test("review content: draft, missing onboarding, self-review en ontbrekende tenant-scope geven geen content of event", async () => {
+  await withRollback(async (tx) => {
+    const draftTenant = await createTenant(tx);
+    const emptyTenant = await createTenant(tx);
+    const owner = await createMember(tx, draftTenant.id);
+    const reviewer = await createUser(tx);
+    const selfReviewer = await createMember(tx, draftTenant.id);
+    await assignReviewer(tx, draftTenant.id, reviewer.user.id);
+    await assignReviewer(tx, emptyTenant.id, reviewer.user.id);
+    await assignReviewer(tx, draftTenant.id, selfReviewer.user.id);
+    await saveOnboardingDraftInTransaction(tx, draftInput(draftTenant.id, owner.user.id, 0, { company_name: "Concept" }));
+
+    for (const tenantId of [draftTenant.id, emptyTenant.id]) {
+      assert.deepEqual(
+        await readReviewableOnboardingContentInTransaction(tx, {
+          tenantId,
+          reviewerUserId: reviewer.user.id,
+          requestId: `req-${tenantId}`,
+        }),
+        { status: "not_found" },
+      );
+    }
+    assert.deepEqual(
+      await readReviewableOnboardingContentInTransaction(tx, {
+        tenantId: draftTenant.id,
+        reviewerUserId: selfReviewer.user.id,
+        requestId: "req-self-review",
+      }),
+      { status: "self_review_forbidden" },
+    );
+    assert.equal((await reviewAccessEvents(tx, draftTenant.id)).length, 0);
+    assert.equal((await reviewAccessEvents(tx, emptyTenant.id)).length, 0);
+  });
+});
+
 test("HTTP review met echte repositories: toegang alleen met actieve assignment in een actieve tenant, zonder zelfreview", async () => {
   await withRollback(async (tx) => {
     const tenantA = await createTenant(tx);
@@ -1438,6 +1572,19 @@ test("HTTP review met echte repositories: toegang alleen met actieve assignment 
       assert.deepEqual([ok.json().status, ok.json().version, ok.json().missing_required_fields], ["submitted", 1, 0]);
       assert.ok(!ok.body.includes(String(completeAnswers().company_name)), "geen antwoorden in de response");
 
+      const content = await app.inject({
+        method: "GET",
+        url: "/v1/review/onboarding/content",
+        headers: { "x-test-identity": reviewer.identity.subject, "x-tenant-id": tenantA.id },
+      });
+      assert.equal(content.statusCode, 200);
+      assert.deepEqual(Object.keys(content.json()).sort(), ["answers", "project_brief", "status", "updated_at", "version"]);
+      assert.deepEqual([content.json().status, content.json().version], ["submitted", 1]);
+      assert.equal(content.json().answers.company_name, completeAnswers().company_name);
+      assert.ok(content.json().project_brief);
+      assert.ok(content.headers["cache-control"] === "no-store");
+      assert.equal((await reviewAccessEvents(tx, tenantA.id)).length, 1);
+
       const denied: [string, string, number, string][] = [
         [reviewer.identity.subject, tenantB.id, 403, "forbidden"],
         [reviewer.identity.subject, inactive.id, 403, "forbidden"],
@@ -1447,6 +1594,23 @@ test("HTTP review met echte repositories: toegang alleen met actieve assignment 
       ];
       for (const [subject, tenantId, status, error] of denied) {
         const response = await review(subject, tenantId);
+        assert.equal(response.statusCode, status, error);
+        assert.deepEqual(response.json(), { error });
+      }
+
+      const deniedContent: [string, string, number, string][] = [
+        [reviewer.identity.subject, tenantB.id, 403, "forbidden"],
+        [reviewer.identity.subject, inactive.id, 403, "forbidden"],
+        [revokedReviewer.identity.subject, tenantA.id, 403, "forbidden"],
+        [owner.identity.subject, tenantA.id, 403, "forbidden"],
+        [selfReviewer.identity.subject, tenantA.id, 403, "self_review_forbidden"],
+      ];
+      for (const [subject, tenantId, status, error] of deniedContent) {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/review/onboarding/content",
+          headers: { "x-test-identity": subject, "x-tenant-id": tenantId },
+        });
         assert.equal(response.statusCode, status, error);
         assert.deepEqual(response.json(), { error });
       }
@@ -1477,15 +1641,19 @@ test("HTTP review met echte repositories: draft en ontbrekende onboarding geven 
     const app = appWithRealRepositories(tx);
     try {
       for (const tenant of [withDraft, empty]) {
-        const response = await app.inject({
-          method: "GET",
-          url: "/v1/review/onboarding",
-          headers: { "x-test-identity": reviewer.identity.subject, "x-tenant-id": tenant.id },
-        });
-        assert.equal(response.statusCode, 404);
-        assert.deepEqual(response.json(), { error: "onboarding_not_found" });
-        assert.ok(!response.body.includes("Concept"));
+        for (const url of ["/v1/review/onboarding", "/v1/review/onboarding/content"]) {
+          const response = await app.inject({
+            method: "GET",
+            url,
+            headers: { "x-test-identity": reviewer.identity.subject, "x-tenant-id": tenant.id },
+          });
+          assert.equal(response.statusCode, 404);
+          assert.deepEqual(response.json(), { error: "onboarding_not_found" });
+          assert.ok(!response.body.includes("Concept"));
+        }
       }
+      assert.equal((await reviewAccessEvents(tx, withDraft.id)).length, 0);
+      assert.equal((await reviewAccessEvents(tx, empty.id)).length, 0);
     } finally {
       await app.close();
     }
@@ -1518,6 +1686,54 @@ async function submittedForReview(tx: Tx, answers: Record<string, unknown> = { c
   assert.ok(project);
   return { tenant, owner, reviewer, project };
 }
+
+test("review access events: database bewaakt tenantkoppeling, vaste waarden en append-only gedrag", async () => {
+  await withRollback(async (tx, client) => {
+    const own = await submittedForReview(tx, { company_name: "Geheim A" });
+    const other = await submittedForReview(tx, { company_name: "Geheim B" });
+    const insert = (values: Partial<{
+      tenantId: string;
+      projectId: string;
+      reviewerUserId: string;
+      version: number;
+      purpose: string;
+      action: string;
+      requestId: string;
+    }> = {}) => {
+      const {
+        tenantId = own.tenant.id,
+        projectId = own.project.id,
+        reviewerUserId = own.reviewer.user.id,
+        version = 1,
+        purpose = "onboarding_review",
+        action = "read_onboarding_content",
+        requestId = "req-access-event",
+      } = values;
+      return client.query(
+        "insert into onboarding_review_access_events (tenant_id, reviewer_user_id, project_id, version, purpose, action, request_or_correlation_id) values ($1, $2, $3, $4, $5, $6, $7)",
+        [tenantId, reviewerUserId, projectId, version, purpose, action, requestId],
+      );
+    };
+
+    await expectPgError(client, "23503", () => insert({ tenantId: other.tenant.id }));
+    await expectPgError(client, "23503", () => insert({ projectId: other.project.id }));
+    await expectPgError(client, "23503", () => insert({ reviewerUserId: other.reviewer.user.id }));
+    await expectPgError(client, "23514", () => insert({ version: 0 }));
+    await expectPgError(client, "23514", () => insert({ purpose: "other_purpose" }));
+    await expectPgError(client, "23514", () => insert({ action: "other_action" }));
+    await expectPgError(client, "23514", () => insert({ requestId: "   " }));
+    await expectPgError(client, "23514", () => insert({ requestId: "x".repeat(256) }));
+    await insert();
+
+    await expectPgError(client, "23001", () =>
+      client.query("update onboarding_review_access_events set request_or_correlation_id = 'changed' where tenant_id = $1", [own.tenant.id]),
+    );
+    await expectPgError(client, "23001", () =>
+      client.query("delete from onboarding_review_access_events where tenant_id = $1", [own.tenant.id]),
+    );
+    assert.equal((await reviewAccessEvents(tx, own.tenant.id)).length, 1);
+  });
+});
 
 test("review requests: verzoek wordt opgeslagen met id, versie, reden, notitie en created_at", async () => {
   await withRollback(async (tx) => {
@@ -3129,10 +3345,11 @@ test("testdata is na de tests teruggedraaid", async () => {
               (select count(*)::int from onboarding_versions) as onboarding_versions,
               (select count(*)::int from onboarding_audit_events) as onboarding_audit_events,
               (select count(*)::int from onboarding_reviewer_assignments) as onboarding_reviewer_assignments,
+              (select count(*)::int from onboarding_review_access_events) as onboarding_review_access_events,
               (select count(*)::int from onboarding_review_requests) as onboarding_review_requests,
               (select count(*)::int from onboarding_review_actions) as onboarding_review_actions`,
     );
-    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0, websites: 0, onboarding_projects: 0, onboarding_versions: 0, onboarding_audit_events: 0, onboarding_reviewer_assignments: 0, onboarding_review_requests: 0, onboarding_review_actions: 0 });
+    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0, websites: 0, onboarding_projects: 0, onboarding_versions: 0, onboarding_audit_events: 0, onboarding_reviewer_assignments: 0, onboarding_review_access_events: 0, onboarding_review_requests: 0, onboarding_review_actions: 0 });
   } finally {
     await pool.end();
   }

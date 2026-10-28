@@ -18,6 +18,26 @@ export type ReviewableOnboarding = Readonly<{
   answers: Record<string, unknown>;
 }>;
 
+export type ReviewableOnboardingContent = Readonly<{
+  status: ReviewableOnboardingStatus;
+  version: number;
+  updatedAt: Date;
+  answers: Record<string, unknown>;
+  projectBrief: Record<string, unknown>;
+}>;
+
+export type ReadReviewableContentInput = Readonly<{
+  tenantId: string;
+  reviewerUserId: string;
+  requestId: string;
+}>;
+
+export type ReadReviewableContentResult =
+  | Readonly<{ status: "success"; content: ReviewableOnboardingContent }>
+  | Readonly<{ status: "reviewer_forbidden" }>
+  | Readonly<{ status: "self_review_forbidden" }>
+  | Readonly<{ status: "not_found" }>;
+
 export type ReviewReasonCode = (typeof schema.reviewRequestReasonCodes)[number];
 
 export type BlockReasonCode = (typeof schema.blockReasonCodes)[number];
@@ -85,6 +105,75 @@ export async function findReviewableOnboarding(db: Db, tenantId: string): Promis
     .limit(1);
   if (!row || !isReviewable(row.status)) return null;
   return { ...row, status: row.status, answers: row.answers as Record<string, unknown> };
+}
+
+// Reads the current reviewable content and records the access event atomically. The transaction
+// locks the project before reading its current version, so the event always describes the content
+// that this request actually returns.
+export async function readReviewableOnboardingContent(db: Db, input: ReadReviewableContentInput): Promise<ReadReviewableContentResult> {
+  return db.transaction((tx) => readReviewableOnboardingContentInTransaction(tx, input));
+}
+
+// Same operation inside a caller-managed transaction, used by database tests and transaction-aware callers.
+export async function readReviewableOnboardingContentInTransaction(tx: Tx, input: ReadReviewableContentInput): Promise<ReadReviewableContentResult> {
+  const authorization = await authorizeReviewerInTransaction(tx, input.tenantId, input.reviewerUserId);
+  if (authorization === "reviewer_forbidden") return { status: "reviewer_forbidden" };
+  if (authorization === "self_review_forbidden") return { status: "self_review_forbidden" };
+
+  const [project] = await tx
+    .select({
+      id: schema.onboardingProjects.id,
+      status: schema.onboardingProjects.status,
+      currentVersion: schema.onboardingProjects.currentVersion,
+      updatedAt: schema.onboardingProjects.updatedAt,
+    })
+    .from(schema.onboardingProjects)
+    .where(eq(schema.onboardingProjects.tenantId, input.tenantId))
+    .orderBy(...currentProjectOrder)
+    .for("update")
+    .limit(1);
+
+  if (!project || !isReviewable(project.status)) return { status: "not_found" };
+
+  const [version] = await tx
+    .select({
+      version: schema.onboardingVersions.version,
+      answers: schema.onboardingVersions.answers,
+      projectBrief: schema.onboardingVersions.projectBrief,
+    })
+    .from(schema.onboardingVersions)
+    .where(
+      and(
+        eq(schema.onboardingVersions.tenantId, input.tenantId),
+        eq(schema.onboardingVersions.projectId, project.id),
+        eq(schema.onboardingVersions.version, project.currentVersion),
+      ),
+    )
+    .for("share")
+    .limit(1);
+
+  // A project without its current version is not readable content. Do not create an access event.
+  if (!version) return { status: "not_found" };
+
+  const content: ReviewableOnboardingContent = {
+    status: project.status,
+    version: version.version,
+    updatedAt: project.updatedAt,
+    answers: version.answers as Record<string, unknown>,
+    projectBrief: version.projectBrief as Record<string, unknown>,
+  };
+
+  await tx.insert(schema.onboardingReviewAccessEvents).values({
+    tenantId: input.tenantId,
+    reviewerUserId: input.reviewerUserId,
+    projectId: project.id,
+    version: version.version,
+    purpose: "onboarding_review",
+    action: "read_onboarding_content",
+    requestOrCorrelationId: input.requestId,
+  });
+
+  return { status: "success", content };
 }
 
 function isReviewable(status: OnboardingStatus): status is ReviewableOnboardingStatus {

@@ -5,7 +5,7 @@ import type { ExternalIdentity, ReviewerAssignment } from "./types.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
-// Returns the reviewer assignments the identity may currently use: active assignment in an active tenant.
+// Returns the reviewer assignments an active identity may currently use: active assignment in an active tenant.
 // Only tenant and user IDs are returned; an unknown user simply yields an empty list.
 export async function findActiveReviewerAssignments(db: Db, identity: ExternalIdentity): Promise<ReviewerAssignment[]> {
   // Same single-issuer assumption as findActiveMemberships: the subject alone identifies the user.
@@ -20,6 +20,7 @@ export async function findActiveReviewerAssignments(db: Db, identity: ExternalId
     .where(
       and(
         eq(schema.users.authProviderUserId, identity.subject),
+        eq(schema.users.status, "active"),
         eq(schema.onboardingReviewerAssignments.status, "active"),
         eq(schema.tenants.status, "active"),
       ),

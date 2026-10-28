@@ -19,6 +19,8 @@ export type ApiProxyRoute = Readonly<{
   apiPath: string;
   method: "GET" | "PUT" | "POST";
   forwardedErrors: readonly ForwardedError[];
+  // Platform-scoped routes must not inherit a tenant selected by the browser.
+  forwardTenantHeader?: boolean;
   // Alleen bij PUT/POST: maximale grootte van de JSON-body die naar de API gaat.
   maxBodyBytes?: number;
 }>;
@@ -35,7 +37,7 @@ export function createApiProxy(
     fetch(`${apiBaseUrl}${route.apiPath}`, {
       method: route.method,
       cache: "no-store",
-      headers: apiHeaders(request, accessToken, body !== undefined),
+      headers: apiHeaders(request, accessToken, body !== undefined, route.forwardTenantHeader ?? true),
       body,
       signal: AbortSignal.timeout(3000),
     });
@@ -107,12 +109,15 @@ async function discardBody(response: Response): Promise<void> {
   await response.body?.cancel().catch(() => undefined);
 }
 
-// De BFF beslist niets over tenanttoegang; x-tenant-id gaat ongewijzigd door, het token komt uit de sessie.
-function apiHeaders(request: NextRequest, accessToken: string, hasBody: boolean): Headers {
+// De BFF beslist niets over tenanttoegang; tenant-scoped routes sturen x-tenant-id door,
+// platform-scoped routes kunnen dit expliciet uitschakelen. Het token komt altijd uit de sessie.
+function apiHeaders(request: NextRequest, accessToken: string, hasBody: boolean, forwardTenantHeader: boolean): Headers {
   const headers = new Headers({ authorization: `Bearer ${accessToken}` });
   if (hasBody) {
     headers.set("content-type", "application/json");
   }
+  if (!forwardTenantHeader) return headers;
+
   const tenantId = request.headers.get("x-tenant-id");
   // Ontbrekend of leeg wordt niet meegestuurd.
   if (tenantId) {

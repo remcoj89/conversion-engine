@@ -38,3 +38,16 @@ export type ReviewerAssignment = {
 
 // Returns only active assignments in active tenants; an unknown user yields an empty list.
 export type ReviewerAssignmentResolver = (identity: ExternalIdentity) => Promise<readonly ReviewerAssignment[]>;
+
+// Platform rights are deliberately separate from tenant memberships and reviewer assignments.
+// The resolver returns active rights only; revoked rows never enter the auth boundary.
+export type PlatformAdminAssignment = Readonly<{
+  userId: string;
+  permission: "platform_admin";
+}>;
+
+// The resolver owns the identity-to-user lookup and returns only persisted platform rights.
+// Keeping it behind an interface makes the HTTP auth layer independent of Drizzle/PostgreSQL.
+export interface PlatformAdminAssignmentResolver {
+  resolve(identity: ExternalIdentity): Promise<readonly PlatformAdminAssignment[]>;
+}

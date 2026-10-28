@@ -18,6 +18,7 @@ import type {
   ApproveInput,
   RequestChangesInput,
   RequestChangesResult,
+  ReadReviewableContentInput,
   ReviewableOnboarding,
   ReviewActionInput,
   ReviewTransitionResult,
@@ -116,6 +117,7 @@ function setup(t: TestContext, onboardingStore: OnboardingStore = memoryStore().
       reviewerAssignmentResolver: async () => [],
       reviewStore: {
         findReviewable: async () => null,
+        readContent: async () => ({ status: "not_found" }),
         requestChanges: async () => {
           throw new Error("not used in these tests");
         },
@@ -811,6 +813,7 @@ function reviewSetup(
   actionResult?: ReviewTransitionResult<OnboardingStatus>,
 ) {
   const loaderCalls: string[] = [];
+  const contentCalls: ReadReviewableContentInput[] = [];
   const changeCalls: RequestChangesInput[] = [];
   const actionCalls: { action: "block" | "unblock" | "reopen"; input: ReviewActionInput<string> }[] = [];
   const approveCalls: ApproveInput[] = [];
@@ -821,6 +824,17 @@ function reviewSetup(
       findReviewable: async (tenantId) => {
         loaderCalls.push(tenantId);
         return onboarding;
+      },
+      readContent: async (input) => {
+        contentCalls.push(input);
+        if (!onboarding) return { status: "not_found" };
+        return {
+          status: "success",
+          content: {
+            ...onboarding,
+            projectBrief: { status: "ready_for_westend_review", secret: "Project Brief geheim" },
+          },
+        };
       },
       requestChanges: async (input) => {
         changeCalls.push(input);
@@ -844,7 +858,7 @@ function reviewSetup(
       },
     },
   });
-  return { app, loaderCalls, changeCalls, actionCalls, approveCalls, storeCalls };
+  return { app, loaderCalls, contentCalls, changeCalls, actionCalls, approveCalls, storeCalls };
 }
 
 test("review: toegewezen reviewer krijgt alleen de vier metadatavelden van de eigen toegewezen tenant", async (t) => {
@@ -872,11 +886,45 @@ test("review: missing_required_fields komt uit de gedeelde contractlogica", asyn
   assert.ok(response.json().missing_required_fields > 0);
 });
 
+test("review content: geeft alleen actuele onboarding-content terug en legt contextvelden niet in de response vast", async (t) => {
+  const { app, contentCalls } = reviewSetup(t);
+  const response = await app.inject({ method: "GET", url: "/v1/review/onboarding/content", headers: as("reviewer", { "x-tenant-id": tenantA }) });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["cache-control"], "no-store");
+  const json = response.json();
+  assert.deepEqual(Object.keys(json).sort(), ["answers", "project_brief", "status", "updated_at", "version"]);
+  assert.deepEqual(json, {
+    status: "submitted",
+    version: 3,
+    updated_at: "2026-10-27T12:00:00.000Z",
+    answers: defaultReviewable.answers,
+    project_brief: { status: "ready_for_westend_review", secret: "Project Brief geheim" },
+  });
+  assert.deepEqual(contentCalls.map(({ tenantId, reviewerUserId }) => ({ tenantId, reviewerUserId })), [
+    { tenantId: tenantA, reviewerUserId: "user-reviewer" },
+  ]);
+  assert.ok(contentCalls[0]?.requestId, "repository krijgt de Fastify request-id");
+  for (const forbidden of ["project_id", "reviewer_user_id", "request_or_correlation_id"]) {
+    assert.ok(!response.body.includes(forbidden), `response bevat ${forbidden}`);
+  }
+});
+
 test("review: geen reviewbare onboarding geeft 404 onboarding_not_found", async (t) => {
   const { app } = reviewSetup(t, null);
   const response = await app.inject({ method: "GET", url: REVIEW_URL, headers: as("reviewer", { "x-tenant-id": tenantA }) });
   assert.equal(response.statusCode, 404);
   assert.deepEqual(response.json(), { error: "onboarding_not_found" });
+});
+
+test("review content: ontbrekende onboarding geeft 404 zonder content terug te geven", async (t) => {
+  const { app, contentCalls } = reviewSetup(t, null);
+  const response = await app.inject({ method: "GET", url: "/v1/review/onboarding/content", headers: as("reviewer", { "x-tenant-id": tenantA }) });
+
+  assert.equal(response.statusCode, 404);
+  assert.deepEqual(response.json(), { error: "onboarding_not_found" });
+  assert.equal(contentCalls.length, 1);
+  assert.ok(!response.body.includes("answers"));
 });
 
 test("review: anoniem 401, ontbrekende of ongeldige x-tenant-id 400; tenant uit query of body telt niet", async (t) => {
@@ -944,7 +992,7 @@ test("review: een storefout geeft 500 zonder interne details, ook bij request-ch
   };
   const app = setup(t, undefined, {
     reviewerAssignmentResolver: async ({ subject }) => assignmentsBySubject[subject] ?? [],
-    reviewStore: { findReviewable: failure, requestChanges: failure, block: failure, unblock: failure, approve: failure, reopen: failure },
+    reviewStore: { findReviewable: failure, readContent: failure, requestChanges: failure, block: failure, unblock: failure, approve: failure, reopen: failure },
   });
   const requests = [
     { method: "GET", url: REVIEW_URL },

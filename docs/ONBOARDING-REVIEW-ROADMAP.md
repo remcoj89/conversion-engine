@@ -23,9 +23,12 @@ De kern van de klant-onboarding is lokaal gebouwd en gecontroleerd:
 - `approved` naar `review_needed` via een gecontroleerde reopen;
 - dashboardondersteuning voor `review_needed`;
 - Owner-weergave van reopen-feedback;
+- Owner-weergave van unblock-feedback;
+- aparte dashboardlabels voor `blocked` en `approved`;
+- gecontroleerde reviewer-provisioning voor aanmaken en heractiveren van tenantgebonden assignments;
 - reparatie van de autosave-submit-race.
 
-De laatste slices zijn lokaal geaccepteerd maar nog niet gecommit of gepusht. Migraties `0012` t/m `0016` zijn alleen op de lokale testdatabase toegepast. Zie `docs/PROJECT-CONTEXT.md` en `docs/PROJECT-CHECKLIST.md` voor de actuele Git- en databasepositie.
+De laatste reviewer-provisioning-slice, Slice 2.1b, Slice 2.2/2.3 en de bijgewerkte statusdocumentatie zijn lokaal geaccepteerd maar nog niet gecommit of gepusht. Migraties `0012` t/m `0017` zijn alleen op de lokale testdatabase toegepast. Zie `docs/PROJECT-CONTEXT.md` en `docs/PROJECT-CHECKLIST.md` voor de actuele Git- en databasepositie.
 
 ## Planningsregels
 
@@ -102,17 +105,21 @@ Alle ongeautoriseerde, stale-version, tenant- en ongeldige overgangspaden zijn g
 
 ### Gate 2 — reviewer operations
 
-#### Slice 2.1 — reviewerbeheer
+#### Slice 2.1a — reviewer-provisioning: aanmaken en heractiveren — afgerond
 
-Beheer van actieve reviewer-toewijzingen per tenant, inclusief autorisatie, self-reviewpreventie, activeren/deactiveren en auditbaarheid. Eerst O-2 en O-3 definitief besluiten; daarna één endpoint- of script-slice, UI pas wanneer die nodig is.
+De gecontroleerde server-side CLI `provision:reviewer` maakt een assignment aan of heractiveert een revoked assignment. De bestaande samengestelde primary key wordt hergebruikt, actieve assignments blijven ongewijzigd en `created_at` blijft bij heractivatie behouden. De CLI vereist expliciete bevestiging en weigert productie. O-2 en O-3 blijven leidend; dit is geen Platform Admin-UI en geen technische MFA/AAL-handhaving.
 
-#### Slice 2.2 — reviewerinzage in antwoorden en Project Brief
+#### Slice 2.1b — reviewerbeheer: revoke/deactivatie — afgerond
 
-Een toegewezen reviewer kan alleen de actuele reviewbare onboarding van de eigen tenant lezen. De scope bevat antwoorden en Project Brief, maar geen klantcredentials, sessies of gegevens van andere tenants.
+De gecontroleerde server-side CLI `revoke:reviewer` valideert de actieve tenant, reviewer, operator en bestaande assignment, zet `status = revoked` en `revoked_at` transactioneel vast en is idempotent voor reeds revoked assignments. De bestaande reviewscope sluit revoked reviewers direct uit. Er is geen migratie, onboarding-audit-event, klant-Owner-endpoint of algemene UI toegevoegd. Technische operatorautorisatie blijft een aparte release-hardening-slice.
 
-#### Slice 2.3 — inzage-logging
+#### Slice 2.2 — reviewerinzage in antwoorden en Project Brief — afgerond
 
-Iedere reviewerinzage wordt minimaal vastgelegd met tenant, reviewer, project, versie, tijdstip en actie. Logs bevatten geen onnodige klantinhoud en zijn niet wijzigbaar vanuit de normale applicatieroutes.
+Een toegewezen reviewer kan alleen de actuele reviewbare onboarding van de eigen tenant lezen via `GET /v1/review/onboarding/content`. De scope bevat antwoorden en Project Brief, maar geen klantcredentials, sessies of gegevens van andere tenants. De autorisatie wordt opnieuw binnen de repository-transactie gecontroleerd; drafts, revoked assignments, self-review en cross-tenant combinaties worden geweigerd.
+
+#### Slice 2.3 — inzage-logging — afgerond
+
+Iedere succesvolle reviewerinzage wordt in dezelfde transactie vastgelegd in `onboarding_review_access_events` (migratie `0017`) met tenant, reviewer, project, versie, doel, actie, request/correlation-ID en tijdstip. Logs bevatten geen klantinhoud. Tenantveilige foreign keys, rollback bij een logfout en een database-trigger tegen `UPDATE` en `DELETE` borgen de herleidbaarheid.
 
 #### Slice 2.4 — audit-dashboard
 
@@ -180,4 +187,4 @@ De websiteproductie-MVP is gereed na Gate 4 en Gate 5: betrouwbare klantinput, p
 
 ## Volgende concrete slice
 
-De eerstvolgende stap is Slice 2.1: reviewerbeheer. De klantgerichte onboarding-reviewlus uit Gate 1 is functioneel afgerond; reviewer operations, security release gates en productiehandoff blijven apart gepland. Er wordt niet vooruit geïmplementeerd op basis van deze roadmap.
+De eerstvolgende stap is Slice 2.4: het audit-dashboard. De klantgerichte onboarding-reviewlus uit Gate 1 en de veilige reviewerinzage met logging uit Slice 2.2/2.3 zijn functioneel afgerond; security release gates en productiehandoff blijven apart gepland. Er wordt niet vooruit geïmplementeerd op basis van deze roadmap.

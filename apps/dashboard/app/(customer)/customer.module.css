@@ -1,0 +1,591 @@
+.customerHeaderActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.customerToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.customerFilterForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+
+.customerFilterField {
+  min-width: 180px;
+}
+
+.customerFilterActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.customerResultCount {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.customerTwoColumn {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.customerThreeColumn {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.customerFourColumn {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.customerCardContent {
+  padding: 24px;
+}
+
+.customerCardContent > h2,
+.customerCardContent > h3 {
+  margin-bottom: 8px;
+}
+
+.customerCardContent > p {
+  color: var(--text-secondary);
+}
+
+.customerBackLink {
+  display: inline-flex;
+  margin-bottom: 16px;
+  color: var(--brand-active);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.customerDetailHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.customerDetailHeader h2 {
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.customerDetailHeader p {
+  margin-top: 4px;
+  color: var(--text-secondary);
+}
+
+.customerDefinitionList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.customerDefinition {
+  min-width: 0;
+}
+
+.customerDefinition dt {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.customerDefinition dd {
+  margin: 4px 0 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.customerStack {
+  display: grid;
+  gap: 16px;
+}
+
+.customerTableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+
+.customerTable {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.customerTable th,
+.customerTable td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.customerTable th {
+  background: #f7f9fc;
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.customerTable tr:last-child td {
+  border-bottom: 0;
+}
+
+.customerTable tbody tr:hover td {
+  background: #fbfcff;
+}
+
+.customerTableLink {
+  color: var(--brand-active);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.customerTableMuted {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.customerTableCellContent {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.customerKanban {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(220px, 1fr));
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.customerKanbanColumn {
+  min-height: 300px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: #eef2f7;
+}
+
+.customerKanbanHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.customerDealCard {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+}
+
+.customerDealCard:last-child {
+  margin-bottom: 0;
+}
+
+.customerDealCard h3 {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.customerDealMeta {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.customerDealValue {
+  color: var(--brand-active);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.customerList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.customerListItem {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+}
+
+.customerListItemDone {
+  opacity: 0.7;
+}
+
+.customerListMain {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.customerCheckbox {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--brand-primary);
+}
+
+.customerListMeta {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.customerInlineLink {
+  flex-shrink: 0;
+  color: var(--brand-active);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.customerTimeline {
+  display: grid;
+  gap: 18px;
+  margin: 0;
+  padding: 4px 0 4px 20px;
+  list-style: none;
+  border-left: 2px solid #d9e3ef;
+}
+
+.customerTimelineItem {
+  position: relative;
+}
+
+.customerTimelineItem::before {
+  position: absolute;
+  top: 4px;
+  left: -27px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--surface-card);
+  border-radius: 50%;
+  background: #9eb2c8;
+  content: "";
+}
+
+.customerTimelineDate {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.customerTimelineDetail {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.customerTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 20px 0 16px;
+  padding: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.customerTab,
+.customerTabActive {
+  padding: 10px 12px;
+  border-bottom: 3px solid transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.customerTab:hover,
+.customerTabActive {
+  border-bottom-color: var(--brand-primary);
+  color: var(--brand-active);
+}
+
+.customerChart {
+  display: grid;
+  gap: 12px;
+}
+
+.customerChartBars {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  height: 160px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(to top, #f7f9fc, #ffffff);
+}
+
+.customerChartBar {
+  flex: 1;
+  min-width: 10px;
+  border-radius: 6px 6px 0 0;
+  background: var(--brand-primary);
+}
+
+.customerChartLegend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.customerSourceStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.customerSourceLabel {
+  display: inline-flex;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  background: #f7f9fc;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.customerSourceMeta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.customerRecommendation {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+
+.customerRecommendationHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.customerRecommendationHeader h3 {
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.customerRecommendation p {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.customerRecommendationDetails {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.customerForm {
+  display: grid;
+  gap: 20px;
+}
+
+.customerFormGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.customerFormFull {
+  grid-column: 1 / -1;
+}
+
+.customerReadonly {
+  background: #f7f9fc;
+}
+
+.customerFormActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.customerRequestList {
+  display: grid;
+  gap: 10px;
+}
+
+.customerRequest {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.customerRequestMeta {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+  .customerFourColumn {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .customerThreeColumn {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .customerTwoColumn,
+  .customerThreeColumn,
+  .customerFourColumn,
+  .customerDefinitionList,
+  .customerFormGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .customerTableWrap {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .customerTable,
+  .customerTable thead,
+  .customerTable tbody,
+  .customerTable tr,
+  .customerTable th,
+  .customerTable td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .customerTable {
+    min-width: 0;
+  }
+
+  .customerTable thead {
+    display: none;
+  }
+
+  .customerTable tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  .customerTable tbody tr {
+    padding: 4px 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: var(--surface-card);
+  }
+
+  .customerTable tbody th,
+  .customerTable tbody td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: right;
+  }
+
+  .customerTable tbody th::before,
+  .customerTable tbody td::before {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 700;
+    text-align: left;
+  }
+
+  .customerTable tbody tr > :last-child {
+    border-bottom: 0;
+  }
+
+  .customerTable tbody td > :first-child,
+  .customerTable tbody th > :first-child {
+    min-width: 0;
+  }
+
+  .customerCardContent {
+    padding: 18px;
+  }
+
+  .customerListItem,
+  .customerRequest {
+    flex-direction: column;
+  }
+
+  .customerFilterForm,
+  .customerFilterField {
+    width: 100%;
+  }
+
+  .customerFilterActions .button {
+    flex: 1;
+  }
+
+  .customerRecommendationHeader {
+    flex-direction: column;
+  }
+
+  .customerRecommendationHeader .button {
+    width: 100%;
+  }
+}

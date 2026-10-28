@@ -5,7 +5,7 @@ import type { ExternalIdentity, Membership } from "./types.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
-// Returns the memberships the identity may currently use: active membership in an active tenant.
+// Returns the memberships an active identity may currently use: active membership in an active tenant.
 // An unknown user simply yields an empty list.
 export async function findActiveMemberships(
   db: Db,
@@ -26,6 +26,7 @@ export async function findActiveMemberships(
     .where(
       and(
         eq(schema.users.authProviderUserId, identity.subject),
+        eq(schema.users.status, "active"),
         eq(schema.memberships.status, "active"),
         eq(schema.tenants.status, "active"),
       ),

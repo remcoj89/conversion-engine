@@ -9,9 +9,12 @@ import type {
   BlockResult,
   ReopenInput,
   ReopenResult,
+  ReadReviewableContentInput,
+  ReadReviewableContentResult,
   RequestChangesInput,
   RequestChangesResult,
   ReviewableOnboarding,
+  ReviewableOnboardingContent,
   ReviewActionInput,
   ReviewerTarget,
   ReviewTransitionResult,
@@ -23,6 +26,7 @@ import { missingFields, parseAnswers } from "../../../../packages/onboarding-con
 // Keeps the HTTP layer independent of Drizzle/PostgreSQL. Always called with the reviewer context tenant.
 export type ReviewStore = Readonly<{
   findReviewable: (tenantId: string) => Promise<ReviewableOnboarding | null>;
+  readContent: (input: ReadReviewableContentInput) => Promise<ReadReviewableContentResult>;
   // Each action stores its reason, changes the status and writes its audit event in one transaction.
   requestChanges: (input: RequestChangesInput) => Promise<RequestChangesResult>;
   block: (input: BlockInput) => Promise<BlockResult>;
@@ -59,6 +63,28 @@ export function registerReviewRoutes(app: FastifyInstance, { reviewStore }: Revi
     };
   });
 
+  // Content access is deliberately a separate endpoint because it creates an immutable access event.
+  app.get("/v1/review/onboarding/content", async (request, reply) => {
+    const context = getReviewerContext(request);
+    reply.headers(noStore);
+
+    const result = await reviewStore.readContent({
+      tenantId: context.tenantId,
+      reviewerUserId: context.userId,
+      requestId: request.id,
+    });
+    switch (result.status) {
+      case "reviewer_forbidden":
+        return reply.code(403).send({ error: "forbidden" });
+      case "self_review_forbidden":
+        return reply.code(403).send({ error: "self_review_forbidden" });
+      case "not_found":
+        return sendNotFound(reply);
+      case "success":
+        return toContentResponse(result.content);
+    }
+  });
+
   // Reviewer status actions. Tenant and reviewer come only from the reviewer context; each action accepts
   // only its own reason codes.
   registerReviewAction(app, "/v1/review/onboarding/request-changes", reasonBody(reviewRequestReasonCodes), reviewStore.requestChanges); // submitted → review_needed
@@ -66,6 +92,16 @@ export function registerReviewRoutes(app: FastifyInstance, { reviewStore }: Revi
   registerReviewAction(app, "/v1/review/onboarding/unblock", reasonBody(unblockReasonCodes), reviewStore.unblock); // blocked → review_needed
   registerReviewAction(app, "/v1/review/onboarding/approve", parseApproveBody, reviewStore.approve); // submitted → approved
   registerReviewAction(app, "/v1/review/onboarding/reopen", reasonBody(reopenReasonCodes), reviewStore.reopen); // approved → review_needed
+}
+
+function toContentResponse(content: ReviewableOnboardingContent) {
+  return {
+    status: content.status,
+    version: content.version,
+    updated_at: content.updatedAt.toISOString(),
+    answers: content.answers,
+    project_brief: content.projectBrief,
+  };
 }
 
 // One POST route for a reviewer status action, with a strict body parser and the shared result mapping.
