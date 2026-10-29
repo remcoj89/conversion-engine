@@ -1,4 +1,4 @@
-export type AdminTone = "success" | "warning" | "danger" | "info" | "neutral";
+import type { AdminTone } from "./admin-types";
 
 export type AdminClient = {
   id: string;

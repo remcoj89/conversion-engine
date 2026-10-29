@@ -134,6 +134,55 @@
       "when": 1793200914052,
       "tag": "0018_serious_infant_terrible",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793276793544,
+      "tag": "0019_milky_rachel_grey",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793277329438,
+      "tag": "0020_premium_bromley",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793277960694,
+      "tag": "0021_aspiring_cammi",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793279000000,
+      "tag": "0022_tenant_row_security",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793279100000,
+      "tag": "0023_rls_test_user_write",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793279200000,
+      "tag": "0024_restrict_lead_rls_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793279300000,
+      "tag": "0025_allow_invitation_acceptance",
+      "breakpoints": true
     }
   ]
 }

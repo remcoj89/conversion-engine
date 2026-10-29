@@ -1,182 +1,324 @@
 import Link from "next/link";
-import { AdminBadge, AdminDemoFooter, AdminNotice, AdminPageHeader, AdminSection, AdminStat } from "../admin-components";
-import { adminClients, adminOperations } from "../admin-data";
+import {
+  ForbiddenState,
+  UnauthenticatedState,
+  UnavailableState,
+} from "../../ui-states";
+import { AdminBadge, AdminNotice, AdminPageHeader, AdminSection, AdminStat } from "../admin-components";
+import { mapPlatformTenantList, type AdminTenantRow } from "../../../lib/admin/platformTenantMapping";
+import {
+  type PlatformTenantListResult,
+  type PlatformTenantQuery,
+} from "../../../lib/bff/platformTenants";
+import { readPlatformTenantList } from "../../../lib/bff/platformTenantsServer";
+import { CreateClientForm } from "./admin-client-actions";
 
 type SearchParamValue = string | string[] | undefined;
+type SearchParams = Record<string, SearchParamValue>;
 
-type AdminClientsPageProps = {
-  searchParams?: Promise<Record<string, SearchParamValue>>;
-};
+const accountStatusFilters = new Set(["pending", "active", "disabled"]);
+const onboardingStatusFilters = new Set([
+  "not_started",
+  "draft",
+  "submitted",
+  "review_needed",
+  "blocked",
+  "approved",
+]);
 
-function firstSearchParam(value: SearchParamValue) {
-  return Array.isArray(value) ? value[0] : value;
+export type AdminClientsPageState =
+  | "ready"
+  | "empty"
+  | "unauthenticated"
+  | "forbidden"
+  | "unavailable";
+
+export type AdminClientsPageProps = Readonly<{
+  searchParams?: Promise<SearchParams>;
+}>;
+
+export function parseAdminClientsQuery(searchParams: SearchParams): PlatformTenantQuery {
+  const query = firstSearchParam(searchParams.q)?.trim();
+  const status = firstSearchParam(searchParams.status);
+  const onboardingStatus = firstSearchParam(searchParams.onboarding_status);
+  const limit = firstSearchParam(searchParams.limit);
+  const cursor = firstSearchParam(searchParams.cursor)?.trim();
+
+  return {
+    ...(query ? { q: query } : {}),
+    ...(status && accountStatusFilters.has(status) ? { status } : {}),
+    ...(onboardingStatus && onboardingStatusFilters.has(onboardingStatus)
+      ? { onboarding_status: onboardingStatus }
+      : {}),
+    ...(limit && /^(?:[1-9]|[1-4][0-9]|50)$/.test(limit) ? { limit } : { limit: "25" }),
+    ...(cursor ? { cursor } : {}),
+  };
 }
 
-export async function AdminClientsOverview({ searchParams, basePath = "/admin" }: AdminClientsPageProps & { basePath?: string }) {
+export function buildAdminClientsHref(
+  query: PlatformTenantQuery,
+  overrides: Readonly<{ cursor?: string | null }> = {},
+): string {
+  const params = new URLSearchParams();
+  for (const key of ["q", "status", "onboarding_status", "limit"] as const) {
+    const value = query[key];
+    if (value) params.set(key, value);
+  }
+
+  const cursor = overrides.cursor === undefined ? query.cursor : overrides.cursor;
+  if (cursor) params.set("cursor", cursor);
+
+  const queryString = params.toString();
+  return queryString ? `/admin/clients?${queryString}` : "/admin/clients";
+}
+
+export function getAdminClientsPageState(result: PlatformTenantListResult): AdminClientsPageState {
+  if (result.status === "unauthenticated") return "unauthenticated";
+  if (result.status === "forbidden") return "forbidden";
+  if (result.status !== "ready") return "unavailable";
+  return result.data.items.length === 0 ? "empty" : "ready";
+}
+
+export default async function AdminClientsPage({ searchParams }: AdminClientsPageProps) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
-  const query = firstSearchParam(resolvedSearchParams.q)?.trim().toLowerCase() ?? "";
-  const selectedStatus = firstSearchParam(resolvedSearchParams.status) ?? "all";
-  const selectedOnboarding = firstSearchParam(resolvedSearchParams.onboarding) ?? "all";
+  const query = parseAdminClientsQuery(resolvedSearchParams);
+  const result = await readPlatformTenantList(query);
+  const state = getAdminClientsPageState(result);
 
-  const filteredClients = adminClients.filter((client) => {
-    const matchesQuery = query.length === 0
-      || client.name.toLowerCase().includes(query)
-      || client.industry.toLowerCase().includes(query)
-      || client.owner.toLowerCase().includes(query)
-      || client.website.toLowerCase().includes(query);
-    const matchesStatus = selectedStatus === "all" || client.statusKey === selectedStatus;
-    const matchesOnboarding = selectedOnboarding === "all" || client.onboardingKey === selectedOnboarding;
+  if (state === "unauthenticated") {
+    return <UnauthenticatedState message="Meld je aan om de Westend klantenlijst te bekijken." />;
+  }
+  if (state === "forbidden") {
+    return <ForbiddenState message="Je account heeft geen Platform Admin-recht voor de Westend klantenlijst." />;
+  }
+  if (state === "unavailable") {
+    return <UnavailableState />;
+  }
 
-    return matchesQuery && matchesStatus && matchesOnboarding;
-  });
+  if (result.status !== "ready") {
+    return <UnavailableState />;
+  }
 
-  const activeWebsiteCount = adminClients.filter((client) => client.websiteEnvironment === "Live").length;
-  const attentionCount = adminClients.filter((client) =>
-    client.statusKey === "review" || client.statusKey === "onboarding" || client.monitoringTone === "warning",
-  ).length;
-  const reviewCount = adminClients.filter((client) => client.statusKey === "review").length;
+  return <AdminClientsPageLayout query={query} result={result} />;
+}
+
+function AdminClientsPageLayout({
+  query,
+  result,
+}: Readonly<{
+  query: PlatformTenantQuery;
+  result: Extract<PlatformTenantListResult, { status: "ready" }>;
+}>) {
+  const rows = mapPlatformTenantList(result.data);
+  const activeCount = result.data.items.filter((tenant) => tenant.status === "active").length;
+  const activeWebsiteCount = result.data.items.reduce(
+    (count, tenant) => count + (tenant.website_summary?.active ?? 0),
+    0,
+  );
+  const hasFilters = Boolean(query.q || query.status || query.onboarding_status);
 
   return (
     <div className="admin-page">
+      <nav className="admin-breadcrumb" aria-label="Kruimelpad">
+        <span>Westend beheer</span>
+        <span aria-hidden="true">/</span>
+        <strong>Klanten</strong>
+      </nav>
+
       <AdminPageHeader
-        eyebrow="Westend beheeromgeving · Klanten & projecten"
-        title="Klantenoverzicht"
-        description="Start bij de klantcontext: status, onboarding, website en de eerstvolgende beheeractie per tenant."
-        actions={<Link href="/admin/review" className="button button-primary">Open review queue</Link>}
+        eyebrow="Westend beheer · Platform Admin"
+        title="Klanten"
+        description="Bekijk operationele status, onboarding en websitekoppelingen per klant. Deze lijst toont alleen metadata die de backend betrouwbaar beschikbaar maakt."
+        actions={<CreateClientForm />}
       />
 
       <div className="admin-stat-grid">
-        <AdminStat label="Alle klanten" value={String(adminClients.length)} detail="Fictieve tenants in demo" tone="info" />
-        <AdminStat label="Live websites" value={String(activeWebsiteCount)} detail="Websiteomgeving actief" tone="success" />
-        <AdminStat label="Aandacht nodig" value={String(attentionCount)} detail="Review, onboarding of incident" tone="warning" />
-        <AdminStat label="Review queue" value={String(reviewCount)} detail="Klant met open aanvulling" tone="info" />
+        <AdminStat label="Resultaten" value={String(rows.length)} detail="Op deze pagina" tone="info" />
+        <AdminStat label="Actieve klanten" value={String(activeCount)} detail="Operationele status" tone="success" />
+        <AdminStat label="Actieve websites" value={String(activeWebsiteCount)} detail="Op deze pagina" tone="success" />
+        <AdminStat label="Paginering" value={result.data.next_cursor ? "Volgende" : "Laatste"} detail="Server-side cursor" tone="neutral" />
       </div>
 
       <AdminNotice tone="info">
-        <strong>Demo-omgeving.</strong> Deze klantcontext gebruikt fictieve gegevens. De routes tonen de beheerflow, maar voeren geen autorisatie-, review-, support- of deploymentactie uit.
+        <strong>Live klantdata.</strong> Je kunt hier tenants aanmaken. Interne reviewinhoud, klantantwoorden en klant-CRM blijven buiten deze route.
       </AdminNotice>
 
-      <AdminSection title="Alle klanten" description="Zoek op klant, branche, eigenaar of domein en open daarna het klantdetail.">
+      <AdminSection title="Klanten zoeken" description="Zoek op klantnaam en filter server-side op account- of onboardingstatus.">
         <form className="admin-filter-bar" method="get" aria-label="Klantfilters">
           <div className="admin-filter-field admin-filter-field-search">
-            <label htmlFor="client-query">Zoeken</label>
-            <input id="client-query" name="q" type="search" placeholder="Bijv. Northline of fysiotherapie" defaultValue={firstSearchParam(resolvedSearchParams.q)} />
+            <label htmlFor="client-query">Klantnaam</label>
+            <input
+              id="client-query"
+              name="q"
+              type="search"
+              placeholder="Bijv. Northline"
+              defaultValue={query.q ?? ""}
+            />
           </div>
           <div className="admin-filter-field">
-            <label htmlFor="client-status">Klantstatus</label>
-            <select id="client-status" name="status" defaultValue={selectedStatus}>
+            <label htmlFor="client-status">Accountstatus</label>
+            <select id="client-status" name="status" defaultValue={query.status ?? "all"}>
               <option value="all">Alle statussen</option>
+              <option value="pending">In afwachting</option>
               <option value="active">Actief</option>
-              <option value="review">In review</option>
-              <option value="onboarding">Onboarding</option>
-              <option value="monitoring">Monitoring</option>
+              <option value="disabled">Inactief</option>
             </select>
           </div>
           <div className="admin-filter-field">
-            <label htmlFor="client-onboarding">Onboarding</label>
-            <select id="client-onboarding" name="onboarding" defaultValue={selectedOnboarding}>
-              <option value="all">Alle fasen</option>
+            <label htmlFor="client-onboarding-status">Onboardingstatus</label>
+            <select
+              id="client-onboarding-status"
+              name="onboarding_status"
+              defaultValue={query.onboarding_status ?? "all"}
+            >
+              <option value="all">Alle statussen</option>
+              <option value="not_started">Niet gestart</option>
+              <option value="draft">In voorbereiding</option>
               <option value="submitted">Ingediend</option>
-              <option value="review-needed">Aanvulling nodig</option>
-              <option value="in-progress">In uitvoering</option>
+              <option value="review_needed">Aanvulling nodig</option>
+              <option value="blocked">Geblokkeerd</option>
               <option value="approved">Goedgekeurd</option>
             </select>
           </div>
           <div className="admin-filter-actions">
             <button type="submit" className="button button-secondary button-small">Toon klanten</button>
-            <Link href={basePath} className="button button-secondary button-small">Wis filters</Link>
+            <Link href="/admin/clients" className="button button-secondary button-small">Wis filters</Link>
           </div>
         </form>
 
         <p className="admin-filter-result" aria-live="polite">
-          {filteredClients.length} van {adminClients.length} klanten zichtbaar
-          {query ? ` voor “${firstSearchParam(resolvedSearchParams.q)}”` : ""}.
+          {rows.length} {rows.length === 1 ? "klant" : "klanten"} op deze pagina
+          {hasFilters ? " · filters actief" : ""}.
         </p>
 
-        {filteredClients.length > 0 ? (
-          <div className="admin-table-wrap admin-client-table-wrap">
-            <table className="admin-table admin-client-table">
-              <caption className="visually-hidden">Klanten en projecten</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Klant</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Onboarding</th>
-                  <th scope="col">Website</th>
-                  <th scope="col">Monitoring</th>
-                  <th scope="col">Eigenaar</th>
-                  <th scope="col">Bijgewerkt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredClients.map((client) => (
-                  <tr key={client.id}>
-                    <td data-label="Klant">
-                      <div className="admin-table-client">
-                        <Link href={`/admin/clients/${client.id}`} className="admin-table-link">
-                          <strong>{client.name}</strong>
-                          <span>{client.industry}</span>
-                        </Link>
-                        <Link href={`/admin/clients/${client.id}`} className="admin-table-link admin-table-action-link">Bekijk detail →</Link>
-                      </div>
-                    </td>
-                    <td data-label="Status"><AdminBadge tone={client.statusTone}>{client.status}</AdminBadge></td>
-                    <td data-label="Onboarding">
-                      <div className="admin-table-cell-stack">
-                        <strong>{client.onboarding}</strong>
-                        <span className="admin-table-subtext">{client.onboardingProgress}</span>
-                      </div>
-                    </td>
-                    <td data-label="Website">
-                      <div className="admin-table-cell-stack">
-                        <span className="admin-mono">{client.website}</span>
-                        <span className="admin-table-subtext">{client.websiteEnvironment} · {client.websiteGate}</span>
-                      </div>
-                    </td>
-                    <td data-label="Monitoring">
-                      <div className="admin-table-cell-stack">
-                        <AdminBadge tone={client.monitoringTone}>{client.monitoringStatus}</AdminBadge>
-                        <span className="admin-table-subtext">{client.monitoringDetail}</span>
-                      </div>
-                    </td>
-                    <td data-label="Eigenaar">{client.owner}</td>
-                    <td data-label="Bijgewerkt">{client.updatedAt}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {rows.length === 0 ? (
+          <div className="card admin-empty-state">
+            <strong>{hasFilters ? "Geen klanten gevonden" : "Nog geen klanten beschikbaar"}</strong>
+            <span>
+              {hasFilters
+                ? "Pas je zoekterm of filters aan om opnieuw te zoeken."
+                : "Er zijn nog geen actieve klantgegevens beschikbaar in de Platform Admin-bron."}
+            </span>
+            {hasFilters ? <Link href="/admin/clients" className="button button-secondary button-small">Wis filters</Link> : null}
           </div>
         ) : (
-          <div className="card admin-empty-state">
-            <strong>Geen klanten gevonden</strong>
-            <span>Pas je zoekterm of filters aan om een klantdetail te openen.</span>
-            <Link href={basePath} className="button button-secondary button-small">Toon alle klanten</Link>
-          </div>
+          <>
+            <div className="admin-table-wrap admin-desktop-client-table">
+              <table className="admin-table admin-client-table">
+                <caption className="visually-hidden">Klantenoverzicht</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Klant</th>
+                    <th scope="col">Accountstatus</th>
+                    <th scope="col">Onboarding</th>
+                    <th scope="col">Websites</th>
+                    <th scope="col">Aangemaakt</th>
+                    <th scope="col">Detail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => <AdminClientTableRow key={row.id} row={row} />)}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="admin-mobile-client-list" aria-label="Klantenoverzicht mobiel">
+              {rows.map((row) => <AdminClientCard key={row.id} row={row} />)}
+            </div>
+          </>
         )}
-      </AdminSection>
 
-      <AdminSection title="Aandacht vandaag" description="Snelle links naar bestaande Westend-beheeronderdelen; klantacties blijven in het detail gescheiden.">
-        <div className="admin-operation-list">
-          {adminOperations.map((operation) => (
-            <Link key={operation.title} href={operation.href} className="admin-operation-item">
-              <div>
-                <strong>{operation.title}</strong>
-                <span>{operation.detail}</span>
-              </div>
-              <AdminBadge tone={operation.tone}>{operation.status}</AdminBadge>
+        {result.data.next_cursor ? (
+          <nav className="admin-pagination" aria-label="Klantenpaginering">
+            <Link
+              href={buildAdminClientsHref(query, { cursor: result.data.next_cursor })}
+              className="button button-secondary button-small"
+            >
+              Volgende pagina →
             </Link>
-          ))}
-        </div>
+          </nav>
+        ) : null}
       </AdminSection>
-
-      <AdminNotice tone="warning">
-        Nieuwe accounts en reviewer-toewijzingen lopen in productie via gecontroleerde provisioning. Deze frontend maakt geen account aan en wijzigt geen autorisaties.
-      </AdminNotice>
-      <AdminDemoFooter />
     </div>
   );
 }
 
-export default function AdminClientsPage(props: AdminClientsPageProps) {
-  return <AdminClientsOverview {...props} basePath="/admin/clients" />;
+function AdminClientTableRow({ row }: { row: AdminTenantRow }) {
+  return (
+    <tr>
+      <td>
+        <div className="admin-table-client">
+          <Link
+            href={`/admin/clients/${row.id}`}
+            className="admin-table-link"
+            aria-label={`Bekijk klantdetail van ${row.name}`}
+          >
+            <strong>{row.name}</strong>
+            <span className="admin-mono">{row.id}</span>
+          </Link>
+        </div>
+      </td>
+      <td><AdminBadge tone={row.accountStatusTone}>{row.accountStatus}</AdminBadge></td>
+      <td>
+        <div className="admin-table-cell-stack">
+          <strong>{row.onboardingStatus}</strong>
+          <span className="admin-table-subtext">{row.onboardingMeta}</span>
+        </div>
+      </td>
+      <td><AdminBadge tone={row.websiteStatusTone}>{row.websiteStatus}</AdminBadge></td>
+      <td><time dateTime={row.createdAtIso}>{row.createdAt}</time></td>
+      <td>
+        <Link
+          href={`/admin/clients/${row.id}`}
+          className="button button-secondary button-small admin-table-action-link"
+        >
+          Bekijk detail
+        </Link>
+      </td>
+    </tr>
+  );
+}
+
+function AdminClientCard({ row }: { row: AdminTenantRow }) {
+  return (
+    <article className="card admin-client-card">
+      <div className="admin-client-card-heading">
+        <Link
+          href={`/admin/clients/${row.id}`}
+          className="admin-client-card-link"
+          aria-label={`Bekijk klantdetail van ${row.name}`}
+        >
+          <h3>{row.name}</h3>
+          <span className="admin-mono">{row.id}</span>
+        </Link>
+        <AdminBadge tone={row.accountStatusTone}>{row.accountStatus}</AdminBadge>
+      </div>
+      <dl className="admin-client-card-details">
+        <div>
+          <dt>Onboarding</dt>
+          <dd>
+            <AdminBadge tone={row.onboardingStatusTone}>{row.onboardingStatus}</AdminBadge>
+            <span>{row.onboardingMeta}</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Websites</dt>
+          <dd><AdminBadge tone={row.websiteStatusTone}>{row.websiteStatus}</AdminBadge></dd>
+        </div>
+        <div>
+          <dt>Aangemaakt</dt>
+          <dd><time dateTime={row.createdAtIso}>{row.createdAt}</time></dd>
+        </div>
+      </dl>
+      <div className="admin-client-card-footer">
+        <Link href={`/admin/clients/${row.id}`} className="button button-secondary button-small">
+          Bekijk klantdetail →
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+function firstSearchParam(value: SearchParamValue): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

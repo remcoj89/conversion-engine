@@ -44,7 +44,7 @@ export type CallbackHandlerDependencies = Readonly<{
   logRejection?: (reason: string) => void;
 }>;
 
-type Transaction = Readonly<{ state: string; nonce: string; codeVerifier: string; issuedAt: number }>;
+type Transaction = Readonly<{ state: string; nonce: string; codeVerifier: string; issuedAt: number; returnTo: "/" | "/invite" }>;
 
 type TokenSet = Readonly<{ accessToken: string; refreshToken: string; idToken: string; expiresIn: number }>;
 
@@ -102,7 +102,7 @@ export function createCallbackHandler(deps: CallbackHandlerDependencies) {
         throw new CallbackError("session_store_failed", "auth_unavailable");
       }
 
-      const response = NextResponse.redirect(new URL("/", deps.appOrigin), 303);
+      const response = NextResponse.redirect(new URL(transaction.returnTo, deps.appOrigin), 303);
       response.headers.set("Cache-Control", "no-store");
       response.cookies.set({
         name: sessionCookiePolicy.name,
@@ -152,7 +152,8 @@ function readTransaction(request: NextRequest, key: Buffer, now: Date): Transact
     !isNonEmptyString((parsed as Record<string, unknown>).state) ||
     !isNonEmptyString((parsed as Record<string, unknown>).nonce) ||
     !isNonEmptyString((parsed as Record<string, unknown>).codeVerifier) ||
-    !Number.isSafeInteger((parsed as Record<string, unknown>).issuedAt)
+    !Number.isSafeInteger((parsed as Record<string, unknown>).issuedAt) ||
+    !isReturnTo((parsed as Record<string, unknown>).returnTo)
   ) {
     throw new CallbackError("invalid_transaction");
   }
@@ -163,6 +164,10 @@ function readTransaction(request: NextRequest, key: Buffer, now: Date): Transact
     throw new CallbackError("expired_transaction");
   }
   return transaction;
+}
+
+function isReturnTo(value: unknown): value is "/" | "/invite" {
+  return value === "/" || value === "/invite";
 }
 
 async function exchangeCode(deps: CallbackHandlerDependencies, code: string, codeVerifier: string): Promise<TokenSet> {

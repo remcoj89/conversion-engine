@@ -32,7 +32,9 @@ const WorkspaceContext = createContext<WorkspaceContextValue | undefined>(undefi
 export function WorkspaceContextProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const isAdminRoute = pathname === "/admin" || pathname.startsWith("/admin/");
-  const initialTenantId = useState<string | null>(() => readStoredTenantId())[0];
+  const isInviteRoute = pathname === "/invite";
+  const bypassWorkspace = isAdminRoute || isInviteRoute;
+  const initialTenantId = useState<string | null>(() => bypassWorkspace ? null : readStoredTenantId())[0];
   const [state, setState] = useState<WorkspaceContextState>(initialWorkspaceContext);
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(initialTenantId);
   const stateRef = useRef(state);
@@ -63,8 +65,8 @@ export function WorkspaceContextProvider({ children }: { children: ReactNode }) 
   }, []);
 
   useEffect(() => {
-    setTenantRequestBoundary(isAdminRoute ? null : selectedTenantId);
-  }, [isAdminRoute, selectedTenantId, setTenantRequestBoundary]);
+    setTenantRequestBoundary(bypassWorkspace ? null : selectedTenantId);
+  }, [bypassWorkspace, selectedTenantId, setTenantRequestBoundary]);
 
   useEffect(() => () => setTenantRequestBoundary(null), [setTenantRequestBoundary]);
 
@@ -90,9 +92,9 @@ export function WorkspaceContextProvider({ children }: { children: ReactNode }) 
   );
 
   useEffect(() => {
-    if (isAdminRoute) return;
+    if (bypassWorkspace) return;
     queueMicrotask(() => void loadContext(initialTenantId, true));
-  }, [initialTenantId, isAdminRoute, loadContext]);
+  }, [bypassWorkspace, initialTenantId, loadContext]);
 
   const selectTenant = useCallback(
     async (tenantId: string): Promise<void> => {
@@ -117,17 +119,17 @@ export function WorkspaceContextProvider({ children }: { children: ReactNode }) 
   );
 
   const workspaceFetch = useMemo<WorkspaceFetch>(
-    () => createWorkspaceFetch(isAdminRoute ? null : selectedTenantId, fetch),
-    [isAdminRoute, selectedTenantId],
+    () => createWorkspaceFetch(bypassWorkspace ? null : selectedTenantId, fetch),
+    [bypassWorkspace, selectedTenantId],
   );
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({
-      ...(isAdminRoute ? { status: "not_applicable", tenant: null, memberships: [] } : state),
+      ...(bypassWorkspace ? { status: "not_applicable", tenant: null, memberships: [] } : state),
       selectTenant,
       fetch: workspaceFetch,
     }),
-    [isAdminRoute, selectTenant, state, workspaceFetch],
+    [bypassWorkspace, selectTenant, state, workspaceFetch],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

@@ -9,7 +9,18 @@ export type MembershipStatus = "active" | "invited" | "disabled";
 export type ExternalIdentity = {
   issuer: string; // OIDC "iss"; not stored yet (single-issuer assumption)
   subject: string; // OIDC "sub"; only unique within its issuer
+  assurance: AuthAssurance;
 };
+
+// This is deliberately a derived, claim-free representation. Raw JWT assurance claims never
+// cross the adapter boundary, so authorization can only check the small server-side contract.
+export type AuthAssurance = Readonly<
+  | { level: "aal2" }
+  | { level: "insufficient" }
+>;
+
+export const STRONG_AUTH_ASSURANCE: AuthAssurance = Object.freeze({ level: "aal2" });
+export const INSUFFICIENT_AUTH_ASSURANCE: AuthAssurance = Object.freeze({ level: "insufficient" });
 
 export type Membership = {
   tenantId: string;

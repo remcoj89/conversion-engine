@@ -22,9 +22,8 @@ const navGroups = {
   admin: {
     label: "WESTEND BEHEER",
     items: [
-      { label: "Beheeroverzicht", glyph: "◈", href: "/admin" },
-      { label: "Audit & versies", glyph: "⌁", href: "/admin/audit" },
       { label: "Klanten", glyph: "▦", href: "/admin/clients" },
+      { label: "Audit & versies", glyph: "⌁", href: "/admin/audit" },
       { label: "Project Brief Review", glyph: "▣", href: "/admin/review" },
       { label: "Websites", glyph: "▤", href: "/admin/websites" },
       { label: "Monitoring", glyph: "◉", href: "/admin/monitoring" },
@@ -52,9 +51,10 @@ export default function Sidebar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const pathname = usePathname();
   const isAdmin = isAdminPath(pathname);
-  const contextLabel = isAdmin ? navGroups.admin.label : navGroups.customer.label;
+  const isInvite = pathname === "/invite";
+  const contextLabel = isInvite ? "UITNODIGING" : isAdmin ? navGroups.admin.label : navGroups.customer.label;
   const activeGroup = isAdmin ? navGroups.admin : navGroups.customer;
-  const brandHref = isAdmin ? "/admin" : "/";
+  const brandHref = isAdmin ? "/admin/clients" : "/";
 
   return (
     <aside className="sidebar">
@@ -62,7 +62,7 @@ export default function Sidebar() {
         <Link
           href={brandHref}
           className="brand"
-          aria-label={`${contextLabel}, naar ${isAdmin ? "het beheeroverzicht" : "het klantdashboard"}`}
+          aria-label={`${contextLabel}, naar ${isAdmin ? "het klantenoverzicht" : "het klantdashboard"}`}
         >
           <span className="brand-symbol" aria-hidden="true">
             CE

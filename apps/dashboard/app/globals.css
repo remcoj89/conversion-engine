@@ -232,6 +232,10 @@ a.nav-item:hover {
   color: var(--text-primary);
 }
 
+.topbar-login {
+  flex: 0 0 auto;
+}
+
 .badge {
   display: inline-flex;
   padding: 4px 10px;
@@ -272,6 +276,10 @@ a.nav-item:hover {
   font-size: 32px;
   line-height: 1.2;
   letter-spacing: -0.03em;
+}
+
+.page-login-button {
+  margin-top: calc(var(--space-unit) * 2);
 }
 
 .intro {
@@ -1720,6 +1728,11 @@ textarea.field-control {
     padding: 0 calc(var(--space-unit) * 2);
   }
 
+  /* The sidebar already identifies the product on small screens. */
+  .topbar > .badge {
+    display: none;
+  }
+
   .content {
     padding: calc(var(--space-unit) * 3) calc(var(--space-unit) * 2);
   }
@@ -1898,6 +1911,55 @@ textarea.field-control {
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
+}
+
+.invite-page {
+  display: grid;
+  min-height: min(620px, calc(100vh - 190px));
+  place-items: center;
+}
+
+.invite-card {
+  display: grid;
+  width: min(100%, 620px);
+  gap: calc(var(--space-unit) * 2);
+  padding: clamp(24px, 5vw, 52px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: 0 18px 44px rgba(28, 45, 70, 0.08);
+}
+
+.invite-card h1 {
+  margin: 0;
+  font-size: clamp(28px, 5vw, 42px);
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+}
+
+.invite-message {
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--space-unit) * 1.5);
+  padding-top: calc(var(--space-unit) * 1.5);
+  border-top: 1px solid var(--border);
+}
+
+.invite-message h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.invite-message p {
+  max-width: 58ch;
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+.invite-help {
+  font-size: 13px;
 }
 
 @keyframes ui-state-pulse {

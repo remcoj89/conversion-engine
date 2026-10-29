@@ -24,6 +24,7 @@ const transaction = {
   codeVerifier: "code-verifier-value",
   codeChallenge: "code-challenge-value",
   issuedAt: NOW.getTime() - 60_000,
+  returnTo: "/" as const,
 };
 
 const ACCESS_TOKEN = "access-token-secret-value";
@@ -321,6 +322,22 @@ test("succesvolle callback maakt een sessie, zet de sessiecookie en redirect naa
     accessExpiresAt: new Date(NOW.getTime() + 3600 * 1000),
     absoluteExpiresAt: new Date(NOW.getTime() + 24 * 60 * 60 * 1000),
   });
+});
+
+test("succesvolle callback kan alleen naar de vaste invite-continuatie redirecten", async () => {
+  const signedIdToken = await idToken();
+  const { handler } = setup(() => tokenResponse({ id_token: signedIdToken }));
+  const response = await handler(request(validQuery, sealedTransaction({ ...transaction, returnTo: "/invite" })));
+
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get("location"), `${APP_ORIGIN}/invite`);
+});
+
+test("callback weigert een gemanipuleerde returnTo-waarde in de versleutelde transactie", async () => {
+  const { handler, postCalls, logs } = setup();
+  await assertGenericFailure(await handler(request(validQuery, sealedTransaction({ ...transaction, returnTo: "https://evil.test" }))));
+  assert.equal(postCalls.length, 0);
+  assert.deepEqual(logs, ["invalid_transaction"]);
 });
 
 test("accessExpiresAt valt nooit na de absolute sessie-einde", async () => {

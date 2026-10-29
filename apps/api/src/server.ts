@@ -6,7 +6,7 @@ import { findActivePlatformAdminAssignments } from "./auth/platformAdminResolver
 import { createDiscoveredKeySet } from "./auth/oidcDiscovery.js";
 import { createZitadelAdapter } from "./auth/zitadelAdapter.js";
 import { createDb } from "./db.js";
-import { createLead } from "./leads/leadRepository.js";
+import { createLead, createLeadReader } from "./leads/leadRepository.js";
 import { findCurrentOnboarding, saveOnboardingDraft, submitOnboarding } from "./onboarding/onboardingRepository.js";
 import {
   approveOnboarding,
@@ -17,6 +17,11 @@ import {
   requestOnboardingChanges,
   unblockOnboarding,
 } from "./onboarding/onboardingReviewRepository.js";
+import { createPlatformTenantRepository } from "./platform/platformTenantRepository.js";
+import { createPlatformTenantDetailRepository } from "./platform/platformTenantDetailRepository.js";
+import { createPlatformTenantMutationRepository } from "./platform/platformTenantMutationRepository.js";
+import { createPlatformAuditEventRepository } from "./platform/platformAuditEventRepository.js";
+import { createTenantOwnerInvitationRepository } from "./platform/tenantOwnerInvitationRepository.js";
 import { findTenant } from "./tenants/tenantLoader.js";
 
 const HOST = "127.0.0.1";
@@ -47,8 +52,14 @@ const app = buildApp({
   platformAdminAssignmentResolver: {
     resolve: (identity) => findActivePlatformAdminAssignments(db, identity),
   },
+  platformTenantRepository: createPlatformTenantRepository(db),
+  platformTenantDetailRepository: createPlatformTenantDetailRepository(db),
+  platformTenantMutationRepository: createPlatformTenantMutationRepository(db),
+  platformAuditEventRepository: createPlatformAuditEventRepository(db),
+  tenantOwnerInvitationRepository: createTenantOwnerInvitationRepository(db),
   tenantLoader: (tenantId) => findTenant(db, tenantId),
-  leadCreator: (tenantId, lead) => createLead(db, tenantId, lead),
+  leadCreator: (tenantId, lead, actorUserId) => createLead(db, tenantId, lead, actorUserId),
+  leadReader: createLeadReader(db),
   onboardingStore: {
     findCurrent: (tenantId) => findCurrentOnboarding(db, tenantId),
     saveDraft: (input) => saveOnboardingDraft(db, input),

@@ -29,7 +29,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       <div className="admin-main">
         <div className="admin-context-bar" aria-label="Werkruimte Westend beheer">
           <span><strong>Westend beheer</strong> · interne operations</span>
-          <span className="badge badge-neutral">Demo-data · read-only</span>
+          <span className="badge badge-neutral">Platform Admin · read-only</span>
         </div>
         <div className="admin-content">{children}</div>
       </div>

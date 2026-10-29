@@ -17,11 +17,13 @@ export type ForwardedError = Readonly<{ status: number; error: string; fields?: 
 
 export type ApiProxyRoute = Readonly<{
   apiPath: string;
-  method: "GET" | "PUT" | "POST";
+  method: "GET" | "PUT" | "POST" | "PATCH";
   forwardedErrors: readonly ForwardedError[];
   // Platform-scoped routes must not inherit a tenant selected by the browser.
   forwardTenantHeader?: boolean;
-  // Alleen bij PUT/POST: maximale grootte van de JSON-body die naar de API gaat.
+  // Cookie-authenticated mutations must originate from this dashboard.
+  requireSameOrigin?: boolean;
+  // Alleen bij muterende requests: maximale grootte van de JSON-body die naar de API gaat.
   maxBodyBytes?: number;
 }>;
 
@@ -44,6 +46,10 @@ export function createApiProxy(
 
   return async function handle(request: NextRequest): Promise<Response> {
     try {
+      if (route.requireSameOrigin && !isSameOriginRequest(request)) {
+        return reply({ error: "forbidden" }, 403);
+      }
+
       // Alleen de sessiecookie telt; een Authorization-header uit de browser wordt genegeerd.
       const sessionId = request.cookies.get(SESSION_COOKIE_NAME)?.value;
       const session = sessionId ? await lookupSession(sessionId) : null;
@@ -97,6 +103,11 @@ export function createApiProxy(
       return reply({ error: "api_unavailable" }, 503);
     }
   };
+}
+
+function isSameOriginRequest(request: NextRequest): boolean {
+  const origin = request.headers.get("origin");
+  return origin !== null && origin === request.nextUrl.origin;
 }
 
 function refreshFailed(outcome: Exclude<RefreshOutcome, { status: "ok" }>): Response {

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { readOidcConfig } from "../../../lib/auth/config";
 import { createOidcTransaction } from "../../../lib/auth/pkce";
 import { encryptSecret } from "../../../lib/session/crypto";
@@ -9,10 +9,10 @@ import {
 
 const OIDC_SCOPES = "openid profile email offline_access";
 
-export function GET(): Response {
+export function GET(request: NextRequest): Response {
   try {
     const config = readOidcConfig();
-    const transaction = createOidcTransaction();
+    const transaction = createOidcTransaction(new Date(), getReturnTo(request.nextUrl.searchParams.get("returnTo")));
     const authorizationUrl = new URL(config.authorizationEndpoint);
 
     authorizationUrl.searchParams.set("client_id", config.clientId);
@@ -46,4 +46,8 @@ export function GET(): Response {
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
+}
+
+export function getReturnTo(value: string | null): "/" | "/invite" {
+  return value === "/invite" ? "/invite" : "/";
 }

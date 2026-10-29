@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import type { AdminTone } from "./admin-data";
+import type { AdminTone } from "./admin-types";
 
 const toneLabels: Record<AdminTone, string> = {
   success: "success",

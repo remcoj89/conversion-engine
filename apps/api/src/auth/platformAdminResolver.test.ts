@@ -13,6 +13,7 @@ type Db = NodePgDatabase<typeof schema>;
 const identityFor = (subject: string): ExternalIdentity => ({
   issuer: "https://issuer.test",
   subject,
+  assurance: { level: "aal2" },
 });
 
 async function withRollback(fn: (db: Db, client: PoolClient) => Promise<void>) {

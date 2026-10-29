@@ -153,14 +153,40 @@ function assertInvalidWithoutLeak(result: AuthResult, token: string) {
 }
 
 test("zitadelAdapter: geldig token geeft alleen issuer en subject", async () => {
-  const token = await sign({ sub: SUBJECT, email: "someone@example.com" });
+  const token = await sign({ sub: SUBJECT, email: "someone@example.com", acr: "aal2" });
 
   assert.deepEqual(await authenticate(`Bearer ${token}`), {
     status: "authenticated",
-    identity: { issuer: ISSUER, subject: SUBJECT },
+    identity: { issuer: ISSUER, subject: SUBJECT, assurance: { level: "aal2" } },
   });
   // Bearer-schema is niet hoofdlettergevoelig.
   assert.equal((await authenticate(`bearer ${token}`)).status, "authenticated");
+});
+
+test("zitadelAdapter: assurance is claim-based, explicit en fail-closed", async () => {
+  const cases: Array<[string, JWTPayload, { level: "aal2" | "insufficient" }]> = [
+    ["ontbrekend", { sub: SUBJECT }, { level: "insufficient" }],
+    ["te laag acr", { sub: SUBJECT, acr: "aal1" }, { level: "insufficient" }],
+    ["malformed acr", { sub: SUBJECT, acr: 2 as never }, { level: "insufficient" }],
+    ["malformed amr", { sub: SUBJECT, amr: "mfa" as never }, { level: "insufficient" }],
+    ["malformed ce_aal", { sub: SUBJECT, ce_aal: ["aal2"] as never }, { level: "insufficient" }],
+    ["null ce_aal", { sub: SUBJECT, ce_aal: null as never }, { level: "insufficient" }],
+    ["object ce_aal", { sub: SUBJECT, ce_aal: { level: "aal2" } as never }, { level: "insufficient" }],
+    ["lege ce_aal", { sub: SUBJECT, ce_aal: "" }, { level: "insufficient" }],
+    ["ongeldige ce_aal", { sub: SUBJECT, ce_aal: "aal1" }, { level: "insufficient" }],
+    ["conflicterende acr en ce_aal", { sub: SUBJECT, acr: "aal1", ce_aal: "aal2" }, { level: "insufficient" }],
+    ["aal2", { sub: SUBJECT, acr: "aal2" }, { level: "aal2" }],
+    ["Conversion Engine aal2 claim", { sub: SUBJECT, ce_aal: "aal2" }, { level: "aal2" }],
+    ["mfa evidence", { sub: SUBJECT, amr: ["pwd", "mfa"] }, { level: "aal2" }],
+  ];
+
+  for (const [name, payload, assurance] of cases) {
+    const result = await authenticate(`Bearer ${await sign(payload)}`);
+    assert.deepEqual(result, {
+      status: "authenticated",
+      identity: { issuer: ISSUER, subject: SUBJECT, assurance },
+    }, name);
+  }
 });
 
 test("zitadelAdapter: verlopen token wordt geweigerd", async () => {
@@ -403,7 +429,7 @@ test("HTTP met ZITADEL-adapter: /health 200, zonder of met ongeldig token 401, g
   const tenantId = randomUUID();
   const { app, logs } = httpSetup([{ tenantId, userId: randomUUID(), role: "team_member", status: "active" }]);
   t.after(() => app.close());
-  const valid = await sign({ sub: SUBJECT });
+  const valid = await sign({ sub: SUBJECT, ce_aal: "aal2" });
   const expired = await sign({ sub: SUBJECT }, { expiresIn: Math.floor(Date.now() / 1000) - 60 });
   const url = "/v1/dashboard/today";
 
@@ -432,11 +458,33 @@ test("HTTP met ZITADEL-adapter: geldig token maar geen membership geeft 403", as
   const response = await app.inject({
     method: "GET",
     url: "/v1/dashboard/today",
-    headers: { authorization: `Bearer ${await sign({ sub: SUBJECT })}` },
+    headers: { authorization: `Bearer ${await sign({ sub: SUBJECT, acr: "aal2" })}` },
   });
 
   assert.equal(response.statusCode, 403);
   assert.deepEqual(response.json(), { error: "forbidden" });
+});
+
+test("HTTP beschermt alle auth-scopes met dezelfde assurance-gate", async (t) => {
+  const tenantId = randomUUID();
+  const { app, logs } = httpSetup([{ tenantId, userId: randomUUID(), role: "team_member", status: "active" }]);
+  t.after(() => app.close());
+  const token = await sign({ sub: SUBJECT, acr: "aal1" });
+  const headers = { authorization: `Bearer ${token}`, "x-tenant-id": tenantId };
+
+  for (const url of [
+    "/v1/dashboard/today",
+    "/v1/session/context",
+    "/v1/review/onboarding",
+    "/v1/platform/context",
+  ]) {
+    const response = await app.inject({ method: "GET", url, headers });
+    assert.equal(response.statusCode, 403, url);
+    assert.deepEqual(response.json(), { error: "insufficient_assurance" }, url);
+  }
+
+  assert.ok(!logs.join("").includes("aal1"));
+  assert.ok(!logs.join("").includes(token));
 });
 
 test("HTTP met ZITADEL-adapter: JWKS-fout geeft 500 internal_error zonder tokendata in response of log", async (t) => {

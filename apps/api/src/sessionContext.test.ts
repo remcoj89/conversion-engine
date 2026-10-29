@@ -37,7 +37,7 @@ const testAuthAdapter: AuthAdapter = {
     if (typeof identity !== "string" || identity === "invalid") {
       return { status: "invalid", reason: "test" };
     }
-    return { status: "authenticated", identity: { issuer: "https://issuer.test", subject } };
+    return { status: "authenticated", identity: { issuer: "https://issuer.test", subject, assurance: { level: "aal2" } } };
   },
 };
 

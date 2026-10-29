@@ -101,7 +101,7 @@ De beveiligingsgrens van de Fastify API, bijgewerkt naar de huidige code (23 okt
 - Foutresponses bevatten geen tenant-, identity- of databasedetails: `401`, `403` en `400` voor auth, toegang en ongeldige invoer, `413` voor een te grote body en een generieke `500 internal_error` bij interne fouten.
 - De API-testset bevat HTTP-tests voor authenticatie (inclusief de ZITADEL-adapter), tenantkeuze, roltoegang, tenantisolatie, leadvalidatie en fail-closed gedrag. De database-testset controleert de echte membership resolver, tenant-loader en lead-repository.
 
-Nog niet aanwezig: MFA/AAL-handhaving en PostgreSQL-RLS. De resolver gaat uit van één geconfigureerde issuer en koppelt op `auth_provider_user_id`/OIDC-subject; issuer-opslag en de samengestelde uniqueness-regel zijn nog niet besloten.
+MFA/AAL-enforcement is lokaal server-side geïmplementeerd voor alle beschermde auth-scopes. Alleen geverifieerde JWT-claims met `acr = aal2`, expliciete `amr = mfa` of het Conversion Engine access-tokencontract `ce_aal = aal2` worden geaccepteerd als sterke assurance; ontbrekende of onvoldoende assurance geeft `403 insufficient_assurance`. De lokale access-token contracttest en de echte ZITADEL end-to-end controle zijn groen. De lokale-only diagnosecontrole toonde `ce_aal = aal2` zonder de token zelf te tonen en is daarna uitgeschakeld. PostgreSQL-RLS is lokaal geïmplementeerd voor alle tenantgebonden tabellen, inclusief `FORCE ROW LEVEL SECURITY`, request-/transactiecontext, identity-only invitation acceptance en cross-tenant regressietests. De nieuwe read-only production database verifier en het RLS-runbook leggen de nog openstaande rol-, policy- en deploymentcontroles vast; productie is nog niet geaccepteerd.
 
 Voor onboarding zijn echte uploads/private opslag, prefill en productiehandoff nog niet aanwezig; draftopslag, officieel indienen, audit-events en de eerste reviewerworkflow zijn er wel. De huidige draftopslag is lokaal gebouwd en getest. De handmatige smoketest met een echte ZITADEL-sessie is geslaagd: login, conceptopslag, refresh en opnieuw inloggen behouden de ingevulde antwoorden.
 
@@ -161,7 +161,7 @@ Het officieel indienen van een onboarding wordt vastgelegd in een onveranderlijk
 - Een databasetrigger weigert `UPDATE` en `DELETE` op de tabel. Deze trigger is handmatig aan de gegenereerde migratie toegevoegd, omdat Drizzle triggers niet modelleert.
 - Database- en API-tests dekken het geslaagde event en de foutpaden: onvolledige of ongeldige antwoorden, verouderde `base_version`, tweede submit, submit na een eerdere statusovergang, een fout tijdens de transactie, een mismatch tussen tenant en project, een actor uit een andere tenant en een ongeldige vorige status.
 
-Een audit-endpoint of audit-dashboard bestaat nog niet. De migraties `0007` t/m `0015` zijn alleen op de lokale testdatabase toegepast; de ontwikkeldatabase is nog niet gemigreerd. De audit- en review-slices zijn onafhankelijk gecontroleerd.
+Het Platform Admin-audit-dashboard is beschikbaar via `GET /v1/platform/audit-events` en `/api/admin/audit-events`. Het toont alleen immutable statusmetadata en inhoudsvrije reviewerinzage; klantinhoud en vrije reviewnotities blijven uitgesloten. De bestaande audit- en review-slices zijn onafhankelijk gecontroleerd.
 
 ## Westend-reviewer foundation — 27 oktober 2026
 
@@ -194,13 +194,13 @@ Slice 2.1b voegt de gecontroleerde server-side CLI `revoke:reviewer` toe. Die va
 - reviewstatusovergangen;
 - status- en redenovergangen buiten `review_requested`;
 - inzage in antwoorden door reviewers, en het loggen daarvan;
-- MFA/AAL-handhaving en PostgreSQL-RLS.
+- De definitieve providerkoppeling voor de MFA/AAL-claim en production hardening; de server-side auth-gate en PostgreSQL-RLS zijn lokaal toegevoegd maar nog niet end-to-end/productie-geaccepteerd.
 
-De provisioning-CLI blijft een gecontroleerd uitvoeringshulpmiddel en is geen beheer-UI. De technische Platform Admin-autorisatie is in de backendfundering toegevoegd, maar MFA/AAL en de volledige productie-hardening blijven releasevoorwaarden.
+De provisioning-CLI blijft een gecontroleerd uitvoeringshulpmiddel en is geen beheer-UI. De technische Platform Admin-autorisatie, PostgreSQL-RLS en de lokale server-side MFA/AAL-gate zijn in de backendfundering toegevoegd; het access-token-claimcontract en de overige productie-hardening blijven releasevoorwaarden.
 
 Migratie `0009` is handmatig toegepast op de lokale testdatabase; de testworkflow migreert niet automatisch. De ontwikkeldatabase is niet gemigreerd. De voortgang staat in [`docs/PROJECT-CHECKLIST.md`](docs/PROJECT-CHECKLIST.md).
 
-## Platform Admin-autorisatie — 28 oktober 2026
+## Platform Admin-autorisatie en live klantenlijst — 29 oktober 2026
 
 Platformbrede beheerrechten staan los van tenant-memberships en reviewerassignments. De nieuwe tabel `platform_admin_assignments` (migratie `0018`) bewaart actieve of ingetrokken `platform_admin`-rechten, inclusief `granted_by`, timestamps en databasechecks. Een disabled user wordt in geen enkele auth-resolver meer als actief behandeld.
 
@@ -208,9 +208,32 @@ Platformbrede beheerrechten staan los van tenant-memberships en reviewerassignme
 - `GET /v1/platform/context` vereist authenticatie én een actieve platformgrant; tenantselectie, `x-tenant-id`, memberships en reviewerrechten zijn geen fallback.
 - Responses en logs geven geen identity-, token- of assignmentdetails terug; responses zijn `no-store`.
 - De Next.js BFF-route `/api/admin/context` gebruikt uitsluitend de server-side sessie en stuurt geen tenantheader door. De admin-layout valideert deze context server-side vóór admin-childpagina’s worden gerenderd.
-- De API-tests, lint, typecheck, build en diff-controle zijn groen. Migratie `0018` is op de lokale testdatabase toegepast; de database-suite heeft 124 geslaagde tests en alleen de bekende cleanup-check met achtergebleven lokale fixtures faalt.
+- `GET /v1/platform/tenants` levert read-only tenantmetadata met zoeken, account-/onboardingfilters, stabiele cursorpaginering en website-/onboardingsamenvattingen.
+- `/api/admin/clients` gebruikt uitsluitend de HttpOnly-sessie, whitelist alleen de afgesproken filters en lekt geen tenantcontext of upstream-details.
+- De admin-klantenlijst gebruikt live data zonder demo-fallback en heeft expliciete loading-, lege-, unauthorized-, forbidden- en unavailable-states, plus aparte desktop- en mobiele weergave.
+- API-lint, typecheck, build en 205 tests; dashboard-lint, typecheck, build en 211 tests; `git diff --check` en de slice-specifieke database-repositorytests zijn groen. De volledige databasesuite heeft 127 geslaagde tests en alleen de bekende cleanup-check met achtergebleven lokale fixtures faalt.
 
-De huidige dashboard-beheerpagina’s blijven read-only demo-oppervlakken, maar zijn nu server-side afgeschermd. Klant- en Westend-beheer hebben daarmee afzonderlijke sessie- en navigatiepaden; live admindata en beheeracties blijven volgende functionele slices.
+De overige dashboard-beheerpagina’s blijven read-only demo-oppervlakken, maar zijn server-side afgeschermd. Klant- en Westend-beheer hebben afzonderlijke sessie- en navigatiepaden. De live klantenlijst, het klantdetail en het audit-dashboard zijn read-only beschikbaar; beheeracties en security release-hardening volgen in volgende slices.
+
+## Tenant lifecycle en owner-uitnodigingen — 29 oktober 2026
+
+Platform Admin kan een tenant aanmaken als `pending`, hernoemen, uitschakelen en heractiveren. Vanuit het klantdetail kan een Platform Admin een handmatige owner-uitnodigingslink maken. De link gebruikt een eenmalige 32-byte bearer-token in een URL-fragment; alleen de SHA-256-hash wordt opgeslagen en de uitnodiging verloopt na zeven dagen.
+
+De acceptatie verloopt via een aparte identity-only scope met sterke MFA/AAL. Een nieuwe ZITADEL-subject kan daardoor zonder bestaande membership transactioneel als lokale user worden aangemaakt, owner worden gekoppeld en de pending tenant activeren. De Next.js invitepagina gebruikt een vaste `/invite`-logincontinuatie, same-origin BFF-mutaties, geen tenantheader en geen localStorage/sessionStorage.
+
+De admin-interface verzendt nog geen e-mail: de link wordt één keer aan de Platform Admin getoond om veilig handmatig te delen. Het ingevulde e-mailadres is voorlopig metadata en wordt niet als geverifieerd identiteitsbewijs gebruikt. De database-migratie `0020_premium_bromley.sql` is gegenereerd maar moet nog handmatig worden toegepast voordat de invitation-flow tegen de database kan draaien.
+
+## Live CRM-leads lezen — 29 oktober 2026
+
+De klantomgeving gebruikt voor leads geen demo-data meer. De API biedt `GET /v1/leads` voor een tenantgebonden lijst en `GET /v1/leads/:leadId` voor een detailweergave. De routes vereisen `leads:read`, valideren zoek-, status-, limiet- en cursorparameters server-side en geven bij een onbekende of niet-toegankelijke lead dezelfde generieke `404 not_found` terug.
+
+- Owners lezen alle leads binnen de gekozen tenant.
+- Team Members zien alleen leads waarvoor een actieve `lead_assignments`-rij bestaat. Een nieuwe lead die via de geauthenticeerde productieflow wordt aangemaakt, krijgt in dezelfde transactie een assignment voor de actor.
+- De assignmenttabel gebruikt samengestelde tenantveilige foreign keys naar `leads` en `memberships`; ingetrokken assignments blijven traceerbaar.
+- De Next.js BFF forwardt uitsluitend de whitelisted leadfilters en gebruikt alleen de HttpOnly-sessie. De klantpagina’s hebben geen fallback naar fictieve data en tonen loading-, empty-, unauthorized-, forbidden-, not-found- en unavailable-states.
+- De lead-read slice is onafhankelijk gecontroleerd met API-lint, typecheck, build en 235 tests; dashboard-lint, typecheck, build en 236 tests; plus `git diff --check` en desktop-/mobiele screenshotcontrole.
+
+Migraties `0019` t/m `0021` en de RLS-migraties `0022` t/m `0025` zijn lokaal toegepast op zowel de ontwikkel- als testdatabase. De database-integratiesuites zijn daarna sequentieel uitgevoerd; parallelle uitvoering blijft ongeschikt omdat suites dezelfde testdatabase gebruiken.
 
 ## Westend-review: wijzigingen aanvragen — 27 oktober 2026
 

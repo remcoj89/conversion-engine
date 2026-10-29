@@ -1,9 +1,5 @@
-import { AdminClientsOverview } from "./clients/page";
+import { redirect } from "next/navigation";
 
-type AdminOverviewPageProps = {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-};
-
-export default function AdminOverviewPage(props: AdminOverviewPageProps) {
-  return <AdminClientsOverview {...props} basePath="/admin" />;
+export default function AdminOverviewPage() {
+  redirect("/admin/clients");
 }

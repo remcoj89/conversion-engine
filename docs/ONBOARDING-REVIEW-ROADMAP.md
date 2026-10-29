@@ -1,6 +1,6 @@
 # Roadmap onboarding en review
 
-**Laatst bijgewerkt:** 27 oktober 2026  
+**Laatst bijgewerkt:** 29 oktober 2026
 **Projectfase:** Fase 5 — technische implementatie met kleine verticale slices
 
 Dit document beschrijft de volgorde waarin de onboarding, reviewworkflow en productiehandoff worden afgebouwd. Het is een roadmap, geen vrijbrief voor één grote implementatieopdracht. Iedere ontwikkelstap blijft een afzonderlijke verticale slice met eigen acceptatiecriteria, onafhankelijke review en kwaliteitsgate.
@@ -29,6 +29,8 @@ De kern van de klant-onboarding is lokaal gebouwd en gecontroleerd:
 - reparatie van de autosave-submit-race.
 
 De laatste reviewer-provisioning-slice, Slice 2.1b, Slice 2.2/2.3 en de bijgewerkte statusdocumentatie zijn lokaal geaccepteerd maar nog niet gecommit of gepusht. Migraties `0012` t/m `0017` zijn alleen op de lokale testdatabase toegepast. Zie `docs/PROJECT-CONTEXT.md` en `docs/PROJECT-CHECKLIST.md` voor de actuele Git- en databasepositie.
+
+De expliciete productprioriteit heeft daarnaast een afzonderlijke Platform Admin-track toegevoegd. De live read-only klantenlijst (Slice 1), het live klantdetail en het live audit-dashboard zijn lokaal gebouwd en gecontroleerd; deze track blijft gescheiden van de klantweergave. Beheeracties zijn nog niet gebouwd.
 
 ## Planningsregels
 
@@ -121,21 +123,21 @@ Een toegewezen reviewer kan alleen de actuele reviewbare onboarding van de eigen
 
 Iedere succesvolle reviewerinzage wordt in dezelfde transactie vastgelegd in `onboarding_review_access_events` (migratie `0017`) met tenant, reviewer, project, versie, doel, actie, request/correlation-ID en tijdstip. Logs bevatten geen klantinhoud. Tenantveilige foreign keys, rollback bij een logfout en een database-trigger tegen `UPDATE` en `DELETE` borgen de herleidbaarheid.
 
-#### Slice 2.4 — audit-dashboard
+#### Slice 2.4 — audit-dashboard — afgerond
 
-Een geautoriseerde Westend-gebruiker kan status, versie, actor, reden en tijdlijn van onboarding-events bekijken. Vrije reviewnotities worden alleen getoond volgens het vastgelegde autorisatie- en bewaarbeleid.
+Een geautoriseerde Westend-gebruiker kan status, versie, actor en tijdlijn van onboarding-events bekijken. De live Platform Admin-feed combineert statusovergangen en inhoudsvrije reviewerinzage, met tenant-, eventtype-, tijd- en cursorfilters. Vrije reviewnotities en klantinhoud worden niet getoond.
 
 **Gate 2 is klaar wanneer:** reviewers hun toegewezen werk kunnen uitvoeren en iedere gevoelige inzage herleidbaar is.
 
 ### Gate 3 — security release gate
 
-#### Slice 3.1 — MFA/AAL-handhaving
+#### Slice 3.1 — MFA/AAL-handhaving — afgerond
 
-MFA/AAL wordt server-side afgedwongen voor klantrollen en reviewers. De API vertrouwt niet op alleen client-state of UI-beperkingen. Tests dekken ontbrekende, onvoldoende en geldige assurance-context.
+De API handhaaft MFA/AAL server-side voor klantrollen, reviewers en Platform Admin. Alleen cryptografisch geverifieerde JWT-claims met `acr = aal2`, expliciete `amr = mfa` of `ce_aal = aal2` geven sterke assurance; ontbrekende, malformed of te lage assurance geeft `403 insufficient_assurance`. `/health` blijft publiek. De lokale tests dekken ontbrekende, onvoldoende en geldige assurance-context in alle beschermde scopes. De echte ZITADEL-login is gecontroleerd met de lokale-only diagnosecontrole: het access-token bevat `ce_aal = aal2`. De diagnose-instelling is daarna uitgeschakeld.
 
-#### Slice 3.2 — PostgreSQL-RLS
+#### Slice 3.2 — PostgreSQL-RLS — lokaal afgerond
 
-RLS wordt tenantveilig ingevoerd voor de relevante tabellen, met expliciete transactiesettings en cross-tenant regression tests. Applicatielaagchecks blijven bestaan als tweede verdedigingslaag.
+RLS is tenantveilig ingevoerd voor de relevante tabellen met `ENABLE` plus `FORCE ROW LEVEL SECURITY`. De API zet per request en transactie de scope, subject, tenant en eventuele invitation-tokenhash; customer, reviewer, Platform Admin en identity-only acceptance hebben gescheiden policies. Cross-tenant reads/writes, ontbrekende context, standalone pooled queries, reviewer-leadtoegang en invitation acceptance zijn regressietestgedekt. Applicatielaagchecks blijven bestaan als tweede verdedigingslaag. Production database-rollen, deployment hardening en een echte productie-migratie blijven open.
 
 **Gate 3 is klaar wanneer:** cross-tenant toegang, onvoldoende authenticatie en directe databasepaden aantoonbaar worden geblokkeerd.
 
@@ -187,4 +189,4 @@ De websiteproductie-MVP is gereed na Gate 4 en Gate 5: betrouwbare klantinput, p
 
 ## Volgende concrete slice
 
-De eerstvolgende stap is Slice 2.4: het audit-dashboard. De klantgerichte onboarding-reviewlus uit Gate 1 en de veilige reviewerinzage met logging uit Slice 2.2/2.3 zijn functioneel afgerond; security release gates en productiehandoff blijven apart gepland. Er wordt niet vooruit geïmplementeerd op basis van deze roadmap.
+De volgende securitystap is production database-role/deployment hardening met de read-only verifier en het RLS-runbook. MFA/AAL, inclusief het echte ZITADEL access-token-claimcontract (`ce_aal = aal2`), is lokaal end-to-end geaccepteerd. PostgreSQL-RLS is lokaal gebouwd en getest; productieacceptatie blijft open. Daarna volgt Gate 4.1 veilige uploads. Productiehandoff en overige Gate 5-slices blijven apart gepland.

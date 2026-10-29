@@ -23,7 +23,6 @@ const pageTitles: ReadonlyArray<readonly [string, string]> = [
   ["/admin/sources", "Databronnen"],
   ["/admin/templates", "Templates"],
   ["/admin/support", "Support"],
-  ["/admin", "Beheeroverzicht"],
 ];
 
 function matchesRoute(pathname: string, route: string): boolean {
@@ -44,16 +43,25 @@ function getPageTitle(pathname: string): string {
 export default function TopbarContext() {
   const pathname = usePathname();
   const isAdmin = pathname === "/admin" || pathname.startsWith("/admin/");
+  const isInvite = pathname === "/invite";
   const { status, tenant } = useWorkspaceContext();
+  const showLoginLink = !isAdmin && ["loading", "unauthenticated", "unavailable"].includes(status);
 
   return (
-    <p className="topbar-context">
-      {isAdmin ? "WESTEND BEHEER" : "KLANTDASHBOARD"} <span aria-hidden="true">/</span>{" "}
-      <strong>{getPageTitle(pathname)}</strong>{" "}
-      <span className="badge badge-neutral" aria-live="polite">
-        {isAdmin ? "Beheeromgeving" : getWorkspaceLabel(status, tenant)}
-      </span>
-    </p>
+    <>
+      <p className="topbar-context">
+        {isInvite ? "UITNODIGING" : isAdmin ? "WESTEND BEHEER" : "KLANTDASHBOARD"} <span aria-hidden="true">/</span>{" "}
+        <strong>{isInvite ? "Uitnodiging" : getPageTitle(pathname)}</strong>{" "}
+        <span className="badge badge-neutral" aria-live="polite">
+          {isInvite ? "Publieke uitnodiging" : isAdmin ? "Beheeromgeving" : getWorkspaceLabel(status, tenant)}
+        </span>
+      </p>
+      {showLoginLink ? (
+        <a className="button button-primary button-small topbar-login" href="/auth/login">
+          Aanmelden
+        </a>
+      ) : null}
+    </>
   );
 }
 

@@ -1,6 +1,8 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { hasStrongAuthAssurance } from "./assurance.js";
 import { resolvePlatformAdminContext, type PlatformAdminContext } from "./platformAdminContext.js";
 import type { AuthAdapter, PlatformAdminAssignmentResolver } from "./types.js";
+import { ensureDatabaseRequestContext, setDatabaseIdentity, setDatabasePlatformAdmin } from "../db/requestContext.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -30,6 +32,14 @@ export function createPlatformAdminAuthHook({
       return reply.code(401).send({ error: "unauthorized" });
     }
 
+    if (!hasStrongAuthAssurance(auth.identity)) {
+      request.log.info({ authOutcome: "insufficient_assurance" }, "platform request rejected");
+      return reply.code(403).send({ error: "insufficient_assurance" });
+    }
+
+    const databaseContext = ensureDatabaseRequestContext(request);
+    setDatabaseIdentity(databaseContext, auth.identity.subject, "identity");
+
     const assignments = await platformAdminAssignmentResolver.resolve(auth.identity);
     const result = resolvePlatformAdminContext(assignments);
     if (result.status === "forbidden") {
@@ -38,6 +48,7 @@ export function createPlatformAdminAuthHook({
     }
 
     request.platformAdminContext = result.context;
+    setDatabasePlatformAdmin(databaseContext, auth.identity.subject);
   };
 }
 

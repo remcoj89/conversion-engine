@@ -23,7 +23,7 @@ const testAuthAdapter: AuthAdapter = {
     const value = request.headers[TEST_IDENTITY_HEADER];
     if (value === undefined) return { status: "anonymous" };
     if (typeof value !== "string" || value === "invalid") return { status: "invalid", reason: "test" };
-    return { status: "authenticated", identity: { issuer: "https://issuer.test", subject: value } };
+    return { status: "authenticated", identity: { issuer: "https://issuer.test", subject: value, assurance: { level: "aal2" } } };
   },
 };
 
@@ -161,7 +161,7 @@ test("platform context geeft alleen de minimale admincontext en negeert x-tenant
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers["cache-control"], "no-store");
   assert.deepEqual(response.json(), { workspace: "admin", role: "platform_admin" });
-  assert.deepEqual(seenIdentities, [{ issuer: "https://issuer.test", subject }]);
+  assert.deepEqual(seenIdentities, [{ issuer: "https://issuer.test", subject, assurance: { level: "aal2" } }]);
   assert.doesNotMatch(response.body, /platform-admin-subject|platform-user-id|not-a-uuid/);
 });
 

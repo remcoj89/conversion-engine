@@ -1,4 +1,5 @@
-import { errors, jwtVerify, type JWTVerifyGetKey } from "jose";
+import { errors, jwtVerify, type JWTVerifyGetKey, type JWTPayload } from "jose";
+import { deriveAuthAssurance } from "./assurance.js";
 import type { AuthAdapter, AuthResult } from "./types.js";
 
 const ALLOWED_ALGORITHMS = ["RS256"];
@@ -67,13 +68,15 @@ export function createZitadelAdapter({ issuer, audience, keys }: ZitadelAdapterO
       }
 
       let subject: unknown;
+      let payload: JWTPayload | undefined;
       try {
-        const { payload } = await jwtVerify(token, keys, {
+        const verified = await jwtVerify(token, keys, {
           issuer,
           audience,
           algorithms: ALLOWED_ALGORITHMS,
           requiredClaims: ["exp", "sub"],
         });
+        payload = verified.payload;
         subject = payload.sub;
       } catch (error) {
         if (TOKEN_ERRORS.some((tokenError) => error instanceof tokenError)) {
@@ -86,7 +89,10 @@ export function createZitadelAdapter({ issuer, audience, keys }: ZitadelAdapterO
         return invalid("missing_subject");
       }
       // The issuer comes from configuration, never from the token.
-      return { status: "authenticated", identity: { issuer, subject } };
+      return {
+        status: "authenticated",
+        identity: { issuer, subject, assurance: deriveAuthAssurance(payload!) },
+      };
     },
   };
 }

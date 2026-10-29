@@ -124,6 +124,13 @@ test("publieke auth-route wordt niet door de customer gate geblokkeerd", () => {
   assert.doesNotMatch(markup, /Klantomgeving laden/);
 });
 
+test("invite-route wordt publiek gerenderd zonder klant-membership gate", () => {
+  const markup = renderBoundary("/invite");
+
+  assert.match(markup, new RegExp(DEMO_MARKER));
+  assert.doesNotMatch(markup, /Klantomgeving laden/);
+});
+
 test("fallback-rendering bevat geen gevoelige tenantinformatie", () => {
   const markup = renderBoundary("/leads");
 

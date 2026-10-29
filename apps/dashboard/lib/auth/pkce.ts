@@ -7,9 +7,10 @@ export type OidcTransaction = Readonly<{
   codeChallenge: string;
   // Epoch milliseconds; the callback rejects transactions older than ten minutes.
   issuedAt: number;
+  returnTo: "/" | "/invite";
 }>;
 
-export function createOidcTransaction(now: Date = new Date()): OidcTransaction {
+export function createOidcTransaction(now: Date = new Date(), returnTo: "/" | "/invite" = "/"): OidcTransaction {
   const state = randomValue();
   const nonce = randomValue();
   const codeVerifier = randomValue(48);
@@ -20,6 +21,7 @@ export function createOidcTransaction(now: Date = new Date()): OidcTransaction {
     codeVerifier,
     codeChallenge: createCodeChallenge(codeVerifier),
     issuedAt: now.getTime(),
+    returnTo,
   });
 }
 

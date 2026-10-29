@@ -1,5 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { hasStrongAuthAssurance } from "./assurance.js";
 import type { AuthAdapter, Membership, MembershipResolver } from "./types.js";
+import { ensureDatabaseRequestContext, setDatabaseIdentity } from "../db/requestContext.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -31,6 +33,14 @@ export function createIdentityAuthHook({ authAdapter, membershipResolver }: Iden
       request.log.info({ authOutcome: auth.status }, "session context request rejected");
       return reply.code(401).send({ error: "unauthorized" });
     }
+
+    if (!hasStrongAuthAssurance(auth.identity)) {
+      request.log.info({ authOutcome: "insufficient_assurance" }, "session context request rejected");
+      return reply.code(403).send({ error: "insufficient_assurance" });
+    }
+
+    const databaseContext = ensureDatabaseRequestContext(request);
+    setDatabaseIdentity(databaseContext, auth.identity.subject, "identity");
 
     const memberships = (await membershipResolver(auth.identity)).filter(
       (membership) => membership.status === "active",

@@ -1,7 +1,9 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { hasStrongAuthAssurance } from "./assurance.js";
 import { readRequestedTenantId } from "./authHook.js";
 import { resolveReviewerContext, type ReviewerContext } from "./reviewerContext.js";
 import type { AuthAdapter, MembershipResolver, ReviewerAssignmentResolver } from "./types.js";
+import { ensureDatabaseRequestContext, setDatabaseIdentity, setDatabaseTenant } from "../db/requestContext.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -28,6 +30,14 @@ export function createReviewerAuthHook({ authAdapter, membershipResolver, review
       return reply.code(401).send({ error: "unauthorized" });
     }
 
+    if (!hasStrongAuthAssurance(auth.identity)) {
+      request.log.info({ authOutcome: "insufficient_assurance" }, "review request rejected");
+      return reply.code(403).send({ error: "insufficient_assurance" });
+    }
+
+    const databaseContext = ensureDatabaseRequestContext(request);
+    setDatabaseIdentity(databaseContext, auth.identity.subject, "identity");
+
     const [assignments, memberships] = await Promise.all([
       reviewerAssignmentResolver(auth.identity),
       membershipResolver(auth.identity),
@@ -36,6 +46,7 @@ export function createReviewerAuthHook({ authAdapter, membershipResolver, review
 
     switch (result.status) {
       case "success":
+        setDatabaseTenant(databaseContext, "reviewer", result.context.tenantId);
         request.reviewerContext = result.context;
         return;
       case "tenant_required":

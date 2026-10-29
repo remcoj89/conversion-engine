@@ -15,6 +15,8 @@ import {
 } from "drizzle-orm/pg-core";
 import { generateWebsitePublicKey, WEBSITE_PUBLIC_KEY_PATTERN } from "../websites/websitePublicKey.js";
 
+export const tenantStatuses = ["pending", "active", "disabled"] as const;
+
 export const tenants = pgTable("tenants", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -22,7 +24,16 @@ export const tenants = pgTable("tenants", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
-});
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  disabledBy: uuid("disabled_by").references(() => users.id),
+  purgeAfterAt: timestamp("purge_after_at", { withTimezone: true }),
+}, (table) => [
+  index("tenants_status_idx").on(table.status),
+  check("tenants_status_check", sql`${table.status} in ('pending', 'active', 'disabled')`),
+]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -61,6 +72,53 @@ export const memberships = pgTable(
     check(
       "memberships_status_check",
       sql`${table.status} in ('active', 'invited', 'disabled')`,
+    ),
+  ],
+);
+
+export const tenantInvitationStatuses = ["pending", "accepted", "revoked", "expired"] as const;
+
+// A tenant owner invitation is a one-time bearer credential. Only the SHA-256 digest of the
+// opaque token is persisted; the plaintext token exists only while the create response is built.
+export const tenantOwnerInvitations = pgTable(
+  "tenant_owner_invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    email: text("email").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    status: text("status", { enum: tenantInvitationStatuses }).notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    acceptedBy: uuid("accepted_by").references(() => users.id),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("tenant_owner_invitations_tenant_status_idx").on(table.tenantId, table.status),
+    uniqueIndex("tenant_owner_invitations_one_pending_per_tenant")
+      .on(table.tenantId)
+      .where(sql`${table.status} = 'pending'`),
+    check(
+      "tenant_owner_invitations_status_check",
+      sql`${table.status} in ('pending', 'accepted', 'revoked', 'expired')`,
+    ),
+    check(
+      "tenant_owner_invitations_token_hash_check",
+      sql`${table.tokenHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "tenant_owner_invitations_terminal_fields_check",
+      sql`(
+        (${table.status} in ('pending', 'expired') and ${table.acceptedAt} is null and ${table.acceptedBy} is null and ${table.revokedAt} is null)
+        or (${table.status} = 'accepted' and ${table.acceptedAt} is not null and ${table.acceptedBy} is not null and ${table.revokedAt} is null)
+        or (${table.status} = 'revoked' and ${table.acceptedAt} is null and ${table.acceptedBy} is null and ${table.revokedAt} is not null)
+      )`,
     ),
   ],
 );
@@ -107,7 +165,56 @@ export const leads = pgTable(
   },
   (table) => [
     index("leads_tenant_id_idx").on(table.tenantId),
+    // Allows tenant-safe foreign keys from assignment records. The lead id is globally unique,
+    // but the composite key keeps the tenant boundary explicit in the relational model.
+    unique("leads_tenant_id_id_unique").on(table.tenantId, table.id),
     check("leads_status_check", sql`${table.status} in ('new')`),
+  ],
+);
+
+export const leadAssignmentStatuses = ["active", "revoked"] as const;
+
+// A lead is visible to a team member only through an active assignment. Owners can read all
+// leads in their tenant; assignments remain traceable after revocation.
+export const leadAssignments = pgTable(
+  "lead_assignments",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    leadId: uuid("lead_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    assignedBy: uuid("assigned_by").notNull(),
+    status: text("status", { enum: leadAssignmentStatuses }).notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.leadId, table.userId] }),
+    foreignKey({
+      name: "lead_assignments_lead_tenant_fk",
+      columns: [table.tenantId, table.leadId],
+      foreignColumns: [leads.tenantId, leads.id],
+    }),
+    foreignKey({
+      name: "lead_assignments_user_membership_fk",
+      columns: [table.tenantId, table.userId],
+      foreignColumns: [memberships.tenantId, memberships.userId],
+    }),
+    foreignKey({
+      name: "lead_assignments_assigned_by_membership_fk",
+      columns: [table.tenantId, table.assignedBy],
+      foreignColumns: [memberships.tenantId, memberships.userId],
+    }),
+    index("lead_assignments_active_user_idx")
+      .on(table.tenantId, table.userId)
+      .where(sql`${table.status} = 'active'`),
+    check(
+      "lead_assignments_status_check",
+      sql`${table.status} in ('active', 'revoked')`,
+    ),
+    check(
+      "lead_assignments_revoked_at_check",
+      sql`(${table.status} = 'active' and ${table.revokedAt} is null) or (${table.status} = 'revoked' and ${table.revokedAt} is not null)`,
+    ),
   ],
 );
 

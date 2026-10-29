@@ -1,11 +1,14 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { hasStrongAuthAssurance } from "./assurance.js";
 import { resolveRequestContext, type RequestContext } from "./requestContext.js";
 import type { AuthAdapter, MembershipResolver } from "./types.js";
+import { ensureDatabaseRequestContext, setDatabaseIdentity, setDatabaseTenant } from "../db/requestContext.js";
 
 declare module "fastify" {
   interface FastifyRequest {
     // Only set after successful authentication and tenant selection.
     authContext?: RequestContext;
+    dbRequestContext?: import("../db/requestContext.js").DatabaseRequestContext;
   }
 }
 
@@ -23,11 +26,20 @@ export function createAuthHook({ authAdapter, membershipResolver }: AuthHookDepe
       return reply.code(401).send({ error: "unauthorized" });
     }
 
+    if (!hasStrongAuthAssurance(auth.identity)) {
+      request.log.info({ authOutcome: "insufficient_assurance" }, "request rejected");
+      return reply.code(403).send({ error: "insufficient_assurance" });
+    }
+
+    const databaseContext = ensureDatabaseRequestContext(request);
+    setDatabaseIdentity(databaseContext, auth.identity.subject, "identity");
+
     const memberships = await membershipResolver(auth.identity);
     const result = resolveRequestContext(memberships, readRequestedTenantId(request));
 
     switch (result.status) {
       case "success":
+        setDatabaseTenant(databaseContext, "customer", result.context.tenantId);
         request.authContext = result.context;
         return;
       case "tenant_required":

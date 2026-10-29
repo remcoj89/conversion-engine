@@ -1,6 +1,7 @@
 // Local development only: links the most recently logged-in session to a local tenant.
 // Run explicitly with: npm --workspace api run provision:local -- --confirm-local
 import { createDb } from "../db.js";
+import { runWithDatabaseContext } from "../db/requestContext.js";
 import {
   ProvisioningError,
   assertLocalInvocation,
@@ -18,7 +19,9 @@ async function main(): Promise<number> {
 
   const { db, pool } = createDb();
   try {
-    const result = await provisionLocalUser(drizzleTransactionRunner(db));
+    const result = await runWithDatabaseContext({ scope: "maintenance" }, () =>
+      provisionLocalUser(drizzleTransactionRunner(db)),
+    );
     if (result.status === "already_provisioned") {
       console.log("Provisioning was al voltooid: er bestaat al een actieve membership. Er is niets gewijzigd.");
     } else {

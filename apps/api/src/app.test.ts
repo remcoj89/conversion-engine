@@ -50,7 +50,7 @@ const testAuthAdapter: AuthAdapter = {
     const subject = request.headers[TEST_IDENTITY_HEADER];
     if (subject === undefined) return { status: "anonymous" };
     if (subject === "invalid" || typeof subject !== "string") return { status: "invalid", reason: "test" };
-    return { status: "authenticated", identity: { issuer: "https://issuer.test", subject } };
+    return { status: "authenticated", identity: { issuer: "https://issuer.test", subject, assurance: { level: "aal2" } } };
   },
 };
 

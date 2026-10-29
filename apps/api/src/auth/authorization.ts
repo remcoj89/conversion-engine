@@ -1,10 +1,11 @@
 import type { TenantRole } from "./types.js";
 
-export type Permission = "dashboard:read" | "leads:create" | "onboarding:manage";
+export type Permission = "dashboard:read" | "leads:create" | "leads:read" | "onboarding:manage";
 
 const allowedRoles: Readonly<Record<Permission, readonly TenantRole[]>> = {
   "dashboard:read": ["owner", "team_member"],
   "leads:create": ["owner", "team_member"],
+  "leads:read": ["owner", "team_member"],
   // Eerste onboardingslice: alleen de Owner van de actieve tenant leest en wijzigt de intake.
   "onboarding:manage": ["owner"],
 };

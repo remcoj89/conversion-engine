@@ -26,6 +26,15 @@ export default function CustomerWorkspaceGate({
   // Admin and technical routes do not belong to the customer workspace boundary.
   if (routeAccess === "admin" || routeAccess === "public") return children;
 
+  // The home page contains only public shell content and protected data states.
+  // Keep it renderable so unauthenticated visitors can reach the login CTA.
+  if (
+    pathname === "/" &&
+    (status === "loading" || status === "unauthenticated" || status === "unavailable")
+  ) {
+    return children;
+  }
+
   if (status === "loading" || status === "not_applicable") {
     return (
       <LoadingState
@@ -52,6 +61,7 @@ function classifyRoute(pathname: string | null): RouteAccess {
   const path = pathname ?? "/";
 
   if (path === "/admin" || path.startsWith("/admin/")) return "admin";
+  if (path === "/invite") return "public";
   if (
     path === "/api" ||
     path === "/auth" ||

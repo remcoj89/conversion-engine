@@ -1,4 +1,5 @@
 import { createDb } from "../db.js";
+import { runWithDatabaseContext } from "../db/requestContext.js";
 import {
   drizzleReviewerAssignmentRevocationTransactionRunner,
   parseReviewerAssignmentRevocationInvocation,
@@ -19,9 +20,11 @@ async function main(): Promise<number> {
 
   const { db, pool } = createDb();
   try {
-    const result = await revokeReviewerAssignment(
-      drizzleReviewerAssignmentRevocationTransactionRunner(db),
-      input,
+    const result = await runWithDatabaseContext({ scope: "maintenance" }, () =>
+      revokeReviewerAssignment(
+        drizzleReviewerAssignmentRevocationTransactionRunner(db),
+        input,
+      ),
     );
     if (result.status === "revoked") {
       console.log("Reviewer-toewijzing ingetrokken.");

@@ -10,7 +10,15 @@ import { findActiveReviewerAssignments } from "./auth/reviewerAssignmentResolver
 import type { ExternalIdentity } from "./auth/types.js";
 import { createDb } from "./db.js";
 import * as schema from "./db/schema.js";
-import { createLead, findLead, InvalidLeadTenantError, type NewLead } from "./leads/leadRepository.js";
+import {
+  createLead,
+  createLeadInTransaction,
+  findLead,
+  findLeadDetail,
+  InvalidLeadTenantError,
+  listLeads,
+  type NewLead,
+} from "./leads/leadRepository.js";
 import { findTenant } from "./tenants/tenantLoader.js";
 import {
   findCurrentOnboarding,
@@ -275,7 +283,7 @@ test("memberships: toegestane rollen en statussen werken, andere worden geweiger
 });
 
 const TEST_ISSUER = "https://issuer.test";
-const identityFor = (subject: string): ExternalIdentity => ({ issuer: TEST_ISSUER, subject });
+const identityFor = (subject: string): ExternalIdentity => ({ issuer: TEST_ISSUER, subject, assurance: { level: "aal2" } });
 
 // Maakt een user aan en geeft zijn identity terug.
 async function createUser(tx: Tx) {
@@ -357,7 +365,7 @@ test("findActiveMemberships: een disabled user krijgt geen actieve memberships",
 test("findActiveMemberships: membership in inactieve tenant wordt niet gevonden", async () => {
   await withRollback(async (tx) => {
     const { user, identity } = await createUser(tx);
-    const tenant = await createTenant(tx, "suspended");
+    const tenant = await createTenant(tx, "disabled");
     await tx.insert(schema.memberships).values({ tenantId: tenant.id, userId: user.id, role: "owner" });
 
     assert.deepEqual(await findActiveMemberships(tx, identity), []);
@@ -408,9 +416,9 @@ test("findTenant: onbekende tenant geeft null", async () => {
 
 test("findTenant: geeft de opgeslagen status terug", async () => {
   await withRollback(async (tx) => {
-    const tenant = await createTenant(tx, "suspended");
+    const tenant = await createTenant(tx, "disabled");
 
-    assert.deepEqual(await findTenant(tx, tenant.id), { id: tenant.id, name: tenant.name, status: "suspended" });
+    assert.deepEqual(await findTenant(tx, tenant.id), { id: tenant.id, name: tenant.name, status: "disabled" });
   });
 });
 
@@ -460,11 +468,12 @@ test("createLead: telefoonnummer is optioneel", async () => {
 
 test("createLead: onbekende, ongeldige of lege tenant wordt geweigerd", async () => {
   await withRollback(async (tx, client) => {
+    const before = await client.query<{ count: number }>("select count(*)::int as count from leads");
     for (const tenantId of [randomUUID(), "abc", ""]) {
       await expectInvalidTenant(client, () => createLead(tx, tenantId, exampleLead()));
     }
     const { rows } = await client.query<{ count: number }>("select count(*)::int as count from leads");
-    assert.equal(rows[0]?.count, 0);
+    assert.equal(rows[0]?.count, before.rows[0]?.count);
   });
 });
 
@@ -508,6 +517,86 @@ test("findLead: onbekende lead of onbekende tenant geeft null", async () => {
   });
 });
 
+test("listLeads: tenantisolatie, server-side zoekvelden en stabiele cursorpaginering", async () => {
+  await withRollback(async (tx) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    await createLead(tx, tenantA.id, exampleLead({ name: "Alpha", message: "eerste aanvraag" }));
+    await createLead(tx, tenantA.id, exampleLead({ name: "Bravo", source: "website" }));
+    const foreignLead = await createLead(tx, tenantB.id, exampleLead({ name: "Tenant B geheim" }));
+
+    const firstPage = await listLeads(tx, { tenantId: tenantA.id, limit: 1 });
+    assert.equal(firstPage.items.length, 1);
+    assert.equal("tenantId" in firstPage.items[0]!, false);
+    assert.ok(firstPage.nextCursor);
+
+    const secondPage = await listLeads(tx, {
+      tenantId: tenantA.id,
+      q: "website",
+      status: "new",
+      limit: 10,
+    });
+    assert.deepEqual(secondPage.items.map((item) => item.name), ["Bravo"]);
+    assert.ok(!secondPage.items.some((item) => item.id === foreignLead.id));
+
+    const afterCursor = await listLeads(tx, {
+      tenantId: tenantA.id,
+      limit: 10,
+      cursor: firstPage.nextCursor!,
+    });
+    assert.equal(afterCursor.items.length, 1);
+    assert.notEqual(afterCursor.items[0]?.id, firstPage.items[0]?.id);
+  });
+});
+
+test("findLeadDetail: geeft alleen expliciete leadvelden en weigert cross-tenant detail", async () => {
+  await withRollback(async (tx) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+    const lead = await createLead(tx, tenantA.id, exampleLead());
+
+    const detail = await findLeadDetail(tx, tenantA.id, lead.id);
+    assert.ok(detail);
+    assert.equal("tenantId" in detail, false);
+    assert.equal(detail.email, lead.email);
+    assert.equal(await findLeadDetail(tx, tenantB.id, lead.id), null);
+    assert.equal(await findLeadDetail(tx, tenantA.id, randomUUID()), null);
+  });
+});
+
+test("lead assignments: team member ziet alleen actieve toegewezen leads", async () => {
+  await withRollback(async (tx) => {
+    const tenant = await createTenant(tx);
+    const owner = await createUser(tx);
+    const teamMember = await createUser(tx);
+    await tx.insert(schema.memberships).values([
+      { tenantId: tenant.id, userId: owner.user.id, role: "owner" },
+      { tenantId: tenant.id, userId: teamMember.user.id, role: "team_member" },
+    ]);
+
+    const assigned = await createLeadInTransaction(tx, tenant.id, exampleLead({ name: "Toegewezen" }), teamMember.user.id);
+    const ownerLead = await createLeadInTransaction(tx, tenant.id, exampleLead({ name: "Owner lead" }), owner.user.id);
+
+    const visibleToTeamMember = await listLeads(tx, {
+      tenantId: tenant.id,
+      role: "team_member",
+      userId: teamMember.user.id,
+      limit: 10,
+    });
+    assert.deepEqual(visibleToTeamMember.items.map((lead) => lead.name), ["Toegewezen"]);
+    assert.equal(await findLeadDetail(tx, tenant.id, assigned.id, "team_member", teamMember.user.id) !== null, true);
+    assert.equal(await findLeadDetail(tx, tenant.id, ownerLead.id, "team_member", teamMember.user.id), null);
+
+    const visibleToOwner = await listLeads(tx, {
+      tenantId: tenant.id,
+      role: "owner",
+      userId: owner.user.id,
+      limit: 10,
+    });
+    assert.deepEqual(new Set(visibleToOwner.items.map((lead) => lead.name)), new Set(["Toegewezen", "Owner lead"]));
+  });
+});
+
 test("HTTP met echte resolver en loader: eigen tenant 200, andere tenant en disabled membership 403", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
@@ -532,7 +621,9 @@ test("HTTP met echte resolver en loader: eigen tenant 200, andere tenant en disa
         },
         membershipResolver: (identity) => findActiveMemberships(tx, identity),
         tenantLoader: (tenantId) => findTenant(tx, tenantId),
-        leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
+        leadCreator: (tenantId, lead, actorUserId) => actorUserId
+          ? createLeadInTransaction(tx, tenantId, lead, actorUserId)
+          : createLead(tx, tenantId, lead),
         onboardingStore: onboardingStoreFor(tx),
         reviewerAssignmentResolver: (identity) => findActiveReviewerAssignments(tx, identity),
         reviewStore: reviewStoreFor(tx),
@@ -591,7 +682,9 @@ test("HTTP POST /v1/leads met echte repository: lead komt bij de eigen tenant, n
         },
         membershipResolver: (identity) => findActiveMemberships(tx, identity),
         tenantLoader: (tenantId) => findTenant(tx, tenantId),
-        leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
+        leadCreator: (tenantId, lead, actorUserId) => actorUserId
+          ? createLeadInTransaction(tx, tenantId, lead, actorUserId)
+          : createLead(tx, tenantId, lead),
         onboardingStore: onboardingStoreFor(tx),
         reviewerAssignmentResolver: (identity) => findActiveReviewerAssignments(tx, identity),
         reviewStore: reviewStoreFor(tx),
@@ -682,7 +775,7 @@ test("findActiveWebsiteContext: disabled website geeft null", async () => {
 
 test("findActiveWebsiteContext: website van een inactieve tenant geeft null", async () => {
   await withRollback(async (tx) => {
-    const website = await createWebsite(tx, (await createTenant(tx, "suspended")).id);
+    const website = await createWebsite(tx, (await createTenant(tx, "disabled")).id);
 
     assert.equal(await findActiveWebsiteContext(tx, website.publicKey), null);
   });
@@ -771,7 +864,9 @@ const appWithRealRepositories = (tx: Tx) =>
       },
       membershipResolver: (identity) => findActiveMemberships(tx, identity),
       tenantLoader: (tenantId) => findTenant(tx, tenantId),
-      leadCreator: (tenantId, lead) => createLead(tx, tenantId, lead),
+      leadCreator: (tenantId, lead, actorUserId) => actorUserId
+        ? createLeadInTransaction(tx, tenantId, lead, actorUserId)
+        : createLead(tx, tenantId, lead),
       onboardingStore: onboardingStoreFor(tx),
       reviewerAssignmentResolver: (identity) => findActiveReviewerAssignments(tx, identity),
       reviewStore: reviewStoreFor(tx),

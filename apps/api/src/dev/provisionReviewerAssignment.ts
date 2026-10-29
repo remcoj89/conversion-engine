@@ -1,4 +1,5 @@
 import { createDb } from "../db.js";
+import { runWithDatabaseContext } from "../db/requestContext.js";
 import {
   drizzleReviewerAssignmentTransactionRunner,
   parseReviewerAssignmentInvocation,
@@ -19,7 +20,9 @@ async function main(): Promise<number> {
 
   const { db, pool } = createDb();
   try {
-    const result = await provisionReviewerAssignment(drizzleReviewerAssignmentTransactionRunner(db), input);
+    const result = await runWithDatabaseContext({ scope: "maintenance" }, () =>
+      provisionReviewerAssignment(drizzleReviewerAssignmentTransactionRunner(db), input),
+    );
     if (result.status === "created") {
       console.log("Reviewer-toewijzing aangemaakt.");
     } else if (result.status === "reactivated") {
