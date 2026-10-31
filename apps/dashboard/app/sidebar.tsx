@@ -10,7 +10,10 @@ const navGroups = {
     items: [
       { label: "Vandaag", glyph: "▦", href: "/" },
       { label: "Onboarding", glyph: "◎", href: "/onboarding" },
-      { label: "Leads & contacten", glyph: "☷", href: "/leads" },
+      { label: "CRM-overzicht", glyph: "◇", href: "/crm" },
+      { label: "Organisaties", glyph: "▦", href: "/organizations" },
+      { label: "Contactpersonen", glyph: "◌", href: "/contacts" },
+      { label: "Leads", glyph: "☷", href: "/leads" },
       { label: "Pipeline", glyph: "▥", href: "/pipeline" },
       { label: "Taken & afspraken", glyph: "✓", href: "/tasks" },
       { label: "Resultaten", glyph: "▤", href: "/results" },

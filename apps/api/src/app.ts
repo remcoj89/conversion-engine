@@ -7,6 +7,9 @@ import { createPlatformAdminAuthHook, type PlatformAdminAuthHookDependencies } f
 import { apiErrorHandler } from "./errors.js";
 import { registerDashboardRoutes, type DashboardRouteDependencies } from "./routes/dashboard.js";
 import { registerLeadReadRoutes, registerLeadRoutes, type LeadRouteDependencies } from "./routes/leads.js";
+import { registerOrganizationRoutes } from "./routes/organizations.js";
+import { registerContactRoutes } from "./routes/contacts.js";
+import type { OrganizationContactRepository } from "./crm/organizationContactRepository.js";
 import { registerOnboardingRoutes, type OnboardingRouteDependencies } from "./routes/onboarding.js";
 import { registerReviewRoutes, type ReviewRouteDependencies } from "./routes/review.js";
 import { registerSessionContextRoutes, type SessionContextRouteDependencies } from "./routes/sessionContext.js";
@@ -33,7 +36,9 @@ export type AppDependencies = AuthHookDependencies &
   Partial<PlatformTenantRouteDependencies> &
   Partial<PlatformTenantDetailRouteDependencies> &
   Partial<PlatformAuditEventRouteDependencies> &
-  Partial<TenantOwnerInvitationRouteDependencies>;
+  Partial<TenantOwnerInvitationRouteDependencies> & {
+    organizationContactRepository?: OrganizationContactRepository;
+  };
 
 export function buildApp(
   dependencies: AppDependencies,
@@ -61,6 +66,14 @@ export function buildApp(
     registerDashboardRoutes(protectedApp, dependencies);
     registerLeadRoutes(protectedApp, dependencies);
     if (dependencies.leadReader) registerLeadReadRoutes(protectedApp, dependencies.leadReader);
+    if (dependencies.organizationContactRepository) {
+      registerOrganizationRoutes(protectedApp, {
+        organizationContactRepository: dependencies.organizationContactRepository,
+      });
+      registerContactRoutes(protectedApp, {
+        organizationContactRepository: dependencies.organizationContactRepository,
+      });
+    }
     registerOnboardingRoutes(protectedApp, dependencies);
   });
 

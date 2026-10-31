@@ -61,6 +61,37 @@ export type UpdateContactInput = Readonly<{
 
 export type ListOptions = Readonly<{ includeArchived?: boolean }>;
 
+export type OrganizationContactRepository = Readonly<{
+  listOrganizations: (tenantId: string, options?: ListOptions) => Promise<readonly Organization[]>;
+  createOrganization: (input: CreateOrganizationInput) => Promise<Organization>;
+  findOrganization: (tenantId: string, organizationId: string) => Promise<Organization | null>;
+  updateOrganization: (input: UpdateOrganizationInput) => Promise<Organization | null>;
+  archiveOrganization: (tenantId: string, organizationId: string) => Promise<Organization | null>;
+  listContacts: (
+    tenantId: string,
+    options?: ListOptions & Readonly<{ organizationId?: string }>,
+  ) => Promise<readonly Contact[]>;
+  createContact: (input: CreateContactInput) => Promise<Contact>;
+  findContact: (tenantId: string, contactId: string) => Promise<Contact | null>;
+  updateContact: (input: UpdateContactInput) => Promise<Contact | null>;
+  archiveContact: (tenantId: string, contactId: string) => Promise<Contact | null>;
+}>;
+
+export function createOrganizationContactRepository(db: Db): OrganizationContactRepository {
+  return {
+    listOrganizations: (tenantId, options) => listOrganizations(db, tenantId, options),
+    createOrganization: (input) => createOrganization(db, input),
+    findOrganization: (tenantId, organizationId) => findOrganization(db, tenantId, organizationId),
+    updateOrganization: (input) => updateOrganization(db, input),
+    archiveOrganization: (tenantId, organizationId) => archiveOrganization(db, tenantId, organizationId),
+    listContacts: (tenantId, options) => listContacts(db, tenantId, options),
+    createContact: (input) => createContact(db, input),
+    findContact: (tenantId, contactId) => findContact(db, tenantId, contactId),
+    updateContact: (input) => updateContact(db, input),
+    archiveContact: (tenantId, contactId) => archiveContact(db, tenantId, contactId),
+  };
+}
+
 export async function createOrganization(db: Db, input: CreateOrganizationInput): Promise<Organization> {
   const [organization] = await db
     .insert(schema.organizations)

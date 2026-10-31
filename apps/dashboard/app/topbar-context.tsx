@@ -4,6 +4,9 @@ import { usePathname } from "next/navigation";
 import { useWorkspaceContext } from "./workspace-context";
 
 const pageTitles: ReadonlyArray<readonly [string, string]> = [
+  ["/organizations", "Organisaties"],
+  ["/contacts", "Contactpersonen"],
+  ["/crm", "CRM-overzicht"],
   ["/leads/", "Leaddetail"],
   ["/onboarding", "Onboarding"],
   ["/leads", "Leads & contacten"],
