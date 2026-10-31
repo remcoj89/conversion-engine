@@ -79,7 +79,7 @@ Conversion Engine is een multi-tenant SaaS-dashboard voor leadopvolging, website
 - Het dashboard dient de onboarding in via de BFF (`POST /api/onboarding`), wacht daarbij een lopende autosave af, en toont een ingediende onboarding na refresh alleen-lezen.
 - Zelfstandige demo-site in `apps/demo-site`, visueel gecontroleerd op desktop en mobiel.
 
-De laatste gepushte technische commit is `a25bc5f`. Daarin zijn de Platform Admin-klantenlijst, het klantdetail, het audit-dashboard, de MFA/AAL-handhaving, tenant lifecycle, owner-uitnodigingen, de live CRM-leads read slice, de access-token contracttest, de read-only production database verifier en de CRM-foundation opgenomen. De CRM API/BFF/frontend-slices staan lokaal klaar en zijn onafhankelijk gecontroleerd; deze laatste slice is nog niet gecommit of gepusht. De productie database-identiteit, rollen, RLS-policyset en migration-journal-hashes zijn nog niet met de nieuwe read-only verifier gecontroleerd.
+De laatste gepushte technische commit is `0b44a25`. Daarin zijn de Platform Admin-klantenlijst, het klantdetail, het audit-dashboard, de MFA/AAL-handhaving, tenant lifecycle, owner-uitnodigingen, de live CRM-leads read slice, de access-token contracttest, de read-only production database verifier en de CRM-foundation plus organizations/contacts API, BFF en CRUD-frontend opgenomen. De productie database-identiteit, rollen, RLS-policyset en migration-journal-hashes zijn nog niet met de nieuwe read-only verifier gecontroleerd.
 
 ## Belangrijk onderscheid: twee intakeflows
 
