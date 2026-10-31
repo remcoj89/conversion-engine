@@ -3,12 +3,12 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { eq } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import type { Pool, PoolClient } from "pg";
+import type { PoolClient } from "pg";
 import { buildApp } from "./app.js";
 import { findActiveMemberships } from "./auth/membershipResolver.js";
 import { findActiveReviewerAssignments } from "./auth/reviewerAssignmentResolver.js";
 import type { ExternalIdentity } from "./auth/types.js";
-import { createDb } from "./db.js";
+import { createTestDb } from "./db.js";
 import * as schema from "./db/schema.js";
 import {
   createLead,
@@ -54,7 +54,7 @@ test("database connection reaches conversion_engine_test", async () => {
   const databaseUrl = process.env.DATABASE_TEST_URL;
   assert.ok(databaseUrl, "DATABASE_TEST_URL is required");
 
-  const { pool } = createDb(databaseUrl);
+  const { pool } = createTestDb(databaseUrl);
 
   try {
     const result = await pool.query<{
@@ -63,7 +63,7 @@ test("database connection reaches conversion_engine_test", async () => {
     }>("select current_database() as database, current_user as user");
 
     assert.equal(result.rows[0]?.database, "conversion_engine_test");
-    assert.equal(result.rows[0]?.user, "conversion_engine");
+    assert.equal(result.rows[0]?.user, decodeURIComponent(new URL(databaseUrl).username));
   } finally {
     await pool.end();
   }
@@ -73,7 +73,7 @@ test("tenants: tabel bestaat en vult id, status en created_at automatisch", asyn
   const databaseUrl = process.env.DATABASE_TEST_URL;
   assert.ok(databaseUrl, "DATABASE_TEST_URL is required");
 
-  const { pool } = createDb(databaseUrl);
+  const { pool } = createTestDb(databaseUrl);
   const client = await pool.connect();
   const name = `test-tenant-${Date.now()}`;
 
@@ -118,12 +118,17 @@ test("tenants: tabel bestaat en vult id, status en created_at automatisch", asyn
 
 type Tx = NodePgDatabase<typeof schema>;
 
-// Draait fn in een transactie die altijd wordt teruggedraaid.
-async function withRollback(fn: (tx: Tx, client: PoolClient) => Promise<void>) {
+function requiredDatabaseTestUrl(): string {
   const databaseUrl = process.env.DATABASE_TEST_URL;
   assert.ok(databaseUrl, "DATABASE_TEST_URL is required");
+  return databaseUrl;
+}
 
-  const { pool } = createDb(databaseUrl);
+// Draait fn in een transactie die altijd wordt teruggedraaid.
+async function withRollback(fn: (tx: Tx, client: PoolClient) => Promise<void>) {
+  const databaseUrl = requiredDatabaseTestUrl();
+
+  const { pool } = createTestDb(databaseUrl);
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -146,6 +151,48 @@ async function expectPgError(client: PoolClient, code: string, fn: () => Promise
 }
 
 const uniqueId = (prefix: string) => `${prefix}-${randomUUID()}`;
+
+function createTestMigratorPool(databaseUrl: string) {
+  const configuredUrl = process.env.MIGRATOR_DATABASE_TEST_URL;
+  if (configuredUrl) {
+    const configured = new URL(configuredUrl);
+    assert.equal(
+      decodeURIComponent(configured.username),
+      "ce_migrator",
+      "MIGRATOR_DATABASE_TEST_URL must use ce_migrator",
+    );
+    assert.equal(
+      configured.pathname,
+      new URL(databaseUrl).pathname,
+      "MIGRATOR_DATABASE_TEST_URL must target the same database as DATABASE_TEST_URL",
+    );
+    return createTestDb(configuredUrl).pool;
+  }
+
+  const migratorPassword = process.env.CE_MIGRATOR_PASSWORD;
+  assert.ok(migratorPassword, "CE_MIGRATOR_PASSWORD is required for committed fixture cleanup");
+
+  const migratorUrl = new URL(databaseUrl);
+  migratorUrl.username = "ce_migrator";
+  migratorUrl.password = migratorPassword;
+  return createTestDb(migratorUrl.toString()).pool;
+}
+
+function forcedFailureTable(setup: string): string {
+  const match = /^alter table ([a-z_]+) add constraint test_forced_failure\b/i.exec(setup);
+  assert.ok(match, `unsupported test constraint setup: ${setup}`);
+  return match[1];
+}
+
+async function withTestConstraint(client: PoolClient, setup: string, fn: () => Promise<void>) {
+  await client.query("savepoint forced_failure_setup");
+  try {
+    await client.query("select ce_test_add_forced_failure($1::text)", [forcedFailureTable(setup)]);
+    await fn();
+  } finally {
+    await client.query("rollback to savepoint forced_failure_setup");
+  }
+}
 
 // Echte repository binnen de rollback-transactie van de test.
 const onboardingStoreFor = (tx: Tx): OnboardingStore => ({
@@ -564,7 +611,7 @@ test("findLeadDetail: geeft alleen expliciete leadvelden en weigert cross-tenant
   });
 });
 
-test("lead assignments: team member ziet alleen actieve toegewezen leads", async () => {
+test("lead assignments: team member ziet alle leads; assignment blijft verantwoordelijkheid", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
     const owner = await createUser(tx);
@@ -576,6 +623,7 @@ test("lead assignments: team member ziet alleen actieve toegewezen leads", async
 
     const assigned = await createLeadInTransaction(tx, tenant.id, exampleLead({ name: "Toegewezen" }), teamMember.user.id);
     const ownerLead = await createLeadInTransaction(tx, tenant.id, exampleLead({ name: "Owner lead" }), owner.user.id);
+    const unassigned = await createLead(tx, tenant.id, exampleLead({ name: "Niet toegewezen" }));
 
     const visibleToTeamMember = await listLeads(tx, {
       tenantId: tenant.id,
@@ -583,9 +631,13 @@ test("lead assignments: team member ziet alleen actieve toegewezen leads", async
       userId: teamMember.user.id,
       limit: 10,
     });
-    assert.deepEqual(visibleToTeamMember.items.map((lead) => lead.name), ["Toegewezen"]);
+    assert.deepEqual(
+      new Set(visibleToTeamMember.items.map((lead) => lead.name)),
+      new Set(["Toegewezen", "Owner lead", "Niet toegewezen"]),
+    );
     assert.equal(await findLeadDetail(tx, tenant.id, assigned.id, "team_member", teamMember.user.id) !== null, true);
-    assert.equal(await findLeadDetail(tx, tenant.id, ownerLead.id, "team_member", teamMember.user.id), null);
+    assert.equal(await findLeadDetail(tx, tenant.id, ownerLead.id, "team_member", teamMember.user.id) !== null, true);
+    assert.equal(await findLeadDetail(tx, tenant.id, unassigned.id, "team_member", teamMember.user.id) !== null, true);
 
     const visibleToOwner = await listLeads(tx, {
       tenantId: tenant.id,
@@ -593,7 +645,10 @@ test("lead assignments: team member ziet alleen actieve toegewezen leads", async
       userId: owner.user.id,
       limit: 10,
     });
-    assert.deepEqual(new Set(visibleToOwner.items.map((lead) => lead.name)), new Set(["Toegewezen", "Owner lead"]));
+    assert.deepEqual(
+      new Set(visibleToOwner.items.map((lead) => lead.name)),
+      new Set(["Toegewezen", "Owner lead", "Niet toegewezen"]),
+    );
   });
 });
 
@@ -1236,15 +1291,19 @@ test("onboarding audit: een fout tijdens de transactie laat geen event, versie o
 
     // De savepoint speelt de rol van de transactie in submitOnboarding.
     const expectRolledBackSubmit = async (input: SaveDraftInput, setup?: string) => {
-      await client.query("savepoint submit_attempt");
-      if (setup) await client.query(setup);
-      await assert.rejects(submitOnboardingInTransaction(tx, input));
-      await client.query("rollback to savepoint submit_attempt");
+      const attempt = async () => {
+        await client.query("savepoint submit_attempt");
+        await assert.rejects(submitOnboardingInTransaction(tx, input));
+        await client.query("rollback to savepoint submit_attempt");
 
-      const project = await projectRow(tx, tenant.id);
-      assert.deepEqual([project?.status, project?.currentVersion], ["draft", 1]);
-      assert.equal(await versionCount(tx, tenant.id), 1);
-      assert.equal((await auditEvents(tx, tenant.id)).length, 0);
+        const project = await projectRow(tx, tenant.id);
+        assert.deepEqual([project?.status, project?.currentVersion], ["draft", 1]);
+        assert.equal(await versionCount(tx, tenant.id), 1);
+        assert.equal((await auditEvents(tx, tenant.id)).length, 0);
+      };
+
+      if (setup) await withTestConstraint(client, setup, attempt);
+      else await attempt();
     };
 
     // Fout vóór het event: de versie-insert faalt op een onbekende gebruiker.
@@ -2001,14 +2060,18 @@ test("requestOnboardingChanges: een fout bij review request of audit-event rolt 
 
     // The savepoint plays the role of the transaction in requestOnboardingChanges.
     const expectRolledBack = async (input: RequestChangesInput, setup?: string) => {
-      await client.query("savepoint request_changes_attempt");
-      if (setup) await client.query(setup);
-      await assert.rejects(requestOnboardingChangesInTransaction(tx, input));
-      await client.query("rollback to savepoint request_changes_attempt");
+      const attempt = async () => {
+        await client.query("savepoint request_changes_attempt");
+        await assert.rejects(requestOnboardingChangesInTransaction(tx, input));
+        await client.query("rollback to savepoint request_changes_attempt");
 
-      assert.equal((await projectRow(tx, tenant.id))?.status, "submitted");
-      assert.equal((await reviewRequests(tx, tenant.id)).length, 0);
-      assert.equal((await reviewRequestedEvents(tx, tenant.id)).length, 0);
+        assert.equal((await projectRow(tx, tenant.id))?.status, "submitted");
+        assert.equal((await reviewRequests(tx, tenant.id)).length, 0);
+        assert.equal((await reviewRequestedEvents(tx, tenant.id)).length, 0);
+      };
+
+      if (setup) await withTestConstraint(client, setup, attempt);
+      else await attempt();
     };
 
     // Failure at the first write, after authorization passed and the project was locked.
@@ -2321,15 +2384,19 @@ test("resubmit: een fout bij versie of audit-event laat status, versies en event
 
     // The savepoint plays the role of the transaction in submitOnboarding.
     const expectRolledBack = async (userId: string, setup?: string) => {
-      await client.query("savepoint resubmit_attempt");
-      if (setup) await client.query(setup);
-      await assert.rejects(submitOnboardingInTransaction(tx, draftInput(tenant.id, userId, 1)));
-      await client.query("rollback to savepoint resubmit_attempt");
+      const attempt = async () => {
+        await client.query("savepoint resubmit_attempt");
+        await assert.rejects(submitOnboardingInTransaction(tx, draftInput(tenant.id, userId, 1)));
+        await client.query("rollback to savepoint resubmit_attempt");
 
-      const project = await projectRow(tx, tenant.id);
-      assert.deepEqual([project?.status, project?.currentVersion], ["review_needed", 1]);
-      assert.equal(await versionCount(tx, tenant.id), 1);
-      assert.equal((await auditEvents(tx, tenant.id)).length, eventCount);
+        const project = await projectRow(tx, tenant.id);
+        assert.deepEqual([project?.status, project?.currentVersion], ["review_needed", 1]);
+        assert.equal(await versionCount(tx, tenant.id), 1);
+        assert.equal((await auditEvents(tx, tenant.id)).length, eventCount);
+      };
+
+      if (setup) await withTestConstraint(client, setup, attempt);
+      else await attempt();
     };
 
     // Failure at the version insert (unknown user), and at the audit insert after version and status were written.
@@ -2595,11 +2662,12 @@ test("block en unblock: een fout bij reviewactie of audit-event rolt alles terug
   await withRollback(async (tx, client) => {
     const { tenant, reviewer } = await submittedForReview(tx);
     const expectRolledBack = async (setup: string) => {
-      await client.query("savepoint block_attempt");
-      await client.query(setup);
-      await assert.rejects(blockOnboardingInTransaction(tx, blockInput(tenant.id, reviewer.user.id)));
-      await client.query("rollback to savepoint block_attempt");
-      await assertNoBlockChange(tx, tenant.id, "submitted", setup);
+      await withTestConstraint(client, setup, async () => {
+        await client.query("savepoint block_attempt");
+        await assert.rejects(blockOnboardingInTransaction(tx, blockInput(tenant.id, reviewer.user.id)));
+        await client.query("rollback to savepoint block_attempt");
+        await assertNoBlockChange(tx, tenant.id, "submitted", setup);
+      });
     };
     await expectRolledBack("alter table onboarding_review_actions add constraint test_forced_failure check (false) not valid");
     await expectRolledBack("alter table onboarding_audit_events add constraint test_forced_failure check (false) not valid");
@@ -2712,9 +2780,10 @@ test("HTTP block en unblock met echte repositories: alleen de toegewezen reviewe
 test("block: twee gelijktijdige blokkades op aparte verbindingen leveren precies één geslaagde overgang op", async () => {
   // Real concurrency needs committed data visible to two connections; the test removes exactly its own rows afterwards.
   const url = process.env.DATABASE_TEST_URL;
-  const setup = createDb(url);
-  const first = createDb(url);
-  const second = createDb(url);
+  assert.ok(url, "DATABASE_TEST_URL is required");
+  const setup = createTestDb(url);
+  const first = createTestDb(url);
+  const second = createTestDb(url);
   const userIds: string[] = [];
   let tenantId: string | undefined;
   try {
@@ -2743,16 +2812,18 @@ test("block: twee gelijktijdige blokkades op aparte verbindingen leveren precies
     );
     assert.deepEqual(rows[0], { actions: 1, events: 1, status: "blocked" });
   } finally {
-    if (tenantId) await removeCommittedFixture(setup.pool, tenantId, userIds);
+    if (tenantId) await removeCommittedFixture(url, tenantId, userIds);
     await Promise.all([setup.pool.end(), first.pool.end(), second.pool.end()]);
   }
 });
 
 // Test-only cleanup of a committed fixture: the immutability trigger is lifted only inside this transaction,
 // and only this tenant's rows and these users are removed.
-async function removeCommittedFixture(pool: Pool, tenantId: string, userIds: readonly string[]) {
+async function removeCommittedFixture(databaseUrl: string, tenantId: string, userIds: readonly string[]) {
+  const pool = createTestMigratorPool(databaseUrl);
   const client = await pool.connect();
   try {
+    await client.query("set role ce_owner");
     await client.query("begin");
     await client.query("alter table onboarding_audit_events disable trigger onboarding_audit_events_no_update_delete");
     for (const table of ["onboarding_audit_events", "onboarding_review_actions", "onboarding_review_requests", "onboarding_versions", "onboarding_projects", "onboarding_reviewer_assignments", "memberships"]) {
@@ -2767,6 +2838,7 @@ async function removeCommittedFixture(pool: Pool, tenantId: string, userIds: rea
     throw error;
   } finally {
     client.release();
+    await pool.end();
   }
 }
 
@@ -2834,12 +2906,13 @@ test("approve: een fout bij de statusupdate of het audit-event rolt de hele tran
       "alter table onboarding_projects add constraint test_forced_failure check (status <> 'approved') not valid",
       "alter table onboarding_audit_events add constraint test_forced_failure check (false) not valid",
     ]) {
-      await client.query("savepoint approve_attempt");
-      await client.query(setup);
-      await assert.rejects(approveOnboardingInTransaction(tx, approveInput(tenant.id, reviewer.user.id)));
-      await client.query("rollback to savepoint approve_attempt");
-      assert.equal((await projectRow(tx, tenant.id))?.status, "submitted", setup);
-      assert.equal((await eventsOfType(tx, tenant.id, "approved")).length, 0, setup);
+      await withTestConstraint(client, setup, async () => {
+        await client.query("savepoint approve_attempt");
+        await assert.rejects(approveOnboardingInTransaction(tx, approveInput(tenant.id, reviewer.user.id)));
+        await client.query("rollback to savepoint approve_attempt");
+        assert.equal((await projectRow(tx, tenant.id))?.status, "submitted", setup);
+        assert.equal((await eventsOfType(tx, tenant.id, "approved")).length, 0, setup);
+      });
     }
   });
 });
@@ -2937,9 +3010,10 @@ test("HTTP approve met echte repositories: alleen de toegewezen reviewer; daarna
 test("O-5: twee gelijktijdige Owner-writes op aparte verbindingen na goedkeuring wijzigen niets", async () => {
   // Real concurrency needs committed data visible to two connections; the test removes exactly its own rows afterwards.
   const url = process.env.DATABASE_TEST_URL;
-  const setup = createDb(url);
-  const first = createDb(url);
-  const second = createDb(url);
+  assert.ok(url, "DATABASE_TEST_URL is required");
+  const setup = createTestDb(url);
+  const first = createTestDb(url);
+  const second = createTestDb(url);
   const userIds: string[] = [];
   let tenantId: string | undefined;
   try {
@@ -2972,7 +3046,7 @@ test("O-5: twee gelijktijdige Owner-writes op aparte verbindingen na goedkeuring
     );
     assert.deepEqual(rows[0], { projects: 1, versions: 1, status: "approved" });
   } finally {
-    if (tenantId) await removeCommittedFixture(setup.pool, tenantId, userIds);
+    if (tenantId) await removeCommittedFixture(url, tenantId, userIds);
     await Promise.all([setup.pool.end(), first.pool.end(), second.pool.end()]);
   }
 });
@@ -3072,13 +3146,14 @@ test("reopen: een fout bij reviewactie of audit-event rolt status, actie en audi
       "alter table onboarding_review_actions add constraint test_forced_failure check (false) not valid",
       "alter table onboarding_audit_events add constraint test_forced_failure check (false) not valid",
     ]) {
-      await client.query("savepoint reopen_attempt");
-      await client.query(setup);
-      await assert.rejects(reopenOnboardingInTransaction(tx, reopenInput(tenant.id, reviewer.user.id)));
-      await client.query("rollback to savepoint reopen_attempt");
-      assert.equal((await projectRow(tx, tenant.id))?.status, "approved", setup);
-      assert.equal((await reviewActions(tx, tenant.id)).length, 0, setup);
-      assert.equal((await eventsOfType(tx, tenant.id, "reopened")).length, 0, setup);
+      await withTestConstraint(client, setup, async () => {
+        await client.query("savepoint reopen_attempt");
+        await assert.rejects(reopenOnboardingInTransaction(tx, reopenInput(tenant.id, reviewer.user.id)));
+        await client.query("rollback to savepoint reopen_attempt");
+        assert.equal((await projectRow(tx, tenant.id))?.status, "approved", setup);
+        assert.equal((await reviewActions(tx, tenant.id)).length, 0, setup);
+        assert.equal((await eventsOfType(tx, tenant.id, "reopened")).length, 0, setup);
+      });
     }
   });
 });
@@ -3185,9 +3260,10 @@ test("HTTP reopen met echte repositories: alleen de toegewezen reviewer; daarna 
 test("reopen: twee gelijktijdige reopens op aparte verbindingen leveren precies één geslaagde overgang op", async () => {
   // Real concurrency needs committed data visible to two connections; the test removes exactly its own rows afterwards.
   const url = process.env.DATABASE_TEST_URL;
-  const setup = createDb(url);
-  const first = createDb(url);
-  const second = createDb(url);
+  assert.ok(url, "DATABASE_TEST_URL is required");
+  const setup = createTestDb(url);
+  const first = createTestDb(url);
+  const second = createTestDb(url);
   const userIds: string[] = [];
   let tenantId: string | undefined;
   try {
@@ -3216,7 +3292,7 @@ test("reopen: twee gelijktijdige reopens op aparte verbindingen leveren precies 
     );
     assert.deepEqual(rows[0], { actions: 1, events: 1, status: "review_needed" });
   } finally {
-    if (tenantId) await removeCommittedFixture(setup.pool, tenantId, userIds);
+    if (tenantId) await removeCommittedFixture(url, tenantId, userIds);
     await Promise.all([setup.pool.end(), first.pool.end(), second.pool.end()]);
   }
 });
@@ -3428,7 +3504,7 @@ test("HTTP GET na unblock: Owner ziet reden, notitie, versie en datum zonder int
 });
 
 test("testdata is na de tests teruggedraaid", async () => {
-  const { pool } = createDb(process.env.DATABASE_TEST_URL);
+  const { pool } = createTestDb(process.env.DATABASE_TEST_URL);
   try {
     const { rows } = await pool.query<Record<string, number>>(
       `select (select count(*)::int from tenants) as tenants,
@@ -3451,7 +3527,7 @@ test("testdata is na de tests teruggedraaid", async () => {
 });
 
 test("memberships: index memberships_user_id_idx bestaat op user_id", async () => {
-  const { pool } = createDb(process.env.DATABASE_TEST_URL);
+  const { pool } = createTestDb(process.env.DATABASE_TEST_URL);
   try {
     const { rows } = await pool.query<{ indexdef: string }>(
       "select indexdef from pg_indexes where schemaname = 'public' and tablename = 'memberships' and indexname = 'memberships_user_id_idx'",

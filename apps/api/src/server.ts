@@ -5,7 +5,7 @@ import { findActiveReviewerAssignments } from "./auth/reviewerAssignmentResolver
 import { findActivePlatformAdminAssignments } from "./auth/platformAdminResolver.js";
 import { createDiscoveredKeySet } from "./auth/oidcDiscovery.js";
 import { createZitadelAdapter } from "./auth/zitadelAdapter.js";
-import { createDb } from "./db.js";
+import { createApiRuntimeDb } from "./db.js";
 import { createLead, createLeadReader } from "./leads/leadRepository.js";
 import { findCurrentOnboarding, saveOnboardingDraft, submitOnboarding } from "./onboarding/onboardingRepository.js";
 import {
@@ -31,10 +31,10 @@ const port = Number(process.env.PORT ?? DEFAULT_PORT);
 
 // DATABASE_URL, ZITADEL_ISSUER and API_AUDIENCE are required; there is no fallback or bypass.
 let authConfig: AuthConfig;
-let db: ReturnType<typeof createDb>["db"];
+let db: Awaited<ReturnType<typeof createApiRuntimeDb>>["db"];
 try {
   authConfig = readAuthConfig();
-  ({ db } = createDb());
+  ({ db } = await createApiRuntimeDb());
 } catch (error) {
   // Config errors name the missing variable, never its value.
   console.error("Configuratie ongeldig:", error instanceof Error ? error.message : "unknown");

@@ -1,7 +1,7 @@
 import type { FastifyRequest } from "fastify";
 
 // Roles within a tenant. Platform Admin is deliberately not a tenant role.
-export type TenantRole = "owner" | "team_member";
+export type TenantRole = "owner" | "tenant_admin" | "team_member";
 
 export type MembershipStatus = "active" | "invited" | "disabled";
 

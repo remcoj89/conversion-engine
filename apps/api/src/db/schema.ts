@@ -143,6 +143,87 @@ export const websites = pgTable(
   ],
 );
 
+export const organizationStatuses = ["active", "archived"] as const;
+
+// Organizations are tenant-owned CRM records. The composite unique key is intentional:
+// child records can reference an organization while carrying the tenant boundary in the FK.
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    name: text("name").notNull(),
+    kvkNumber: text("kvk_number"),
+    website: text("website"),
+    generalEmail: text("general_email"),
+    generalPhone: text("general_phone"),
+    address: text("address"),
+    industry: text("industry"),
+    notes: text("notes"),
+    status: text("status", { enum: organizationStatuses }).notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("organizations_tenant_status_idx").on(table.tenantId, table.status),
+    index("organizations_tenant_name_idx").on(table.tenantId, table.name),
+    unique("organizations_tenant_id_unique").on(table.tenantId, table.id),
+    uniqueIndex("organizations_tenant_kvk_unique")
+      .on(table.tenantId, table.kvkNumber)
+      .where(sql`${table.kvkNumber} is not null`),
+    check("organizations_name_not_blank_check", sql`length(btrim(${table.name})) > 0`),
+    check(
+      "organizations_status_check",
+      sql`${table.status} in ('active', 'archived')`,
+    ),
+  ],
+);
+
+export const contactStatuses = ["active", "archived"] as const;
+
+// A contact may exist without an organization. When organization_id is present, the
+// composite FK below prevents linking a contact to another tenant's organization.
+export const contacts = pgTable(
+  "contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    organizationId: uuid("organization_id"),
+    fullName: text("full_name").notNull(),
+    firstName: text("first_name"),
+    lastName: text("last_name"),
+    email: text("email").notNull(),
+    phone: text("phone"),
+    function: text("function"),
+    notes: text("notes"),
+    communicationPreference: text("communication_preference"),
+    status: text("status", { enum: contactStatuses }).notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "contacts_organization_tenant_fk",
+      columns: [table.tenantId, table.organizationId],
+      foreignColumns: [organizations.tenantId, organizations.id],
+    }),
+    index("contacts_tenant_status_idx").on(table.tenantId, table.status),
+    index("contacts_tenant_name_idx").on(table.tenantId, table.fullName),
+    index("contacts_tenant_email_idx").on(table.tenantId, table.email),
+    index("contacts_organization_idx").on(table.tenantId, table.organizationId),
+    check("contacts_full_name_not_blank_check", sql`length(btrim(${table.fullName})) > 0`),
+    check("contacts_email_not_blank_check", sql`length(btrim(${table.email})) > 0`),
+    check(
+      "contacts_status_check",
+      sql`${table.status} in ('active', 'archived')`,
+    ),
+  ],
+);
+
 // Minimal start: every lead begins as "new". Later statuses are added with their own migration.
 export const leadStatuses = ["new"] as const;
 
@@ -174,8 +255,8 @@ export const leads = pgTable(
 
 export const leadAssignmentStatuses = ["active", "revoked"] as const;
 
-// A lead is visible to a team member only through an active assignment. Owners can read all
-// leads in their tenant; assignments remain traceable after revocation.
+// Assignments describe responsibility for a lead. Tenant visibility is enforced independently
+// by the authenticated customer membership and RLS, so revoking an assignment does not hide a lead.
 export const leadAssignments = pgTable(
   "lead_assignments",
   {

@@ -10,6 +10,10 @@ import {
   type ProvisioningTx,
   type RunInTransaction,
 } from "./localProvisioning.js";
+import { readMaintenanceDatabaseUrl as readLocalMaintenanceDatabaseUrl } from "./provisionLocalUser.js";
+import { readMaintenanceDatabaseUrl as readPlatformMaintenanceDatabaseUrl } from "./provisionPlatformAdmin.js";
+import { readMaintenanceDatabaseUrl as readReviewerMaintenanceDatabaseUrl } from "./provisionReviewerAssignment.js";
+import { readMaintenanceDatabaseUrl as readRevocationMaintenanceDatabaseUrl } from "./revokeReviewerAssignment.js";
 
 type Tenant = { id: string; name: string; status: string };
 type User = { id: string; authProviderUserId: string };
@@ -172,6 +176,26 @@ test("productieomgeving en ontbrekende bevestiging worden geweigerd", () => {
   );
   assert.doesNotThrow(() => assertLocalInvocation({ NODE_ENV: "development" }, [CONFIRM_FLAG]));
   assert.doesNotThrow(() => assertLocalInvocation({}, [CONFIRM_FLAG]));
+});
+
+test("alle lokale onderhouds-CLI's vereisen MAINTENANCE_DATABASE_URL voordat de maintenance-factory wordt aangeroepen", () => {
+  const readers = [
+    readLocalMaintenanceDatabaseUrl,
+    readPlatformMaintenanceDatabaseUrl,
+    readReviewerMaintenanceDatabaseUrl,
+    readRevocationMaintenanceDatabaseUrl,
+  ];
+
+  for (const readMaintenanceDatabaseUrl of readers) {
+    assert.throws(
+      () => readMaintenanceDatabaseUrl({}),
+      /MAINTENANCE_DATABASE_URL is required for local maintenance provisioning/,
+    );
+    assert.equal(
+      readMaintenanceDatabaseUrl({ MAINTENANCE_DATABASE_URL: "postgresql://ce_maintenance:secret@127.0.0.1:5432/conversion_engine" }),
+      "postgresql://ce_maintenance:secret@127.0.0.1:5432/conversion_engine",
+    );
+  }
 });
 
 test("fout halverwege draait de hele transactie terug", async () => {

@@ -227,35 +227,15 @@ export async function listLeads(db: Db, query: LeadListQuery): Promise<LeadListR
     );
   }
 
-  if (query.role === "team_member") {
-    // Missing identity data must fail closed rather than silently becoming a tenant-wide query.
-    if (!query.userId) return { items: [], nextCursor: null };
-    conditions.push(
-      eq(schema.leadAssignments.userId, query.userId),
-      eq(schema.leadAssignments.status, "active"),
-    );
-  }
-
-  const rows = query.role === "team_member"
-    ? await db
-      .select(leadListSelection)
-      .from(schema.leads)
-      .innerJoin(
-        schema.leadAssignments,
-        and(
-          eq(schema.leadAssignments.tenantId, schema.leads.tenantId),
-          eq(schema.leadAssignments.leadId, schema.leads.id),
-        ),
-      )
-      .where(and(...conditions))
-      .orderBy(desc(schema.leads.createdAt), desc(schema.leads.id))
-      .limit(query.limit + 1)
-    : await db
-      .select(leadListSelection)
-      .from(schema.leads)
-      .where(and(...conditions))
-      .orderBy(desc(schema.leads.createdAt), desc(schema.leads.id))
-      .limit(query.limit + 1);
+  // Assignments describe responsibility and notifications, not visibility. The HTTP layer
+  // already authenticated the active tenant membership; the tenant predicate above remains
+  // the repository's explicit cross-tenant boundary.
+  const rows = await db
+    .select(leadListSelection)
+    .from(schema.leads)
+    .where(and(...conditions))
+    .orderBy(desc(schema.leads.createdAt), desc(schema.leads.id))
+    .limit(query.limit + 1);
 
   const hasMore = rows.length > query.limit;
   const pageRows = rows.slice(0, query.limit);
@@ -285,31 +265,16 @@ export async function findLeadDetail(
   role?: TenantRole,
   userId?: string,
 ): Promise<LeadRead | null> {
+  // Kept for API compatibility; authorization and active-membership checks happen at the route
+  // and database boundaries, never through assignment-based row filtering.
+  void role;
+  void userId;
   const conditions = [eq(schema.leads.tenantId, tenantId), eq(schema.leads.id, leadId)];
-  if (role === "team_member") {
-    if (!userId) return null;
-    conditions.push(eq(schema.leadAssignments.userId, userId));
-  }
-
-  const [lead] = role === "team_member"
-    ? await db
-      .select(leadReadSelection)
-      .from(schema.leads)
-      .innerJoin(
-        schema.leadAssignments,
-        and(
-          eq(schema.leadAssignments.tenantId, schema.leads.tenantId),
-          eq(schema.leadAssignments.leadId, schema.leads.id),
-          eq(schema.leadAssignments.status, "active"),
-        ),
-      )
-      .where(and(...conditions))
-      .limit(1)
-    : await db
-      .select(leadReadSelection)
-      .from(schema.leads)
-      .where(and(...conditions))
-      .limit(1);
+  const [lead] = await db
+    .select(leadReadSelection)
+    .from(schema.leads)
+    .where(and(...conditions))
+    .limit(1);
   return lead ?? null;
 }
 

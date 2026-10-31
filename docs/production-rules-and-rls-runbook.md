@@ -21,12 +21,13 @@ Gebruik per proces een aparte database-identiteit. De namen hieronder zijn de de
 
 | Rol | Doel | Minimale eigenschappen |
 | --- | --- | --- |
-| `ce_migrator` | Eenmalige of gecontroleerde migratiejob | `NOSUPERUSER`, `NOBYPASSRLS`, geen `CREATEROLE`, geen `CREATEDB`; geen applicatiesecret; alleen vanuit private deploymentomgeving |
+| `ce_migrator` | Gecontroleerde migraties en read-only verificatie | `NOSUPERUSER`, `NOBYPASSRLS`, geen `CREATEROLE`, geen `CREATEDB`; geen applicatiesecret; alleen vanuit private deploymentomgeving |
 | `ce_api_runtime` | API-runtime en tenantdata | `NOSUPERUSER`, `NOBYPASSRLS`, geen `CREATEROLE`, geen `CREATEDB`; geen eigenaar van tabellen of RLS-functies |
-| `ce_bff_runtime` | Dashboard BFF-sessies | `NOSUPERUSER`, `NOBYPASSRLS`; alleen de noodzakelijke `bff_sessions`-rechten; geen toegang tot tenantdata |
-| `ce_maintenance` | Bewuste lokale/operationele onderhoudstaken | `NOSUPERUSER`, `NOBYPASSRLS`; niet beschikbaar aan de normale API-runtime; bij voorkeur geen permanente login |
+| `ce_bff_runtime` | Dashboard BFF-sessies | `NOSUPERUSER`, `NOBYPASSRLS`; uitsluitend de noodzakelijke `bff_sessions`-rechten; geen toegang tot tenantdata |
+| `ce_maintenance` | Afzonderlijk gecontroleerd onderhoud | `NOSUPERUSER`, `NOBYPASSRLS`; niet beschikbaar via de normale API-runtime; bij voorkeur geen permanente login |
+| `ce_owner` | Schema- en table-owner voor DDL en RLS-objecten | `NOLOGIN`; uitsluitend eigenaar, geen runtimeverbinding en geen applicatiecredential |
 
-De schema-/table-owner is een aparte no-login eigenaar. Geen van de runtime-rollen krijgt `SET ROLE` naar deze eigenaar, directe ownership, `BYPASSRLS` of superuserrechten. `FORCE ROW LEVEL SECURITY` beschermt gewone rollen, maar is geen compensatie voor een te machtige login.
+`ce_owner` is de voorkeursnaam voor de no-login schema-/table-owner, mits die naam in de uiteindelijke provider- en schema-inrichting technisch passend blijft; anders wordt een gelijkwaardige expliciet vastgelegde no-login naam gebruikt. Geen van de runtime-rollen krijgt `SET ROLE` naar deze eigenaar, directe ownership, `BYPASSRLS` of superuserrechten. `FORCE ROW LEVEL SECURITY` beschermt gewone rollen, maar is geen compensatie voor een te machtige login.
 
 ### API, BFF en maintenance strikt scheiden
 
@@ -48,6 +49,23 @@ Gebruik een secret manager of private deployment-secrets. Zet geen wachtwoorden 
 - Gebruik TLS met certificaatverificatie (`sslmode=verify-full` of provider-equivalent), private netwerktoegang en korte, roteerbare secrets.
 - De verifier print nooit de URL, host, username uit de URL, password, foutdetails of queryresultaten die secrets kunnen bevatten.
 
+## Lokale role-bootstrap
+
+De database-rollen zijn clusterobjecten en worden daarom niet door een gewone Drizzle-migratie aangemaakt. Voer de bootstrap één keer uit met een lokale PostgreSQL-beheerverbinding. Gebruik hiervoor een tijdelijke shell-omgeving; zet geen wachtwoorden in Git, documentatie of logs.
+
+```text
+DATABASE_URL="<lokale-beheerverbinding-naar-conversion_engine>" \
+CE_MIGRATOR_PASSWORD="<lokaal-secret>" \
+CE_API_RUNTIME_PASSWORD="<ander-lokaal-secret>" \
+CE_BFF_RUNTIME_PASSWORD="<bff-lokaal-secret>" \
+CE_MAINTENANCE_PASSWORD="<maintenance-lokaal-secret>" \
+npm --workspace api run db:bootstrap:roles:local -- --confirm-local
+```
+
+De bootstrap weigert productie, controleert exact de database `conversion_engine`, maakt de vijf rollen idempotent aan, draagt publieke ownership over aan `ce_owner` en verwijdert tijdelijke owner-membership van de uitvoerende beheerrol. Na afloop moeten `DATABASE_URL`, `MIGRATOR_DATABASE_URL`, `MAINTENANCE_DATABASE_URL` en `SESSION_DATABASE_URL` lokaal naar hun respectieve beperkte rollen wijzen. De API mag daarna niet meer met de beheerverbinding starten.
+
+Voer dezelfde gecontroleerde bootstrap daarna opnieuw uit met `EXPECTED_LOCAL_DATABASE=conversion_engine_test` en een adminverbinding naar `conversion_engine_test`; zo krijgen de lokale database-integratietests dezelfde beperkte API/BFF-rollen. Gebruik voor beide databases dezelfde rolcredentials uit je lokale secretomgeving, maar zet ze niet in deze documentatie.
+
 ## Preflight vóór een production migration
 
 Voer deze controles uit vanuit de private deploymentomgeving; de stappen hieronder zijn instructies, geen reeds uitgevoerde acties.
@@ -55,7 +73,7 @@ Voer deze controles uit vanuit de private deploymentomgeving; de stappen hierond
 1. Leg releaseversie, commit-SHA en de exacte migratieset vast. Controleer dat `apps/api/drizzle/` en `drizzle.__drizzle_migrations` dezelfde release bedoelen.
 2. Controleer backup/PITR, restorebaarheid in staging en de afgesproken RPO/RTO. Neem vóór structurele wijzigingen een herstelpunt.
 3. Controleer `current_database()` en `current_user` met de migratorverbinding. Een onverwachte database of rol is direct **no-go**.
-4. Controleer role flags: alle vier genoemde rollen zijn aanwezig, `NOSUPERUSER`, `NOBYPASSRLS`, geen `CREATEROLE`/`CREATEDB`; API, BFF en migrator kunnen inloggen; maintenance bij voorkeur niet.
+4. Controleer role flags: alle vijf genoemde rollen zijn aanwezig; `ce_migrator`, `ce_api_runtime`, `ce_bff_runtime` en `ce_maintenance` zijn `NOSUPERUSER` en `NOBYPASSRLS`, zonder `CREATEROLE`/`CREATEDB`; `ce_owner` is `NOLOGIN` en geen runtime-rol kan ernaar escaleren. API, BFF en migrator kunnen inloggen; maintenance bij voorkeur niet.
 5. Controleer ownership, `SET ROLE`, schema-rechten en `PUBLIC`-rechten. Runtime-rollen mogen geen tabel- of functie-eigenaar zijn.
 6. Controleer RLS `ENABLE` én `FORCE` op alle verwachte tenant-tabellen.
 7. Controleer de exacte policies. De testpolicy `users_privileged_write` uit migratie `0023` mag niet in productie effectief zijn en moet vóór Gate 3.2 production green met een nieuwe forward migration/productie-cleanup worden verwijderd of anderszins buiten productie worden gehouden. Bestaande migraties worden niet herschreven.
@@ -125,7 +143,7 @@ Isoleer de betrokken runtime-rol, roteer het secret, bewaar audit/loggegevens en
 - release en journal hashes zijn exact gelijk;
 - huidige database en migratoridentiteit zijn exact verwacht;
 - geen rol kan via superuser, owner, `BYPASSRLS` of `SET ROLE` RLS omzeilen;
-- API-, BFF-, migrator- en maintenance-rollen zijn gescheiden;
+- API-, BFF-, migrator-, maintenance- en owner-rollen zijn gescheiden;
 - RLS staat enabled én forced op alle verwachte tabellen;
 - policyset is exact en de test-only policy is niet production-effectief;
 - staging-tests voor isolatie, default deny en BFF-scheiding zijn groen;

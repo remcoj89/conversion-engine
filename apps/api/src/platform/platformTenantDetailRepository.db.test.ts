@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import { createDb } from "../db.js";
+import { createTestDb } from "../db.js";
 import * as schema from "../db/schema.js";
 import { findPlatformTenantDetail } from "./platformTenantDetailRepository.js";
 
@@ -12,7 +12,7 @@ async function withRollback(fn: (tx: Tx) => Promise<void>) {
   const databaseUrl = process.env.DATABASE_TEST_URL;
   assert.ok(databaseUrl, "DATABASE_TEST_URL is required");
 
-  const { pool } = createDb(databaseUrl);
+  const { pool } = createTestDb(databaseUrl);
   const client = await pool.connect();
   try {
     await client.query("begin");
