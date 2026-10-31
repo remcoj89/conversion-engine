@@ -1,4 +1,6 @@
-import type { TenantRole } from "./types.js";
+import type { ConfigurableTeamMemberPermission, TenantRole, TeamMemberPermissionContract } from "./types.js";
+
+export type { ConfigurableTeamMemberPermission, TeamMemberPermissionContract } from "./types.js";
 
 export type Permission =
   | "dashboard:read"
@@ -14,19 +16,6 @@ export type Permission =
   | "leads:create"
   | "leads:read"
   | "onboarding:manage";
-
-export type ConfigurableTeamMemberPermission =
-  | "dashboard:read"
-  | "crm:read"
-  | "crm:create"
-  | "crm:update"
-  | "crm:archive"
-  | "crm:import"
-  | "crm:export";
-
-export type TeamMemberPermissionContract = Readonly<
-  Partial<Record<ConfigurableTeamMemberPermission, boolean>>
->;
 
 type PermissionPolicy = Readonly<{
   tenantAdmin: boolean;

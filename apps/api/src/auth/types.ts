@@ -5,6 +5,19 @@ export type TenantRole = "owner" | "tenant_admin" | "team_member";
 
 export type MembershipStatus = "active" | "invited" | "disabled";
 
+export type ConfigurableTeamMemberPermission =
+  | "dashboard:read"
+  | "crm:read"
+  | "crm:create"
+  | "crm:update"
+  | "crm:archive"
+  | "crm:import"
+  | "crm:export";
+
+export type TeamMemberPermissionContract = Readonly<
+  Partial<Record<ConfigurableTeamMemberPermission, boolean>>
+>;
+
 // What the identity provider tells us about the caller, nothing more.
 export type ExternalIdentity = {
   issuer: string; // OIDC "iss"; not stored yet (single-issuer assumption)
@@ -27,6 +40,8 @@ export type Membership = {
   userId: string;
   role: TenantRole;
   status: MembershipStatus;
+  // Optional for legacy/test resolvers; the database resolver always supplies the parsed contract.
+  teamMemberPermissions?: TeamMemberPermissionContract;
 };
 
 export type AuthResult =

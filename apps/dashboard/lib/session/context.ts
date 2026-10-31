@@ -5,7 +5,7 @@ export type SessionTenant = Readonly<{
   id: string;
   name: string;
   status: string;
-  role: "owner" | "team_member";
+  role: "owner" | "tenant_admin" | "team_member";
 }>;
 
 export type SessionContextResponse = Readonly<{
@@ -162,7 +162,7 @@ function isSessionTenant(value: unknown): value is SessionTenant {
     typeof value.name === "string" &&
     value.name.trim().length > 0 &&
     value.status === "active" &&
-    (value.role === "owner" || value.role === "team_member")
+    (value.role === "owner" || value.role === "tenant_admin" || value.role === "team_member")
   );
 }
 

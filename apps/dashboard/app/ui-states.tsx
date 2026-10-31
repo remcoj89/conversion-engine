@@ -7,7 +7,7 @@ export type UiStateAction =
 export type TenantSelectionOption = Readonly<{
   id: string;
   name: string;
-  role: "owner" | "team_member";
+  role: "owner" | "tenant_admin" | "team_member";
 }>;
 
 function StateAction({ action }: { action: UiStateAction }) {
@@ -139,7 +139,7 @@ export function TenantSelectionState({
             onClick={() => onSelectTenant(membership.id)}
           >
             <strong>{membership.name}</strong>
-            <span>{membership.role === "owner" ? "Eigenaar" : "Teamlid"}</span>
+            <span>{membership.role === "owner" ? "Eigenaar" : membership.role === "tenant_admin" ? "Tenantbeheerder" : "Teamlid"}</span>
           </button>
         ))}
       </div>

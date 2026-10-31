@@ -68,7 +68,7 @@ export default function SettingsPage() {
       <section aria-labelledby="access-title">
         <div className="section-heading">
           <h2 id="access-title">Toegang en rechten</h2>
-          <p>Rechten worden in productie door de server en tenantcontext afgedwongen.</p>
+          <p>Rechten worden door de server en tenantcontext afgedwongen.</p>
         </div>
         <div className={styles.customerThreeColumn}>
           <article className="card stat">
@@ -86,6 +86,9 @@ export default function SettingsPage() {
             <p className="stat-value">Beperkt</p>
             <p className="stat-meta">Teamleden zien alleen wat hun rechten toestaan.</p>
           </article>
+        </div>
+        <div className={styles.customerHeaderActions}>
+          <Link className="button button-secondary" href="/settings/team">Team & CRM-rechten beheren</Link>
         </div>
       </section>
 

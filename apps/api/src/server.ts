@@ -24,6 +24,7 @@ import { createPlatformAuditEventRepository } from "./platform/platformAuditEven
 import { createTenantOwnerInvitationRepository } from "./platform/tenantOwnerInvitationRepository.js";
 import { findTenant } from "./tenants/tenantLoader.js";
 import { createOrganizationContactRepository } from "./crm/organizationContactRepository.js";
+import { createTeamMemberRepository } from "./team/teamMemberRepository.js";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4000;
@@ -62,6 +63,7 @@ const app = buildApp({
   leadCreator: (tenantId, lead, actorUserId) => createLead(db, tenantId, lead, actorUserId),
   leadReader: createLeadReader(db),
   organizationContactRepository: createOrganizationContactRepository(db),
+  teamMemberRepository: createTeamMemberRepository(db),
   onboardingStore: {
     findCurrent: (tenantId) => findCurrentOnboarding(db, tenantId),
     saveDraft: (input) => saveOnboardingDraft(db, input),

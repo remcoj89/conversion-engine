@@ -14,6 +14,7 @@ const RLS_TABLES = [
   "tenants",
   "users",
   "memberships",
+  "team_member_crm_permissions",
   "tenant_owner_invitations",
   "websites",
   "organizations",
@@ -316,7 +317,10 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
     await runWithDatabaseContext(
       { scope: "platform_admin", subject: "rls-platform" },
       async () => {
-        const tenants = await client.query<{ id: string }>("select id from tenants order by id");
+        const tenants = await client.query<{ id: string }>(
+          "select id from tenants where id = any($1::uuid[]) order by id",
+          [[tenantA, tenantB]],
+        );
         assert.deepEqual(tenants.rows.map((row) => row.id), [tenantA, tenantB].sort());
         const leads = await client.query<{ id: string }>("select id from leads order by id");
         assert.deepEqual(leads.rows, []);

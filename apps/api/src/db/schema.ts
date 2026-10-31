@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -57,7 +58,7 @@ export const memberships = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id),
-    role: text("role", { enum: ["owner", "team_member"] }).notNull(),
+    role: text("role", { enum: ["owner", "tenant_admin", "team_member"] }).notNull(),
     status: text("status", { enum: ["active", "invited", "disabled"] })
       .notNull()
       .default("active"),
@@ -68,10 +69,40 @@ export const memberships = pgTable(
   (table) => [
     primaryKey({ columns: [table.tenantId, table.userId] }),
     index("memberships_user_id_idx").on(table.userId),
-    check("memberships_role_check", sql`${table.role} in ('owner', 'team_member')`),
+    check("memberships_role_check", sql`${table.role} in ('owner', 'tenant_admin', 'team_member')`),
     check(
       "memberships_status_check",
       sql`${table.status} in ('active', 'invited', 'disabled')`,
+    ),
+  ],
+);
+
+export const crmPermissionKeys = ["crm:read", "crm:create", "crm:update", "crm:archive"] as const;
+
+// A missing row means deny. Rows are still stored for explicit changes so every mutation has
+// timestamps and the normalized tenant/user/permission key remains auditable.
+export const teamMemberCrmPermissions = pgTable(
+  "team_member_crm_permissions",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    permission: text("permission", { enum: crmPermissionKeys }).notNull(),
+    enabled: boolean("enabled").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.userId, table.permission] }),
+    foreignKey({
+      name: "team_member_crm_permissions_membership_fk",
+      columns: [table.tenantId, table.userId],
+      foreignColumns: [memberships.tenantId, memberships.userId],
+    }),
+    index("team_member_crm_permissions_tenant_user_idx").on(table.tenantId, table.userId),
+    index("team_member_crm_permissions_tenant_permission_idx").on(table.tenantId, table.permission),
+    check(
+      "team_member_crm_permissions_permission_check",
+      sql`${table.permission} in ('crm:read', 'crm:create', 'crm:update', 'crm:archive')`,
     ),
   ],
 );

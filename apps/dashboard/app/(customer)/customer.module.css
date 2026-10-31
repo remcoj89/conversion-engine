@@ -5,6 +5,146 @@
   margin-top: 20px;
 }
 
+.teamCardContent {
+  display: grid;
+  gap: 8px;
+  padding: 24px;
+}
+
+.teamCardContent h2 {
+  margin: 0;
+}
+
+.teamCardContent p {
+  max-width: 78ch;
+  color: var(--text-secondary);
+}
+
+.teamMutedHelp {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.teamFeedback {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  font-weight: 650;
+}
+
+.teamFeedbackSuccess {
+  border: 1px solid #b9dec9;
+  background: #eefaf2;
+  color: #24663f;
+}
+
+.teamFeedbackError {
+  border: 1px solid #f4c7c3;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.teamTableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+
+.teamTable {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: collapse;
+}
+
+.teamTable th,
+.teamTable td {
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.teamTable th {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.teamTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.teamTable tbody tr:hover td {
+  background: color-mix(in srgb, var(--brand-soft) 35%, transparent);
+}
+
+.teamPermission {
+  display: inline-flex;
+  min-width: 72px;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.teamPermission input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--brand-primary);
+}
+
+.teamRoleAction {
+  display: grid;
+  min-width: 190px;
+  gap: 8px;
+}
+
+.teamPermissionList {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.teamPermissionList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.teamPermissionList li:last-child {
+  border-bottom: 0;
+}
+
+.teamStatusGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.teamStatusItem {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-muted);
+}
+
+.teamStatusItem span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .crmNavigation {
   margin-bottom: 24px;
   overflow-x: auto;
@@ -883,5 +1023,17 @@
 
   .customerRecommendationHeader .button {
     width: 100%;
+  }
+
+  .teamCardContent {
+    padding: 18px;
+  }
+
+  .teamStatusGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .teamPermissionList li {
+    align-items: flex-start;
   }
 }

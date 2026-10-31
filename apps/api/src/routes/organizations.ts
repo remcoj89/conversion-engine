@@ -32,7 +32,7 @@ export function registerOrganizationRoutes(
 ) {
   app.get("/v1/organizations", async (request, reply) => {
     const context = getAuthContext(request);
-    if (!authorizeForUser(context.role, "crm:read")) {
+    if (!authorizeForUser(context.role, "crm:read", context.teamMemberPermissions)) {
       return reply.code(403).send({ error: "forbidden" });
     }
 
@@ -48,7 +48,7 @@ export function registerOrganizationRoutes(
 
   app.post("/v1/organizations", { bodyLimit: BODY_LIMIT_BYTES }, async (request, reply) => {
     const context = getAuthContext(request);
-    if (!authorizeForUser(context.role, "crm:create")) {
+    if (!authorizeForUser(context.role, "crm:create", context.teamMemberPermissions)) {
       return reply.code(403).send({ error: "forbidden" });
     }
 
@@ -64,7 +64,7 @@ export function registerOrganizationRoutes(
 
   app.get("/v1/organizations/:organizationId", async (request, reply) => {
     const context = getAuthContext(request);
-    if (!authorizeForUser(context.role, "crm:read")) {
+    if (!authorizeForUser(context.role, "crm:read", context.teamMemberPermissions)) {
       return reply.code(403).send({ error: "forbidden" });
     }
 
@@ -81,7 +81,7 @@ export function registerOrganizationRoutes(
 
   app.patch("/v1/organizations/:organizationId", { bodyLimit: BODY_LIMIT_BYTES }, async (request, reply) => {
     const context = getAuthContext(request);
-    if (!authorizeForUser(context.role, "crm:update")) {
+    if (!authorizeForUser(context.role, "crm:update", context.teamMemberPermissions)) {
       return reply.code(403).send({ error: "forbidden" });
     }
 
@@ -102,7 +102,7 @@ export function registerOrganizationRoutes(
 
   app.post("/v1/organizations/:organizationId/archive", async (request, reply) => {
     const context = getAuthContext(request);
-    if (!authorizeForUser(context.role, "crm:archive")) {
+    if (!authorizeForUser(context.role, "crm:archive", context.teamMemberPermissions)) {
       return reply.code(403).send({ error: "forbidden" });
     }
 

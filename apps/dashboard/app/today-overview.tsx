@@ -33,7 +33,7 @@ type SessionTenant = Readonly<{
   id: string;
   name: string;
   status: string;
-  role: "owner" | "team_member";
+  role: "owner" | "tenant_admin" | "team_member";
 }>;
 
 type SessionContextResponse = Readonly<{
@@ -69,7 +69,7 @@ function isSessionTenant(value: unknown): value is SessionTenant {
     && typeof value.id === "string"
     && typeof value.name === "string"
     && typeof value.status === "string"
-    && (value.role === "owner" || value.role === "team_member")
+    && (value.role === "owner" || value.role === "tenant_admin" || value.role === "team_member")
   );
 }
 

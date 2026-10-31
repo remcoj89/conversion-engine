@@ -75,7 +75,7 @@ test("tenants: tabel bestaat en vult id, status en created_at automatisch", asyn
 
   const { pool } = createTestDb(databaseUrl);
   const client = await pool.connect();
-  const name = `test-tenant-${Date.now()}`;
+  const name = uniqueId("test-tenant");
 
   try {
     const table = await client.query<{ name: string | null }>(
@@ -150,7 +150,8 @@ async function expectPgError(client: PoolClient, code: string, fn: () => Promise
   await client.query("rollback to savepoint expected_error");
 }
 
-const uniqueId = (prefix: string) => `${prefix}-${randomUUID()}`;
+const dbTestRunId = randomUUID();
+const uniqueId = (prefix: string) => `${prefix}-${dbTestRunId}-${randomUUID()}`;
 
 function createTestMigratorPool(databaseUrl: string) {
   const configuredUrl = process.env.MIGRATOR_DATABASE_TEST_URL;
@@ -3503,24 +3504,32 @@ test("HTTP GET na unblock: Owner ziet reden, notitie, versie en datum zonder int
   });
 });
 
-test("testdata is na de tests teruggedraaid", async () => {
+test.after(async () => {
   const { pool } = createTestDb(process.env.DATABASE_TEST_URL);
   try {
+    const marker = `%${dbTestRunId}%`;
     const { rows } = await pool.query<Record<string, number>>(
-      `select (select count(*)::int from tenants) as tenants,
-              (select count(*)::int from users) as users,
-              (select count(*)::int from memberships) as memberships,
-              (select count(*)::int from leads) as leads,
-              (select count(*)::int from websites) as websites,
-              (select count(*)::int from onboarding_projects) as onboarding_projects,
-              (select count(*)::int from onboarding_versions) as onboarding_versions,
-              (select count(*)::int from onboarding_audit_events) as onboarding_audit_events,
-              (select count(*)::int from onboarding_reviewer_assignments) as onboarding_reviewer_assignments,
-              (select count(*)::int from onboarding_review_access_events) as onboarding_review_access_events,
-              (select count(*)::int from onboarding_review_requests) as onboarding_review_requests,
-              (select count(*)::int from onboarding_review_actions) as onboarding_review_actions`,
+      `with test_tenants as (
+         select id from tenants where name like $1
+       ), test_users as (
+         select id from users where auth_provider_user_id like $1
+       )
+       select (select count(*)::int from tenants where id in (select id from test_tenants)) as tenants,
+              (select count(*)::int from users where id in (select id from test_users)) as users,
+              (select count(*)::int from memberships where tenant_id in (select id from test_tenants) or user_id in (select id from test_users)) as memberships,
+              (select count(*)::int from leads where tenant_id in (select id from test_tenants)) as leads,
+              (select count(*)::int from websites where tenant_id in (select id from test_tenants)) as websites,
+              (select count(*)::int from onboarding_projects where tenant_id in (select id from test_tenants)) as onboarding_projects,
+              (select count(*)::int from onboarding_versions where tenant_id in (select id from test_tenants)) as onboarding_versions,
+              (select count(*)::int from onboarding_audit_events where tenant_id in (select id from test_tenants)) as onboarding_audit_events,
+              (select count(*)::int from onboarding_reviewer_assignments where tenant_id in (select id from test_tenants) or user_id in (select id from test_users) or granted_by in (select id from test_users)) as onboarding_reviewer_assignments,
+              (select count(*)::int from onboarding_review_access_events where tenant_id in (select id from test_tenants) or reviewer_user_id in (select id from test_users)) as onboarding_review_access_events,
+              (select count(*)::int from onboarding_review_requests where tenant_id in (select id from test_tenants) or reviewer_user_id in (select id from test_users)) as onboarding_review_requests,
+              (select count(*)::int from onboarding_review_actions where tenant_id in (select id from test_tenants) or reviewer_user_id in (select id from test_users)) as onboarding_review_actions,
+              (select count(*)::int from team_member_crm_permissions where tenant_id in (select id from test_tenants) or user_id in (select id from test_users)) as team_member_crm_permissions`,
+      [marker],
     );
-    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0, websites: 0, onboarding_projects: 0, onboarding_versions: 0, onboarding_audit_events: 0, onboarding_reviewer_assignments: 0, onboarding_review_access_events: 0, onboarding_review_requests: 0, onboarding_review_actions: 0 });
+    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0, websites: 0, onboarding_projects: 0, onboarding_versions: 0, onboarding_audit_events: 0, onboarding_reviewer_assignments: 0, onboarding_review_access_events: 0, onboarding_review_requests: 0, onboarding_review_actions: 0, team_member_crm_permissions: 0 });
   } finally {
     await pool.end();
   }

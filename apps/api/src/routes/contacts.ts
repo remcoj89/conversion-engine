@@ -34,7 +34,7 @@ export function registerContactRoutes(
 ) {
   app.get("/v1/contacts", async (request, reply) => {
     const context = getAuthContext(request);
-    if (!authorizeForUser(context.role, "crm:read")) {
+    if (!authorizeForUser(context.role, "crm:read", context.teamMemberPermissions)) {
       return reply.code(403).send({ error: "forbidden" });
     }
 
@@ -50,7 +50,7 @@ export function registerContactRoutes(
 
   app.post("/v1/contacts", { bodyLimit: BODY_LIMIT_BYTES }, async (request, reply) => {
     const context = getAuthContext(request);
-    if (!authorizeForUser(context.role, "crm:create")) {
+    if (!authorizeForUser(context.role, "crm:create", context.teamMemberPermissions)) {
       return reply.code(403).send({ error: "forbidden" });
     }
 
@@ -73,7 +73,7 @@ export function registerContactRoutes(
 
   app.get("/v1/contacts/:contactId", async (request, reply) => {
     const context = getAuthContext(request);
-    if (!authorizeForUser(context.role, "crm:read")) {
+    if (!authorizeForUser(context.role, "crm:read", context.teamMemberPermissions)) {
       return reply.code(403).send({ error: "forbidden" });
     }
 
@@ -87,7 +87,7 @@ export function registerContactRoutes(
 
   app.patch("/v1/contacts/:contactId", { bodyLimit: BODY_LIMIT_BYTES }, async (request, reply) => {
     const context = getAuthContext(request);
-    if (!authorizeForUser(context.role, "crm:update")) {
+    if (!authorizeForUser(context.role, "crm:update", context.teamMemberPermissions)) {
       return reply.code(403).send({ error: "forbidden" });
     }
 
@@ -115,7 +115,7 @@ export function registerContactRoutes(
 
   app.post("/v1/contacts/:contactId/archive", async (request, reply) => {
     const context = getAuthContext(request);
-    if (!authorizeForUser(context.role, "crm:archive")) {
+    if (!authorizeForUser(context.role, "crm:archive", context.teamMemberPermissions)) {
       return reply.code(403).send({ error: "forbidden" });
     }
 

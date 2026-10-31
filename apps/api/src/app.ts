@@ -10,6 +10,8 @@ import { registerLeadReadRoutes, registerLeadRoutes, type LeadRouteDependencies 
 import { registerOrganizationRoutes } from "./routes/organizations.js";
 import { registerContactRoutes } from "./routes/contacts.js";
 import type { OrganizationContactRepository } from "./crm/organizationContactRepository.js";
+import { registerTeamMemberRoutes } from "./routes/teamMembers.js";
+import type { TeamMemberRepository } from "./team/teamMemberRepository.js";
 import { registerOnboardingRoutes, type OnboardingRouteDependencies } from "./routes/onboarding.js";
 import { registerReviewRoutes, type ReviewRouteDependencies } from "./routes/review.js";
 import { registerSessionContextRoutes, type SessionContextRouteDependencies } from "./routes/sessionContext.js";
@@ -38,6 +40,7 @@ export type AppDependencies = AuthHookDependencies &
   Partial<PlatformAuditEventRouteDependencies> &
   Partial<TenantOwnerInvitationRouteDependencies> & {
     organizationContactRepository?: OrganizationContactRepository;
+    teamMemberRepository?: TeamMemberRepository;
   };
 
 export function buildApp(
@@ -72,6 +75,11 @@ export function buildApp(
       });
       registerContactRoutes(protectedApp, {
         organizationContactRepository: dependencies.organizationContactRepository,
+      });
+    }
+    if (dependencies.teamMemberRepository) {
+      registerTeamMemberRoutes(protectedApp, {
+        teamMemberRepository: dependencies.teamMemberRepository,
       });
     }
     registerOnboardingRoutes(protectedApp, dependencies);

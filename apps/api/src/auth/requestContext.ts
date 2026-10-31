@@ -1,9 +1,10 @@
-import type { Membership, TenantRole } from "./types.js";
+import type { Membership, TeamMemberPermissionContract, TenantRole } from "./types.js";
 
 export type RequestContext = Readonly<{
   userId: string;
   tenantId: string;
   role: TenantRole;
+  teamMemberPermissions: TeamMemberPermissionContract;
 }>;
 
 export type RequestContextResult =
@@ -45,6 +46,7 @@ function success(membership: Membership): RequestContextResult {
       userId: membership.userId,
       tenantId: membership.tenantId,
       role: membership.role,
+      teamMemberPermissions: membership.teamMemberPermissions ?? {},
     }),
   };
 }

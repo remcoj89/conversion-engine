@@ -47,7 +47,7 @@ const memberOfB: Membership = { tenantId: tenantB, userId, role: "team_member", 
 test("resolveRequestContext: één membership zonder tenantkeuze geeft die tenant", () => {
   assert.deepEqual(resolveRequestContext([ownerOfA]), {
     status: "success",
-    context: { userId, tenantId: tenantA, role: "owner" },
+    context: { userId, tenantId: tenantA, role: "owner", teamMemberPermissions: {} },
   });
 });
 
@@ -58,7 +58,7 @@ test("resolveRequestContext: meerdere memberships zonder tenantkeuze geeft tenan
 test("resolveRequestContext: geldige tenantkeuze geeft tenant en rol van die membership", () => {
   assert.deepEqual(resolveRequestContext([ownerOfA], tenantA), {
     status: "success",
-    context: { userId, tenantId: tenantA, role: "owner" },
+    context: { userId, tenantId: tenantA, role: "owner", teamMemberPermissions: {} },
   });
 });
 
@@ -67,11 +67,11 @@ test("resolveRequestContext: keuze voor tenant A of B geeft de rol van die tenan
 
   assert.deepEqual(resolveRequestContext(memberships, tenantA), {
     status: "success",
-    context: { userId, tenantId: tenantA, role: "owner" },
+    context: { userId, tenantId: tenantA, role: "owner", teamMemberPermissions: {} },
   });
   assert.deepEqual(resolveRequestContext(memberships, tenantB), {
     status: "success",
-    context: { userId, tenantId: tenantB, role: "team_member" },
+    context: { userId, tenantId: tenantB, role: "team_member", teamMemberPermissions: {} },
   });
 });
 
