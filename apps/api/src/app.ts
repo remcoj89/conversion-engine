@@ -12,6 +12,8 @@ import { registerContactRoutes } from "./routes/contacts.js";
 import type { OrganizationContactRepository } from "./crm/organizationContactRepository.js";
 import { registerTeamMemberRoutes } from "./routes/teamMembers.js";
 import type { TeamMemberRepository } from "./team/teamMemberRepository.js";
+import { registerCrmSettingsRoutes } from "./routes/crmSettings.js";
+import type { CrmSettingsRepository } from "./crm/settingsRepository.js";
 import { registerOnboardingRoutes, type OnboardingRouteDependencies } from "./routes/onboarding.js";
 import { registerReviewRoutes, type ReviewRouteDependencies } from "./routes/review.js";
 import { registerSessionContextRoutes, type SessionContextRouteDependencies } from "./routes/sessionContext.js";
@@ -24,6 +26,7 @@ import {
   registerTenantOwnerInvitationAcceptanceRoutes,
   type TenantOwnerInvitationRouteDependencies,
 } from "./routes/tenantOwnerInvitations.js";
+import { registerPublicLeadRoutes, type PublicLeadRouteDependencies } from "./routes/publicLeads.js";
 import { createDatabaseRequestContext, enterDatabaseRequestContext } from "./db/requestContext.js";
 
 export type AppDependencies = AuthHookDependencies &
@@ -41,7 +44,8 @@ export type AppDependencies = AuthHookDependencies &
   Partial<TenantOwnerInvitationRouteDependencies> & {
     organizationContactRepository?: OrganizationContactRepository;
     teamMemberRepository?: TeamMemberRepository;
-  };
+    crmSettingsRepository?: CrmSettingsRepository;
+  } & Partial<PublicLeadRouteDependencies>;
 
 export function buildApp(
   dependencies: AppDependencies,
@@ -63,6 +67,13 @@ export function buildApp(
     return { status: "ok", service: "conversion-engine-api" };
   });
 
+  if (dependencies.websiteResolver && dependencies.publicLeadCreator) {
+    registerPublicLeadRoutes(app, {
+      websiteResolver: dependencies.websiteResolver,
+      publicLeadCreator: dependencies.publicLeadCreator,
+    });
+  }
+
   // Everything registered in this encapsulated scope requires an auth context.
   app.register(async (protectedApp) => {
     protectedApp.addHook("onRequest", createAuthHook(dependencies));
@@ -80,6 +91,11 @@ export function buildApp(
     if (dependencies.teamMemberRepository) {
       registerTeamMemberRoutes(protectedApp, {
         teamMemberRepository: dependencies.teamMemberRepository,
+      });
+    }
+    if (dependencies.crmSettingsRepository) {
+      registerCrmSettingsRoutes(protectedApp, {
+        crmSettingsRepository: dependencies.crmSettingsRepository,
       });
     }
     registerOnboardingRoutes(protectedApp, dependencies);

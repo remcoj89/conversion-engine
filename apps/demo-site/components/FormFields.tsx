@@ -64,6 +64,7 @@ export function TextField({ id, label, error, hint, required, value, onChange, o
     "aria-invalid": error ? true : undefined,
     "aria-describedby": describedBy(id, error, hint),
     "aria-required": required || undefined,
+    required: required || undefined,
     className: "field__input",
   } as const;
   return (
@@ -96,6 +97,7 @@ export function SelectField({ id, label, error, hint, required, value, options, 
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy(id, error, hint)}
         aria-required={required || undefined}
+        required={required || undefined}
       >
         <option value="">{placeholder}</option>
         {options.map((option) => (
@@ -131,6 +133,7 @@ export function CheckboxField({ id, checked, onChange, error, required, children
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         aria-required={required || undefined}
+        required={required || undefined}
       />
       <label htmlFor={id}>
         {children}
@@ -145,7 +148,7 @@ export function CheckboxField({ id, checked, onChange, error, required, children
   );
 }
 
-export type FormStatus = "idle" | "submitting" | "success" | "unavailable" | "invalid";
+export type FormStatus = "idle" | "submitting" | "success" | "unavailable" | "invalid" | "error";
 
 // Statusmeldingen (GE-10): geen technische details, wel een bruikbare vervolgstap.
 export function FormAlert({ status, messages }: Readonly<{ status: FormStatus; messages: Partial<Record<FormStatus, string>> }>) {
@@ -153,7 +156,7 @@ export function FormAlert({ status, messages }: Readonly<{ status: FormStatus; m
   if (!message) return null;
   const tone = status === "success" ? "success" : status === "submitting" ? "info" : "error";
   return (
-    <p className={`form-alert form-alert--${tone}`} role={tone === "error" ? "alert" : "status"}>
+    <p className={`form-alert form-alert--${tone}`} role={tone === "error" ? "alert" : "status"} aria-live="polite" aria-atomic="true">
       {message}
     </p>
   );

@@ -1,0 +1,119 @@
+.availabilityPanel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 24px;
+  border: 1px solid #ead8b6;
+  border-radius: var(--radius-card);
+  background: var(--warning-soft);
+  color: var(--text-primary);
+}
+
+.availabilityPanel h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.availabilityPanel p,
+.settingsCardContent p {
+  color: var(--text-secondary);
+}
+
+.availabilityIcon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f0c36a;
+  color: #5f3c00;
+  font-weight: 800;
+}
+
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.settingsCardContent {
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+}
+
+.settingsFormGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.workingDays {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.checkboxGroup,
+.sourceList {
+  display: grid;
+  gap: 10px;
+}
+
+.checkboxRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  color: var(--text-primary);
+}
+
+.checkboxRow input {
+  inline-size: 18px;
+  block-size: 18px;
+  accent-color: var(--brand-active);
+}
+
+.feedback {
+  margin: 16px 0 0;
+  color: var(--text-primary);
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.settingsCardContent h2,
+.settingsCardContent h3 {
+  margin: 0;
+}
+
+.plannedBadge {
+  justify-self: start;
+  padding: 4px 10px;
+  border-radius: 100px;
+  background: var(--brand-soft);
+  color: var(--brand-active);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .settingsGrid,
+  .settingsFormGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .availabilityPanel {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+
+  .settingsCardContent {
+    padding: 18px;
+  }
+}

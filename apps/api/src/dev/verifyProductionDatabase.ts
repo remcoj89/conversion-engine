@@ -6,6 +6,7 @@ import { Pool, type PoolClient } from "pg";
 import {
   RUNTIME_FUNCTION_ALLOWLISTS,
   RUNTIME_TABLE_ALLOWLISTS,
+  runtimeTablePrivileges,
 } from "./bootstrapLocalDatabaseRoles.js";
 import { readExpectedRoleNames, roleNamesAreDistinct, type PostgresRoleNames } from "./postgresRoleContract.js";
 
@@ -14,6 +15,11 @@ const EXPECTED_RLS_TABLES = [
   "users",
   "memberships",
   "team_member_crm_permissions",
+  "crm_settings",
+  "crm_settings_audit_events",
+  "public_lead_idempotency_keys",
+  "public_lead_rate_limits",
+  "public_lead_outbox",
   "tenant_owner_invitations",
   "websites",
   "organizations",
@@ -40,14 +46,24 @@ const EXPECTED_POLICIES = [
   ["team_member_crm_permissions", "team_member_crm_permissions_write_access"],
   ["team_member_crm_permissions", "team_member_crm_permissions_update_access"],
   ["team_member_crm_permissions", "team_member_crm_permissions_delete_access"],
+  ["crm_settings", "crm_settings_access"],
+  ["crm_settings_audit_events", "crm_settings_audit_events_read_access"],
+  ["crm_settings_audit_events", "crm_settings_audit_events_insert_access"],
   ["tenant_owner_invitations", "tenant_owner_invitations_access"],
   ["websites", "websites_access"],
   ["organizations", "organizations_access"],
-  ["contacts", "contacts_access"],
+  ["contacts", "contacts_select_access"],
+  ["contacts", "contacts_insert_access"],
+  ["contacts", "contacts_update_access"],
+  ["contacts", "contacts_delete_access"],
   ["leads", "leads_read_access"],
   ["leads", "leads_write_access"],
   ["leads", "leads_update_access"],
   ["leads", "leads_delete_access"],
+  ["public_lead_idempotency_keys", "public_lead_idempotency_select_access"],
+  ["public_lead_idempotency_keys", "public_lead_idempotency_insert_access"],
+  ["public_lead_rate_limits", "public_lead_rate_limits_access"],
+  ["public_lead_outbox", "public_lead_outbox_insert_access"],
   ["lead_assignments", "lead_assignments_access"],
   ["onboarding_projects", "onboarding_projects_access"],
   ["onboarding_versions", "onboarding_versions_access"],
@@ -345,12 +361,12 @@ export function evaluatePublicPrivileges(
   addExpected(roles.api, "schema", "public", "USAGE");
   addExpected(roles.bff, "schema", "public", "USAGE");
   for (const tableName of RUNTIME_TABLE_ALLOWLISTS.api) {
-    for (const privilegeType of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
+    for (const privilegeType of runtimeTablePrivileges("api", tableName)) {
       addExpected(roles.api, "table", tableName, privilegeType);
     }
   }
   for (const tableName of RUNTIME_TABLE_ALLOWLISTS.bff) {
-    for (const privilegeType of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
+    for (const privilegeType of runtimeTablePrivileges("bff", tableName)) {
       addExpected(roles.bff, "table", tableName, privilegeType);
     }
   }

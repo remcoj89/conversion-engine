@@ -43,7 +43,7 @@ export default function ContactPage() {
           <div className="contact-panel">
             <h2>{contact.form.title}</h2>
             <p>{contact.form.text}</p>
-            <ContactForm reasons={contact.form.reasons} submitLabel={contact.form.submitLabel} responder={contact.responder} />
+            <ContactForm submitLabel={contact.form.submitLabel} responder={contact.responder} />
           </div>
         </div>
       </section>

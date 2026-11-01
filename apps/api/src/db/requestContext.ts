@@ -7,13 +7,16 @@ export type DatabaseScope =
   | "customer"
   | "reviewer"
   | "platform_admin"
-  | "maintenance";
+  | "maintenance"
+  | "public";
 
 export type DatabaseRequestContext = {
   scope: DatabaseScope;
   subject?: string;
   tenantId?: string;
   invitationTokenHash?: string;
+  websitePublicKey?: string;
+  publicContactEmail?: string;
 };
 
 const storage = new AsyncLocalStorage<DatabaseRequestContext>();
@@ -49,12 +52,16 @@ export function setDatabaseIdentity(context: DatabaseRequestContext, subject: st
   context.subject = subject;
   context.tenantId = undefined;
   context.invitationTokenHash = undefined;
+  context.websitePublicKey = undefined;
+  context.publicContactEmail = undefined;
 }
 
 export function setDatabaseTenant(context: DatabaseRequestContext, scope: "customer" | "reviewer", tenantId: string): void {
   context.scope = scope;
   context.tenantId = tenantId;
   context.invitationTokenHash = undefined;
+  context.websitePublicKey = undefined;
+  context.publicContactEmail = undefined;
 }
 
 export function setDatabasePlatformAdmin(context: DatabaseRequestContext, subject: string): void {
@@ -62,8 +69,43 @@ export function setDatabasePlatformAdmin(context: DatabaseRequestContext, subjec
   context.subject = subject;
   context.tenantId = undefined;
   context.invitationTokenHash = undefined;
+  context.websitePublicKey = undefined;
+  context.publicContactEmail = undefined;
 }
 
 export function setDatabaseInvitationTokenHash(context: DatabaseRequestContext, tokenHash: string): void {
   context.invitationTokenHash = tokenHash;
+}
+
+export function setDatabasePublicWebsite(
+  context: DatabaseRequestContext,
+  websitePublicKey: string,
+  tenantId: string,
+): void {
+  context.scope = "public";
+  context.subject = undefined;
+  context.tenantId = tenantId;
+  context.invitationTokenHash = undefined;
+  context.websitePublicKey = websitePublicKey;
+  context.publicContactEmail = undefined;
+}
+
+export function setDatabasePublicWebsiteLookup(
+  context: DatabaseRequestContext,
+  websitePublicKey: string,
+): void {
+  context.scope = "public";
+  context.subject = undefined;
+  context.tenantId = undefined;
+  context.invitationTokenHash = undefined;
+  context.websitePublicKey = websitePublicKey;
+  context.publicContactEmail = undefined;
+}
+
+export function setDatabasePublicContactEmail(
+  context: DatabaseRequestContext,
+  email: string,
+): void {
+  if (context.scope !== "public") throw new Error("public contact context requires public scope");
+  context.publicContactEmail = email;
 }

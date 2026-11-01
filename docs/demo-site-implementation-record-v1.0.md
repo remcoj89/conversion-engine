@@ -1,7 +1,7 @@
 # Demo-site — implementatierecord
 
-**Datum:** 22 oktober 2026 (bijgewerkt 23 oktober 2026)
-**Status:** gebouwd, getest en visueel gecontroleerd
+**Datum:** 22 oktober 2026 (bijgewerkt 31 oktober 2026)
+**Status:** gebouwd, getest en visueel gecontroleerd; optionele publieke lead-intake is gekoppeld
 **Locatie:** `apps/demo-site`
 **Doel:** zelfstandige demowebsite voor de Conversion Engine
 
@@ -12,11 +12,13 @@ De demo-site staat als zelfstandige applicatie in `apps/demo-site`.
 De demo-site is bewust losgekoppeld van:
 
 - `apps/dashboard`;
-- `apps/api`;
+- `apps/api` als code-afhankelijkheid;
 - Zitadel-authenticatie;
 - productieklantdata;
 - klantwebsites;
 - externe CRM-, e-mail- en afspraakproviders.
+
+De contactformulier-adapter kan optioneel via de publieke Conversion Engine-lead-intake werken. Die koppeling gebruikt alleen een browser-veilige website key en bevat geen authenticatie- of servergeheimen in de demo-site.
 
 Klantdemo's en productie-klantwebsites vallen buiten dit project.
 
@@ -97,9 +99,11 @@ Bewuste keuzes:
 - Quizscoring is deterministisch.
 - De quiz heeft vijf vragen en vier profielen.
 - Een e-mailadres is niet nodig voor het quizresultaat.
-- Formulieren versturen of bewaren geen echte gegevens.
+- Het contactformulier verstuurt alleen wanneer de twee `NEXT_PUBLIC_`-configuratievariabelen aanwezig en geldig zijn; zonder configuratie blijft de veilige unavailable-state actief.
+- De contactadapter verstuurt alleen de vaste publieke body, gebruikt per poging een nieuwe `Idempotency-Key`, stuurt geen tenant-ID of source mee en gebruikt `credentials: omit`.
+- `201` en `200` tonen succes; `400`, `404`, `409`, `429`, `503` en netwerkfouten worden naar veilige Nederlandstalige fout- of unavailable-states vertaald.
 - Dubbele verzending wordt geblokkeerd.
-- Een e-mailadres op `@fout.test` simuleert tijdelijke onbeschikbaarheid.
+- De API bepaalt zelf de lead source en tenant op basis van de publieke website key.
 - Afspraakknoppen tonen een demo-melding zonder externe afspraakmodule.
 - Quizresultaat gaat via `sessionStorage` naar `/bedankt` en niet via de URL.
 
@@ -171,10 +175,24 @@ Geslaagd na deze wijzigingen:
 
 - Geen packages geïnstalleerd.
 - Geen `npm install` uitgevoerd.
-- Geen echte formulieren of afspraken verstuurd.
+- Geen live formulier-smoketest met echte klantdata uitgevoerd; unit-tests gebruiken alleen mocks.
+- Geen echte afspraakmodule of externe provider aangesloten.
 - Geen productie-integraties aangesloten.
 - Geen wijzigingen buiten `apps/demo-site` gemaakt tijdens de demo-implementatie.
 - Geen commit gemaakt van `apps/demo-site`.
+
+## 12. Publieke lead-intake — 31 oktober 2026
+
+De contactpagina gebruikt de optionele publieke endpoint `POST /v1/public/leads` via een kleine, testbare browseradapter.
+
+Configureer lokaal of tijdens de frontend-build:
+
+```env
+NEXT_PUBLIC_CONVERSION_ENGINE_API_BASE_URL=http://127.0.0.1:4000
+NEXT_PUBLIC_CONVERSION_ENGINE_WEBSITE_KEY=replace-with-public-website-key
+```
+
+De website key is bewust client-visible. Plaats hier nooit databasewachtwoorden, access tokens of andere server secrets. De volledige voorbeeldconfiguratie staat in `apps/demo-site/.env.example`.
 
 ## 11. Vergelijkingsdoel voor morgen
 

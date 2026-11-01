@@ -3526,10 +3526,12 @@ test.after(async () => {
               (select count(*)::int from onboarding_review_access_events where tenant_id in (select id from test_tenants) or reviewer_user_id in (select id from test_users)) as onboarding_review_access_events,
               (select count(*)::int from onboarding_review_requests where tenant_id in (select id from test_tenants) or reviewer_user_id in (select id from test_users)) as onboarding_review_requests,
               (select count(*)::int from onboarding_review_actions where tenant_id in (select id from test_tenants) or reviewer_user_id in (select id from test_users)) as onboarding_review_actions,
-              (select count(*)::int from team_member_crm_permissions where tenant_id in (select id from test_tenants) or user_id in (select id from test_users)) as team_member_crm_permissions`,
+              (select count(*)::int from team_member_crm_permissions where tenant_id in (select id from test_tenants) or user_id in (select id from test_users)) as team_member_crm_permissions,
+              (select count(*)::int from crm_settings where tenant_id in (select id from test_tenants)) as crm_settings,
+              (select count(*)::int from crm_settings_audit_events where tenant_id in (select id from test_tenants) or actor_user_id in (select id from test_users)) as crm_settings_audit_events`,
       [marker],
     );
-    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0, websites: 0, onboarding_projects: 0, onboarding_versions: 0, onboarding_audit_events: 0, onboarding_reviewer_assignments: 0, onboarding_review_access_events: 0, onboarding_review_requests: 0, onboarding_review_actions: 0, team_member_crm_permissions: 0 });
+    assert.deepEqual(rows[0], { tenants: 0, users: 0, memberships: 0, leads: 0, websites: 0, onboarding_projects: 0, onboarding_versions: 0, onboarding_audit_events: 0, onboarding_reviewer_assignments: 0, onboarding_review_access_events: 0, onboarding_review_requests: 0, onboarding_review_actions: 0, team_member_crm_permissions: 0, crm_settings: 0, crm_settings_audit_events: 0 });
   } finally {
     await pool.end();
   }

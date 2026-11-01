@@ -2,7 +2,7 @@
 
 **Laatst bijgewerkt:** 31 oktober 2026
 **Status:** Fase 5, technische implementatie met kleine verticale slices
-**Laatste gepushte technische commit:** `c151816 docs: update CRM release status`
+**Laatste gepushte technische commit:** `af6b219 feat: complete CRM team permissions slice`
 
 Dit document is een compacte startcontext voor nieuwe Codex- en Claude-sessies. Het vervangt de leidende bron- en architectuurdocumenten niet.
 
@@ -68,7 +68,9 @@ Conversion Engine is een multi-tenant SaaS-dashboard voor leadopvolging, website
 - CRM-organizations en contacts API/BFF (Slice CRM-1b): de API biedt tenantgebonden list-, detail-, create-, update- en archive-routes voor organisaties en contactpersonen. De Next.js BFF gebruikt uitsluitend de HttpOnly-sessie, whitelisted query/bodyvelden, same-origin mutaties en strikte response-parsing. Team members worden voor deze routes fail-closed geweigerd zolang configureerbare CRM-rechten nog niet persistent aan een gebruiker gekoppeld zijn.
 - CRM-frontend en integratiegate (Slice CRM-1c/1d): `/crm`, `/organizations` en `/contacts` zijn live gekoppeld aan de BFF zonder demo-data. De pagina’s hebben zoeken, loading-, lege-, unauthorized-, forbidden- en unavailable-states, semantische tabellen, toetsenbordfocus en responsive desktop/mobiel gedrag. De topbar benoemt de drie CRM-routes correct. De lijstweergave met echte ingelogde tenantdata is nog niet visueel gevalideerd omdat tijdens de gate geen lokale geauthenticeerde browsersessie beschikbaar was; contracttests dekken die data- en foutpaden wel af.
 - CRM CRUD-frontend (Slice CRM-1e): organisaties en contactpersonen kunnen in de klantomgeving worden toegevoegd, bewerkt en gearchiveerd via de bestaande server-side BFF. De formulieren valideren invoer, verversen lijsten na succesvolle mutaties en tonen expliciete loading-, fout- en successtates. Archiveren is soft-delete en permanente verwijdering is nog niet beschikbaar. De CRUD-formulieren zijn contractueel getest en gebouwd, maar nog niet met echte tenantdata in een ingelogde browser visueel geopend.
-- CRM-2a backend/BFF: `tenant_admin` is toegevoegd als persistente tenantrol. De genormaliseerde tabel `team_member_crm_permissions` bewaart uitsluitend de vier CRM-rechten (`crm:read`, `crm:create`, `crm:update`, `crm:archive`) met veilige defaults, tenantgebonden composite FK, timestamps en `ENABLE`/`FORCE RLS`. De membership resolver laadt alleen actieve grants in een claimvrij `TeamMemberPermissionContract`; CRM-organizations/contacts en de nieuwe teamroutes gebruiken dit contract server-side. `/v1/team/members` en de permissions-/role-PATCHes geven geen provider-subjects terug en gebruiken stabiele veilige labels. De BFF gebruikt alleen de HttpOnly-sessie, strict allowlists, same-origin mutaties, no-store en veilige 401/403/404/409/503-mappings. Migratie `0031_tenant_crm_permissions.sql` en de database/RLS-tests zijn toegevoegd maar nog niet lokaal uitgevoerd.
+- CRM-2a backend/BFF: `tenant_admin` is toegevoegd als persistente tenantrol. De genormaliseerde tabel `team_member_crm_permissions` bewaart uitsluitend de vier CRM-rechten (`crm:read`, `crm:create`, `crm:update`, `crm:archive`) met veilige defaults, tenantgebonden composite FK, timestamps en `ENABLE`/`FORCE RLS`. De membership resolver laadt alleen actieve grants in een claimvrij `TeamMemberPermissionContract`; CRM-organizations/contacts en de nieuwe teamroutes gebruiken dit contract server-side. `/v1/team/members` en de permissions-/role-PATCHes geven geen provider-subjects terug en gebruiken stabiele veilige labels. De BFF gebruikt alleen de HttpOnly-sessie, strict allowlists, same-origin mutaties, no-store en veilige 401/403/404/409/503-mappings. Migratie `0031_tenant_crm_permissions.sql` is op de lokale development- en testdatabase toegepast en de lokale rol-bootstrap is uitgevoerd. De API-database-suite is 143/143 groen; de gewone API-suite is 295/295 groen.
+- CRM-instellingen (Slice CRM-2b): tenantgebonden CRM-settings bewaren tijdzone, werkdagen, werktijden, leadopvolging, toewijzingsstrategie, meldingen en vaste leadbronnen. `GET/PATCH /v1/crm/settings` en de dashboard-BFF zijn fail-closed, valideren het volledige contract server-side en schrijven een immutable settings-audit-snapshot bij updates. De dashboardpagina heeft loading-, save-, error- en successtates; echte databaseverificatie wacht op migratie `0032_crm_tenant_settings.sql`.
+- Publieke lead-intake (Slice CRM-2c backend): `POST /v1/public/leads` gebruikt uitsluitend een opaque website-key en een bounded `Idempotency-Key`. De server resolveert de actieve website en tenant, valideert naam/e-mail/bericht/consents, dedupliceert contacten transactioneel, rate-limiteert per website-minuut, schrijft lead + pending outbox-event + idempotency-record atomair en retourneert geen tenant- of leaddetails. Public RLS bindt de write exact aan actieve tenant, website, contact-e-mail, vaste bron en privacyconsent; Platform Admin en andere tenants krijgen geen toegang. Migratie `0033_public_lead_intake.sql` en role-bootstrap zijn nog niet lokaal uitgevoerd; de demo-site gebruikt voorlopig bewust een unavailable adapter totdat de website-key/API-configuratie is ingericht.
 - MFA/AAL-handhaving (Slice 3.1): de tenant-, session-, reviewer- en Platform Admin-scopes vereisen server-side sterke assurance uit geverifieerde JWT-claims (`acr = aal2`, `amr = mfa` of `ce_aal = aal2`). Ontbrekende, malformed of te lage assurance geeft `403 insufficient_assurance`; ongeldige authenticatie blijft `401`; `/health` blijft publiek. De adapter geeft alleen een kleine, claimvrije assurance-context door aan de auth-hooks. De lokale enforcement, contracttests en echte ZITADEL end-to-end controle zijn geslaagd. De lokale-only diagnosecontrole is weer uitgeschakeld; productie gebruikt deze route niet.
 - Eerste reviewactie `submitted` → `review_needed` (`POST /v1/review/onboarding/request-changes`, migratie `0010`). In één transactie worden een review request met reden en notitie (tabel `onboarding_review_requests`), de statusovergang en een `review_requested`-audit-event opgeslagen. Audit-events ondersteunen een aparte member- en reviewer-actor, met precies één per event. De repository controleert de reviewer-toewijzing (actief op het moment van de transactie) en zelfreview opnieuw binnen de transactie. Review requests en audit-events verwijzen via een FK naar een bestaande onboardingversie (migratie `0011`).
 - Een Owner kan een onboarding in `review_needed` als concept opslaan via `PUT /v1/onboarding/current`. Elke opslag maakt een nieuwe immutable versie, behoudt de status `review_needed` en maakt geen audit-event.
@@ -80,19 +82,18 @@ Conversion Engine is een multi-tenant SaaS-dashboard voor leadopvolging, website
 - Het dashboard dient de onboarding in via de BFF (`POST /api/onboarding`), wacht daarbij een lopende autosave af, en toont een ingediende onboarding na refresh alleen-lezen.
 - Zelfstandige demo-site in `apps/demo-site`, visueel gecontroleerd op desktop en mobiel.
 
-De laatste gepushte technische commit is `c151816`. Daarin zijn de Platform Admin-klantenlijst, het klantdetail, het audit-dashboard, de MFA/AAL-handhaving, tenant lifecycle, owner-uitnodigingen, de live CRM-leads read slice, de access-token contracttest, de read-only production database verifier en de CRM-foundation plus organizations/contacts API, BFF en CRUD-frontend opgenomen. De huidige CRM-2a backend/BFF-wijzigingen staan nog lokaal en zijn nog niet gecommit of gepusht.
+De laatste gepushte technische commit is `af6b219`. Daarin zijn de Platform Admin-klantenlijst, het klantdetail, het audit-dashboard, de MFA/AAL-handhaving, tenant lifecycle, owner-uitnodigingen, de live CRM-leads read slice, de access-token contracttest, de read-only production database verifier en de CRM-foundation plus organizations/contacts API, BFF en CRUD-frontend opgenomen. Ook CRM-2a (teamrollen, persistente CRM-permissies, teambeheer-BFF en frontend) is gepusht en lokaal gecontroleerd.
 
 ## Belangrijk onderscheid: twee intakeflows
 
 ### Publieke lead-intake
 
-Een bezoeker dient via een klantwebsite een aanvraag in. Hiervoor staan nog open:
+Een bezoeker dient via een klantwebsite een aanvraag in. De backendfundering staat; de volgende vervolgstappen blijven apart:
 
-- publieke formulier-endpoint;
-- anti-spam en rate limiting;
-- submission/outbox-model;
-- idempotency en duplicate prevention;
-- externe verwerking en opvolging.
+- demo-site koppelen met een per-website publieke sleutel en API-configuratie;
+- outbox-worker en externe verwerking/opvolging;
+- aanvullende anti-spammaatregelen zoals abuse-signalen en eventueel CAPTCHA;
+- dashboardweergave en verdere leadopvolging.
 
 ### Klant-onboarding-intake
 
@@ -115,7 +116,7 @@ Antwoorden worden per tenant en project versieerbaar opgeslagen. Bij refresh wor
 
 Voor de reviewworkflow is richting B besloten (zie `docs/reviewworkflow-foundation-decision.md`): een reviewer-toewijzing per tenant, los van memberships, zonder zelfreview. Gebouwd zijn het autorisatiefundament (toewijzingen, de reviewer-scope en een read-only metadata-endpoint) en de eerste reviewactie `submitted` → `review_needed`. Die slaat een review request met notitie op en registreert de reviewer als aparte audit-actor.
 
-PostgreSQL-RLS is lokaal gebouwd en gecontroleerd voor alle tenantgebonden tabellen. De implementation gebruikt `FORCE ROW LEVEL SECURITY`, transactionele requestcontext en een tokengebonden identity-only invitation-flow; de cross-tenant regressietests zijn groen. De RLS-migraties `0022` t/m `0025` zijn op de lokale ontwikkel- en testdatabase toegepast. Production database-rollen, deploymentprocedure en de definitieve MFA/AAL-provideracceptatie blijven open. Het afgesproken PostgreSQL-rollenmodel is: `ce_migrator` voor migraties en read-only verificatie, `ce_api_runtime` voor de API met `NOSUPERUSER`/`NOBYPASSRLS` en zonder ownership, `ce_bff_runtime` voor uitsluitend `bff_sessions`, `ce_maintenance` voor afzonderlijk gecontroleerd onderhoud en een aparte no-login schema-/table-owner, bij voorkeur `ce_owner` als dat technisch passend is. De daadwerkelijke rolcreatie, grants en privilegecontroles zijn nog niet uitgevoerd. De bewaartermijn voor reviewnotities is nog niet besloten. De voortgang van slices en besluiten staat in `docs/PROJECT-CHECKLIST.md`.
+PostgreSQL-RLS is lokaal gebouwd en gecontroleerd voor alle tenantgebonden tabellen. De implementatie gebruikt `FORCE ROW LEVEL SECURITY`, transactionele requestcontext en een tokengebonden identity-only invitation-flow; de cross-tenant regressietests zijn groen. De RLS-migraties `0022` t/m `0025` en de CRM-permissiemigratie `0031` zijn op de lokale ontwikkel- en testdatabase toegepast; de rol-bootstrap voor die lokale databases is uitgevoerd. Production database-rollen, deploymentprocedure, productie-MFA/AAL-provideracceptatie en de nieuwe migraties `0032`/`0033` blijven releasegates. Het afgesproken PostgreSQL-rollenmodel is: `ce_migrator` voor migraties en read-only verificatie, `ce_api_runtime` voor de API met `NOSUPERUSER`/`NOBYPASSRLS` en zonder ownership, `ce_bff_runtime` voor uitsluitend `bff_sessions`, `ce_maintenance` voor afzonderlijk gecontroleerd onderhoud en een aparte no-login schema-/table-owner, bij voorkeur `ce_owner` als dat technisch passend is. De bewaartermijn voor reviewnotities is nog niet besloten. De voortgang van slices en besluiten staat in `docs/PROJECT-CHECKLIST.md`.
 
 De handmatige bouw en verzending van koude outreach-demo’s blijven buiten de Conversion Engine. De backend- en databasefundering wordt niet opnieuw gebouwd voor de demo-opbouw.
 
@@ -146,9 +147,8 @@ Een volledig geïntegreerde websitegenerator/runner in de Conversion Engine is u
 - Production database-rollen/deployment voor PostgreSQL-RLS en tenantveilige samengestelde relaties.
 - Reviewworkflow: bewaartermijn van reviewnotities, technische operatorautorisatie, MFA/AAL en RLS (O-2, O-3, O-5, O-7 t/m O-10 in `docs/reviewworkflow-foundation-decision.md`), daarna de Project Brief-goedkeuring.
 - Veilige uploads, scanning en private opslag.
-- Publieke lead-ingest met anti-spam, rate limiting, outbox en idempotency.
-- CRM-contacten, pipeline, taken en verdere leadopvolging.
-- CRM-openstaand: lokale uitvoering en verificatie van migratie 0031, daarna de volledige tenantinstellingen-slice. De lead-privacygrens voor Platform Admin is met CRM-0b afgedekt; organizations/contacts en team permissions hebben dezelfde RLS-standaard.
+- CRM-pipeline, deals, taken en verdere leadopvolging.
+- Publieke lead-intake: lokale uitvoering en verificatie van migraties `0032` en `0033`, daarna demo-site-koppeling, outbox-worker en abuse-hardening. De lead-privacygrens voor Platform Admin is met CRM-0b afgedekt; organizations/contacts, team permissions, CRM-settings en publieke ingest gebruiken dezelfde RLS-standaard.
 - Backup/WAL/PITR, restore en operationele monitoring.
 - Exacte VPS-resources, recoveryprocedure en deploymentisolatie.
 - Cloudflare Pages DNS-, formulier- en rollbackinrichting.

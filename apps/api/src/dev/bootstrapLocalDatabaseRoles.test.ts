@@ -9,6 +9,7 @@ import {
   LocalRoleBootstrapError,
   RUNTIME_FUNCTION_ALLOWLISTS,
   RUNTIME_TABLE_ALLOWLISTS,
+  runtimeTablePrivileges,
 } from "./bootstrapLocalDatabaseRoles.js";
 import {
   LOCAL_DATABASE_DEFAULT,
@@ -128,18 +129,20 @@ test("local bootstrap grants only the explicit runtime table and function allowl
   const sql = buildDatabaseAndDrizzleOwnershipSql("conversion_engine");
 
   for (const tableName of RUNTIME_TABLE_ALLOWLISTS.api) {
-    assert.match(sql, new RegExp(`GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public\\."${tableName}" TO ce_api_runtime`));
+    assert.match(sql, new RegExp(`GRANT ${runtimeTablePrivileges("api", tableName).join(", ")} ON TABLE public\\."${tableName}" TO ce_api_runtime`));
   }
   assert.match(sql, /GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public\."bff_sessions" TO ce_bff_runtime/);
   assert.doesNotMatch(sql, /TO ce_api_runtime, ce_maintenance/);
   assert.doesNotMatch(sql, /TO ce_bff_runtime, ce_maintenance/);
-  assert.doesNotMatch(sql, /GRANT USAGE ON SCHEMA public TO .*ce_maintenance/);
+  assert.match(
+    sql,
+    /IF current_database\(\) = 'conversion_engine_test' THEN\s+EXECUTE 'GRANT USAGE ON SCHEMA public TO ce_maintenance';\s+EXECUTE 'GRANT SELECT ON TABLE public\.public_lead_outbox TO ce_api_runtime';\s+EXECUTE 'GRANT EXECUTE ON FUNCTION public\.ce_rls_test_bypass\(\) TO ce_maintenance';\s+EXECUTE 'GRANT EXECUTE ON FUNCTION public\.ce_rls_scope\(\), public\.ce_rls_tenant_allowed\(uuid\), public\.ce_rls_public_tenant_active\(uuid\), public\.ce_rls_website_public_key\(\), public\.ce_rls_crm_scope_allowed\(uuid\), public\.ce_rls_public_website_allowed\(uuid\), public\.ce_rls_public_contact_email\(\), public\.ce_rls_customer_can_read_lead\(uuid, uuid\), public\.ce_rls_public_lead_allowed\(uuid, uuid\), public\.ce_rls_public_website_id_allowed\(uuid\) TO ce_maintenance';\s+EXECUTE 'GRANT SELECT ON TABLE public\.tenants, public\.websites, public\.contacts, public\.leads, public\.public_lead_idempotency_keys, public\.public_lead_rate_limits, public\.public_lead_outbox TO ce_maintenance';\s+EXECUTE 'GRANT DELETE ON TABLE public\.tenants, public\.websites, public\.contacts, public\.leads/,
+  );
 
   for (const functionSignature of RUNTIME_FUNCTION_ALLOWLISTS.api) {
     const [functionName, argumentsList] = functionSignature.replace(")", "").split("(");
     assert.match(sql, new RegExp(`GRANT EXECUTE ON FUNCTION public\\."${functionName}"\\(${argumentsList}\\) TO ce_api_runtime`));
   }
-  assert.doesNotMatch(sql, /TO ce_maintenance/);
   assert.match(sql, /to_regprocedure\('public\.ce_test_add_forced_failure\(text\)'\)/);
 });
 

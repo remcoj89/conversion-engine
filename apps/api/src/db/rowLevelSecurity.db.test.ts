@@ -15,6 +15,11 @@ const RLS_TABLES = [
   "users",
   "memberships",
   "team_member_crm_permissions",
+  "crm_settings",
+  "crm_settings_audit_events",
+  "public_lead_idempotency_keys",
+  "public_lead_rate_limits",
+  "public_lead_outbox",
   "tenant_owner_invitations",
   "websites",
   "organizations",
@@ -69,6 +74,205 @@ test("database context is applied to standalone pooled queries", async () => {
       },
     );
   } finally {
+    await pool.end();
+  }
+});
+
+test("public scope is limited to the active opaque website and does not expose broad CRM rows", async () => {
+  const databaseUrl = process.env.DATABASE_TEST_URL;
+  assert.ok(databaseUrl, "DATABASE_TEST_URL is required");
+  const { pool } = createTestDb(databaseUrl);
+  const client = await pool.connect();
+  const tenantA = randomUUID();
+  const tenantB = randomUUID();
+  const websiteA = randomUUID();
+  const websiteAOther = randomUUID();
+  const websiteB = randomUUID();
+  const contactA = randomUUID();
+  const contactB = randomUUID();
+  const leadA = randomUUID();
+  const leadB = randomUUID();
+  const keyA = "site_abcdefghijklmnopqrstuvwxyz123456";
+  const keyAOther = "site_abcdefghijklmnopqrstuvwxyz654321";
+  const keyB = "site_zyxwvutsrqponmlkjihgfedcba654321";
+
+  try {
+    await client.query("begin");
+    await client.query(
+      `insert into tenants (id, name, status) values ($1, 'Public A', 'active'), ($2, 'Public B', 'active')`,
+      [tenantA, tenantB],
+    );
+    await client.query(
+      `insert into websites (id, tenant_id, public_key, status) values
+        ($1, $3, $6, 'active'), ($2, $3, $7, 'active'), ($4, $5, $8, 'active')`,
+      [websiteA, websiteAOther, tenantA, websiteB, tenantB, keyA, keyAOther, keyB],
+    );
+    await client.query(
+      `insert into contacts (id, tenant_id, full_name, email, status) values
+        ($1, $3, 'Contact A', 'a@example.test', 'active'),
+        ($2, $4, 'Contact B', 'b@example.test', 'active')`,
+      [contactA, contactB, tenantA, tenantB],
+    );
+    await client.query(
+      `insert into leads (id, tenant_id, website_id, contact_id, name, email, message, source, status)
+       values ($1, $3, $5, $7, 'Lead A', 'a@example.test', 'A', 'website_contact', 'new'),
+              ($2, $4, $6, $8, 'Lead B', 'b@example.test', 'B', 'website_contact', 'new')`,
+      [leadA, leadB, tenantA, tenantB, websiteA, websiteB, contactA, contactB],
+    );
+    await client.query(
+      `insert into public_lead_idempotency_keys (tenant_id, website_id, idempotency_key, request_hash, lead_id)
+       values ($1, $3, 'public-a', repeat('a', 64), $5), ($2, $4, 'public-b', repeat('b', 64), $6)`,
+      [tenantA, tenantB, websiteA, websiteB, leadA, leadB],
+    );
+    await client.query("set local app.rls_test_mode = 'off'");
+
+    await runWithDatabaseContext(
+      {
+        scope: "public",
+        tenantId: tenantA,
+        websitePublicKey: keyA,
+        publicContactEmail: "a@example.test",
+      },
+      async () => {
+        const tenants = await client.query<{ id: string }>("select id from tenants order by id");
+        assert.deepEqual(tenants.rows.map((row) => row.id), [tenantA]);
+        const websites = await client.query<{ id: string }>("select id from websites order by id");
+        assert.deepEqual(websites.rows.map((row) => row.id), [websiteA]);
+        const contacts = await client.query<{ id: string }>("select id from contacts order by id");
+        assert.deepEqual(contacts.rows.map((row) => row.id), [contactA]);
+        const leads = await client.query<{ id: string }>("select id from leads order by id");
+        assert.deepEqual(leads.rows.map((row) => row.id), [leadA]);
+        const keys = await client.query<{ websiteId: string }>("select website_id as \"websiteId\" from public_lead_idempotency_keys");
+        assert.deepEqual(keys.rows.map((row) => row.websiteId), [websiteA]);
+        assert.deepEqual((await client.query("select id from public_lead_outbox")).rows, []);
+        assert.deepEqual((await client.query("select website_id from public_lead_rate_limits")).rows, []);
+
+        await client.query("savepoint public_cross_tenant_contact");
+        try {
+          await assert.rejects(
+            client.query(
+              `insert into contacts (tenant_id, full_name, email, status) values ($1, 'Cross tenant', 'cross@example.test', 'active')`,
+              [tenantB],
+            ),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint public_cross_tenant_contact");
+        }
+
+        await client.query("savepoint public_wrong_email_contact");
+        try {
+          await assert.rejects(
+            client.query(
+              `insert into contacts (tenant_id, full_name, email, status)
+               values ($1, 'Wrong email', 'wrong@example.test', 'active')`,
+              [tenantA],
+            ),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint public_wrong_email_contact");
+        }
+
+        await client.query("savepoint public_cross_tenant_lead");
+        try {
+          await assert.rejects(
+            client.query(
+              `insert into leads (tenant_id, website_id, name, email, message, source, status)
+               values ($1, $2, 'Cross tenant', 'cross@example.test', 'x', 'website_contact', 'new')`,
+              [tenantB, websiteB],
+            ),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint public_cross_tenant_lead");
+        }
+
+        await client.query("savepoint public_other_website_lead");
+        try {
+          await assert.rejects(
+            client.query(
+              `insert into leads (tenant_id, website_id, contact_id, name, email, message, source, status)
+               values ($1, $2, $3, 'Other website', $4, 'x', 'website_contact', 'new')`,
+              [tenantA, websiteAOther, contactA, "a@example.test"],
+            ),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint public_other_website_lead");
+        }
+
+        await client.query("savepoint public_wrong_email_lead");
+        try {
+          await assert.rejects(
+            client.query(
+              `insert into leads (tenant_id, website_id, contact_id, name, email, message, source, status)
+               values ($1, $2, $3, 'Wrong email', $4, 'x', 'website_contact', 'new')`,
+              [tenantA, websiteA, contactA, "wrong@example.test"],
+            ),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint public_wrong_email_lead");
+        }
+
+        await client.query("savepoint public_wrong_contact_lead");
+        try {
+          await assert.rejects(
+            client.query(
+              `insert into leads (tenant_id, website_id, contact_id, name, email, message, source, status)
+               values ($1, $2, $3, 'Wrong contact', $4, 'x', 'website_contact', 'new')`,
+              [tenantA, websiteA, contactB, "a@example.test"],
+            ),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint public_wrong_contact_lead");
+        }
+
+        await client.query("savepoint public_untrusted_lead_metadata");
+        try {
+          await assert.rejects(
+            client.query(
+              `insert into leads (tenant_id, website_id, contact_id, name, email, message, source, privacy_consent, status)
+               values ($1, $2, $3, 'Untrusted metadata', $4, 'x', 'manual', false, 'new')`,
+              [tenantA, websiteA, contactA, "a@example.test"],
+            ),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint public_untrusted_lead_metadata");
+        }
+      },
+    );
+
+    await client.query("set local app.rls_test_mode = 'on'");
+    await client.query("update tenants set status = 'disabled' where id = $1", [tenantA]);
+    await client.query("set local app.rls_test_mode = 'off'");
+    await runWithDatabaseContext(
+      {
+        scope: "public",
+        tenantId: tenantA,
+        websitePublicKey: keyA,
+        publicContactEmail: "a@example.test",
+      },
+      async () => {
+        assert.deepEqual((await client.query("select id from tenants")).rows, []);
+        assert.deepEqual((await client.query("select id from websites")).rows, []);
+        assert.deepEqual((await client.query("select id from leads")).rows, []);
+        await assert.rejects(
+          client.query(
+            `insert into leads (tenant_id, website_id, name, email, message, source, status)
+             values ($1, $2, 'Disabled tenant', 'disabled@example.test', 'x', 'website_contact', 'new')`,
+            [tenantA, websiteA],
+          ),
+          (error: { code?: string }) => error.code === "42501",
+        );
+      },
+    );
+  } finally {
+    await client.query("rollback");
+    client.release();
     await pool.end();
   }
 });
@@ -275,6 +479,17 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
        values ($1, $2, $3, $3, 'active')`,
       [tenantA, leadA, teamUser],
     );
+    await client.query(
+      `insert into crm_settings (tenant_id, settings) values
+        ($1, '{"timezone":"Europe/Amsterdam"}'::jsonb),
+        ($2, '{"timezone":"UTC"}'::jsonb)`,
+      [tenantA, tenantB],
+    );
+    await client.query(
+      `insert into crm_settings_audit_events (tenant_id, actor_user_id, event_type, settings)
+       values ($1, $2, 'updated', '{"timezone":"Europe/Amsterdam"}'::jsonb)`,
+      [tenantA, userA],
+    );
 
     await client.query("set local app.rls_test_mode = 'off'");
 
@@ -290,6 +505,11 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
         const leads = await client.query<{ id: string }>("select id from leads order by id");
         assert.deepEqual(leads.rows.map((row) => row.id), [leadA].sort());
 
+        const settings = await client.query<{ tenantId: string }>("select tenant_id as \"tenantId\" from crm_settings order by tenant_id");
+        assert.deepEqual(settings.rows.map((row) => row.tenantId), [tenantA]);
+        const auditEvents = await client.query<{ tenantId: string }>("select tenant_id as \"tenantId\" from crm_settings_audit_events");
+        assert.deepEqual(auditEvents.rows.map((row) => row.tenantId), [tenantA]);
+
         await client.query("savepoint cross_tenant_insert");
         try {
           await assert.rejects(
@@ -303,6 +523,34 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
         } finally {
           await client.query("rollback to savepoint cross_tenant_insert");
         }
+
+        await client.query("savepoint cross_tenant_settings_insert");
+        try {
+          await assert.rejects(
+            client.query(
+              `insert into crm_settings (tenant_id, settings)
+               values ($1, '{"timezone":"UTC"}'::jsonb)`,
+              [tenantB],
+            ),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint cross_tenant_settings_insert");
+        }
+
+        await client.query("savepoint cross_tenant_audit_insert");
+        try {
+          await assert.rejects(
+            client.query(
+              `insert into crm_settings_audit_events (tenant_id, actor_user_id, event_type, settings)
+               values ($1, $2, 'updated', '{"timezone":"UTC"}'::jsonb)`,
+              [tenantB, userA],
+            ),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint cross_tenant_audit_insert");
+        }
       },
     );
 
@@ -311,6 +559,20 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
       async () => {
         const leads = await client.query<{ id: string }>("select id from leads order by id");
         assert.deepEqual(leads.rows.map((row) => row.id), [leadA].sort());
+
+        await client.query("savepoint audit_actor_binding");
+        try {
+          await assert.rejects(
+            client.query(
+              `insert into crm_settings_audit_events (tenant_id, actor_user_id, event_type, settings)
+               values ($1, $2, 'updated', '{"timezone":"UTC"}'::jsonb)`,
+              [tenantA, userA],
+            ),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint audit_actor_binding");
+        }
       },
     );
 
@@ -326,6 +588,10 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
         assert.deepEqual(leads.rows, []);
         const assignments = await client.query("select lead_id from lead_assignments");
         assert.deepEqual(assignments.rows, []);
+        const settings = await client.query<{ tenantId: string }>("select tenant_id as \"tenantId\" from crm_settings order by tenant_id");
+        assert.deepEqual(settings.rows, []);
+        const auditEvents = await client.query<{ tenantId: string }>("select tenant_id as \"tenantId\" from crm_settings_audit_events");
+        assert.deepEqual(auditEvents.rows, []);
 
         await client.query("savepoint platform_lead_insert");
         try {
@@ -362,6 +628,10 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
       async () => {
         const leads = await client.query<{ id: string }>("select id from leads order by id");
         assert.deepEqual(leads.rows, []);
+        const settings = await client.query("select tenant_id from crm_settings");
+        assert.deepEqual(settings.rows, []);
+        const auditEvents = await client.query("select tenant_id from crm_settings_audit_events");
+        assert.deepEqual(auditEvents.rows, []);
         await client.query("savepoint reviewer_lead_insert");
         try {
           await assert.rejects(

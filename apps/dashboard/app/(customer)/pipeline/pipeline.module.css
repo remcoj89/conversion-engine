@@ -1,0 +1,98 @@
+.availabilityPanel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 24px;
+  border: 1px solid #ead8b6;
+  border-radius: var(--radius-card);
+  background: var(--warning-soft);
+  color: var(--text-primary);
+}
+
+.availabilityPanel h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.availabilityPanel p,
+.previewCardContent p {
+  color: var(--text-secondary);
+}
+
+.availabilityIcon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f0c36a;
+  color: #5f3c00;
+  font-weight: 800;
+}
+
+.pipelinePreviewGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.previewCardContent {
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+}
+
+.previewCardContent h2,
+.previewCardContent h3 {
+  margin: 0;
+}
+
+.plannedBadge {
+  justify-self: start;
+  padding: 4px 10px;
+  border-radius: 100px;
+  background: var(--brand-soft);
+  color: var(--brand-active);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rulesList {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rulesList li {
+  padding-inline-start: 24px;
+  color: var(--text-secondary);
+  position: relative;
+}
+
+.rulesList li::before {
+  position: absolute;
+  left: 4px;
+  content: "•";
+  color: var(--brand-primary);
+  font-weight: 800;
+}
+
+@media (max-width: 900px) {
+  .pipelinePreviewGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .availabilityPanel {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+
+  .previewCardContent {
+    padding: 18px;
+  }
+}

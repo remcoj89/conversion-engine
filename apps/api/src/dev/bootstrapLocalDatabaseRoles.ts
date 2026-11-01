@@ -20,8 +20,13 @@ export const RUNTIME_TABLE_ALLOWLISTS = {
     "users",
     "memberships",
     "team_member_crm_permissions",
+    "crm_settings",
+    "crm_settings_audit_events",
     "tenant_owner_invitations",
     "websites",
+    "public_lead_idempotency_keys",
+    "public_lead_rate_limits",
+    "public_lead_outbox",
     "organizations",
     "contacts",
     "leads",
@@ -39,6 +44,29 @@ export const RUNTIME_TABLE_ALLOWLISTS = {
   maintenance: [],
 } as const;
 
+export const RUNTIME_TABLE_PRIVILEGE_ALLOWLISTS = {
+  api: {
+    crm_settings: ["SELECT", "INSERT", "UPDATE"],
+    crm_settings_audit_events: ["SELECT", "INSERT"],
+    public_lead_idempotency_keys: ["SELECT", "INSERT"],
+    public_lead_rate_limits: ["SELECT", "INSERT", "UPDATE"],
+    public_lead_outbox: ["INSERT"],
+  },
+  bff: {},
+  maintenance: {},
+} as const satisfies Readonly<Record<keyof typeof RUNTIME_TABLE_ALLOWLISTS, Readonly<Record<string, readonly string[]>>>>;
+
+const ALL_RUNTIME_TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE"] as const;
+
+export function runtimeTablePrivileges(
+  role: keyof typeof RUNTIME_TABLE_PRIVILEGE_ALLOWLISTS,
+  tableName: string,
+): readonly string[] {
+  const rolePrivileges = RUNTIME_TABLE_PRIVILEGE_ALLOWLISTS[role] as Readonly<Record<string, readonly string[]>>;
+  return rolePrivileges[tableName]
+    ?? ALL_RUNTIME_TABLE_PRIVILEGES;
+}
+
 export const RUNTIME_SEQUENCE_ALLOWLISTS = {
   api: [],
   bff: [],
@@ -50,6 +78,8 @@ export const RUNTIME_FUNCTION_ALLOWLISTS = {
     "ce_rls_scope()",
     "ce_rls_subject()",
     "ce_rls_invitation_token_hash()",
+    "ce_rls_website_public_key()",
+    "ce_rls_public_contact_email()",
     "ce_rls_test_bypass()",
     "ce_rls_current_user_id()",
     "ce_rls_platform_access()",
@@ -59,6 +89,10 @@ export const RUNTIME_FUNCTION_ALLOWLISTS = {
     "ce_rls_crm_scope_allowed(uuid)",
     "ce_rls_team_member_crm_permission_allowed(uuid, uuid)",
     "ce_rls_team_member_crm_permission_manage_allowed(uuid)",
+    "ce_rls_public_website_allowed(uuid)",
+    "ce_rls_public_website_id_allowed(uuid)",
+    "ce_rls_public_tenant_active(uuid)",
+    "ce_rls_public_lead_allowed(uuid, uuid)",
   ],
   bff: [],
   maintenance: [],
@@ -256,7 +290,7 @@ function buildExplicitTableGrants(): string {
     DO $runtime_table_${tableName}$
     BEGIN
       IF to_regclass(${sqlStringLiteral(qualifiedName)}) IS NOT NULL THEN
-        EXECUTE ${sqlStringLiteral(`GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ${qualifiedName} TO ${roleName}`)};
+        EXECUTE ${sqlStringLiteral(`GRANT ${runtimeTablePrivileges(roleNameToAllowlist(roleName), tableName).join(", ")} ON TABLE ${qualifiedName} TO ${roleName}`)};
       END IF;
     END
     $runtime_table_${tableName}$;`);
@@ -272,6 +306,12 @@ function buildExplicitTableGrants(): string {
     appendGrant(tableName, "ce_maintenance");
   }
   return grants.join("\n    ");
+}
+
+function roleNameToAllowlist(roleName: string): keyof typeof RUNTIME_TABLE_PRIVILEGE_ALLOWLISTS {
+  if (roleName === "ce_api_runtime") return "api";
+  if (roleName === "ce_bff_runtime") return "bff";
+  return "maintenance";
 }
 
 function buildExplicitSequenceGrants(): string {
@@ -323,6 +363,25 @@ function buildExplicitFunctionGrants(): string {
   appendGrants(RUNTIME_FUNCTION_ALLOWLISTS.bff, "ce_bff_runtime");
   appendGrants(RUNTIME_FUNCTION_ALLOWLISTS.maintenance, "ce_maintenance");
   return grants.join("\n    ");
+}
+
+function buildTestFixtureCleanupGrants(): string {
+  return `
+    -- Test fixture cleanup is deliberately limited to the isolated test database.
+    -- These DELETE grants are not part of any production runtime allowlist.
+    DO $test_fixture_cleanup_grants$
+    BEGIN
+      IF current_database() = 'conversion_engine_test' THEN
+        EXECUTE 'GRANT USAGE ON SCHEMA public TO ce_maintenance';
+        EXECUTE 'GRANT SELECT ON TABLE public.public_lead_outbox TO ce_api_runtime';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.ce_rls_test_bypass() TO ce_maintenance';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION public.ce_rls_scope(), public.ce_rls_tenant_allowed(uuid), public.ce_rls_public_tenant_active(uuid), public.ce_rls_website_public_key(), public.ce_rls_crm_scope_allowed(uuid), public.ce_rls_public_website_allowed(uuid), public.ce_rls_public_contact_email(), public.ce_rls_customer_can_read_lead(uuid, uuid), public.ce_rls_public_lead_allowed(uuid, uuid), public.ce_rls_public_website_id_allowed(uuid) TO ce_maintenance';
+        EXECUTE 'GRANT SELECT ON TABLE public.tenants, public.websites, public.contacts, public.leads, public.public_lead_idempotency_keys, public.public_lead_rate_limits, public.public_lead_outbox TO ce_maintenance';
+        EXECUTE 'GRANT DELETE ON TABLE public.tenants, public.websites, public.contacts, public.leads, public.public_lead_idempotency_keys, public.public_lead_rate_limits, public.public_lead_outbox TO ce_maintenance';
+      END IF;
+    END
+    $test_fixture_cleanup_grants$;
+  `;
 }
 
 export function buildDatabaseAndDrizzleOwnershipSql(databaseName: string): string {
@@ -415,6 +474,7 @@ export function buildDatabaseAndDrizzleOwnershipSql(databaseName: string): strin
     ${buildExplicitTableGrants()}
     ${buildExplicitSequenceGrants()}
     ${buildExplicitFunctionGrants()}
+    ${buildTestFixtureCleanupGrants()}
 
     -- The failure-injection helper exists only in the local test database.
     -- It is needed by database rollback tests and is never granted elsewhere.

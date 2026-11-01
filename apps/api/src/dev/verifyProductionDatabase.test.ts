@@ -15,6 +15,7 @@ import {
 import {
   RUNTIME_FUNCTION_ALLOWLISTS,
   RUNTIME_TABLE_ALLOWLISTS,
+  runtimeTablePrivileges,
 } from "./bootstrapLocalDatabaseRoles.js";
 
 const baseEnvironment = {
@@ -232,7 +233,7 @@ test("runtime privilege evaluation keeps BFF isolated and rejects direct migrato
     { object_kind: "schema" as const, object_name: "public", grantee_name: roles.api, privilege_type: "USAGE", is_grantable: false },
     { object_kind: "schema" as const, object_name: "public", grantee_name: roles.bff, privilege_type: "USAGE", is_grantable: false },
     ...RUNTIME_TABLE_ALLOWLISTS.api.flatMap((tableName) =>
-      ["SELECT", "INSERT", "UPDATE", "DELETE"].map((privilege_type) => ({
+      runtimeTablePrivileges("api", tableName).map((privilege_type) => ({
         object_kind: "table" as const,
         object_name: tableName,
         grantee_name: roles.api,
@@ -241,7 +242,7 @@ test("runtime privilege evaluation keeps BFF isolated and rejects direct migrato
       })),
     ),
     ...RUNTIME_TABLE_ALLOWLISTS.bff.flatMap((tableName) =>
-      ["SELECT", "INSERT", "UPDATE", "DELETE"].map((privilege_type) => ({
+      runtimeTablePrivileges("bff", tableName).map((privilege_type) => ({
         object_kind: "table" as const,
         object_name: tableName,
         grantee_name: roles.bff,

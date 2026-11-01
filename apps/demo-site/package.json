@@ -8,7 +8,7 @@
     "start": "next start --port 3100",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test lib/quiz.test.ts lib/validation.test.ts content/demo.test.ts"
+    "test": "tsx --test lib/quiz.test.ts lib/validation.test.ts lib/publicLeadIntake.test.ts content/demo.test.ts"
   },
   "dependencies": {
     "next": "^16.4.2",

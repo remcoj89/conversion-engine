@@ -36,6 +36,17 @@ export const tenants = pgTable("tenants", {
   check("tenants_status_check", sql`${table.status} in ('pending', 'active', 'disabled')`),
 ]);
 
+// Internal resolver state used by public RLS policies. Keeping the active flag outside the
+// tenant/website policy cycle avoids recursive policy evaluation while exposing no tenant data
+// to runtime roles.
+export const publicTenantAccess = pgTable("public_tenant_access", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  isActive: boolean("is_active").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   authProviderUserId: text("auth_provider_user_id").notNull().unique(),
@@ -107,6 +118,51 @@ export const teamMemberCrmPermissions = pgTable(
   ],
 );
 
+// Tenant-owned CRM configuration. The JSON shape is validated by crm/settings.ts and the
+// database check keeps malformed non-object values out of the persistence boundary.
+export const crmSettings = pgTable(
+  "crm_settings",
+  {
+    tenantId: uuid("tenant_id")
+      .primaryKey()
+      .references(() => tenants.id),
+    settings: jsonb("settings").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("crm_settings_json_object_check", sql`jsonb_typeof(${table.settings}) = 'object'`),
+  ],
+);
+
+export const crmSettingsAuditEventTypes = ["updated"] as const;
+
+// Immutable, content-free audit metadata is not sufficient for configuration recovery, so the
+// validated settings snapshot is retained. It contains no secrets or external credentials.
+export const crmSettingsAuditEvents = pgTable(
+  "crm_settings_audit_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    actorUserId: uuid("actor_user_id").notNull(),
+    eventType: text("event_type", { enum: crmSettingsAuditEventTypes }).notNull(),
+    settings: jsonb("settings").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "crm_settings_audit_events_actor_membership_fk",
+      columns: [table.tenantId, table.actorUserId],
+      foreignColumns: [memberships.tenantId, memberships.userId],
+    }),
+    index("crm_settings_audit_events_tenant_created_idx").on(table.tenantId, table.createdAt),
+    check("crm_settings_audit_events_type_check", sql`${table.eventType} in ('updated')`),
+    check("crm_settings_audit_events_json_object_check", sql`jsonb_typeof(${table.settings}) = 'object'`),
+  ],
+);
+
 export const tenantInvitationStatuses = ["pending", "accepted", "revoked", "expired"] as const;
 
 // A tenant owner invitation is a one-time bearer credential. Only the SHA-256 digest of the
@@ -169,6 +225,7 @@ export const websites = pgTable(
   },
   (table) => [
     index("websites_tenant_id_idx").on(table.tenantId),
+    unique("websites_tenant_id_unique").on(table.tenantId, table.id),
     check("websites_status_check", sql`${table.status} in ('active', 'disabled')`),
     check("websites_public_key_check", sql`${table.publicKey} ~ ${sql.raw(`'${WEBSITE_PUBLIC_KEY_PATTERN}'`)}`),
   ],
@@ -246,6 +303,7 @@ export const contacts = pgTable(
     index("contacts_tenant_name_idx").on(table.tenantId, table.fullName),
     index("contacts_tenant_email_idx").on(table.tenantId, table.email),
     index("contacts_organization_idx").on(table.tenantId, table.organizationId),
+    unique("contacts_tenant_id_unique").on(table.tenantId, table.id),
     check("contacts_full_name_not_blank_check", sql`length(btrim(${table.fullName})) > 0`),
     check("contacts_email_not_blank_check", sql`length(btrim(${table.email})) > 0`),
     check(
@@ -266,11 +324,16 @@ export const leads = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id),
+    websiteId: uuid("website_id"),
+    contactId: uuid("contact_id"),
     name: text("name").notNull(),
     email: text("email").notNull(),
     phone: text("phone"),
+    organizationName: text("organization_name"),
     message: text("message").notNull(),
     source: text("source").notNull(),
+    privacyConsent: boolean("privacy_consent").notNull().default(false),
+    marketingConsent: boolean("marketing_consent").notNull().default(false),
     status: text("status", { enum: leadStatuses }).notNull().default("new"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -280,7 +343,93 @@ export const leads = pgTable(
     // Allows tenant-safe foreign keys from assignment records. The lead id is globally unique,
     // but the composite key keeps the tenant boundary explicit in the relational model.
     unique("leads_tenant_id_id_unique").on(table.tenantId, table.id),
+    foreignKey({
+      name: "leads_website_tenant_fk",
+      columns: [table.tenantId, table.websiteId],
+      foreignColumns: [websites.tenantId, websites.id],
+    }),
+    foreignKey({
+      name: "leads_contact_tenant_fk",
+      columns: [table.tenantId, table.contactId],
+      foreignColumns: [contacts.tenantId, contacts.id],
+    }),
     check("leads_status_check", sql`${table.status} in ('new')`),
+  ],
+);
+
+export const publicLeadIdempotencyKeys = pgTable(
+  "public_lead_idempotency_keys",
+  {
+    tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+    websiteId: uuid("website_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    leadId: uuid("lead_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.websiteId, table.idempotencyKey] }),
+    foreignKey({
+      name: "public_lead_idempotency_website_tenant_fk",
+      columns: [table.tenantId, table.websiteId],
+      foreignColumns: [websites.tenantId, websites.id],
+    }),
+    foreignKey({
+      name: "public_lead_idempotency_lead_tenant_fk",
+      columns: [table.tenantId, table.leadId],
+      foreignColumns: [leads.tenantId, leads.id],
+    }),
+    check("public_lead_idempotency_key_check", sql`${table.idempotencyKey} ~ '^[A-Za-z0-9._~-]{1,128}$'`),
+    check("public_lead_idempotency_hash_check", sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
+  ],
+);
+
+export const publicLeadRateLimits = pgTable(
+  "public_lead_rate_limits",
+  {
+    websiteId: uuid("website_id").notNull().references(() => websites.id),
+    bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+    requestCount: integer("request_count").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.websiteId, table.bucketStart] }),
+    check("public_lead_rate_limits_count_check", sql`${table.requestCount} >= 0`),
+  ],
+);
+
+export const publicLeadOutboxStatuses = ["pending", "processing", "completed", "failed"] as const;
+export const publicLeadOutboxEventTypes = ["lead.created"] as const;
+
+export const publicLeadOutbox = pgTable(
+  "public_lead_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+    websiteId: uuid("website_id").notNull(),
+    leadId: uuid("lead_id").notNull(),
+    eventType: text("event_type", { enum: publicLeadOutboxEventTypes }).notNull(),
+    status: text("status", { enum: publicLeadOutboxStatuses }).notNull().default("pending"),
+    payload: jsonb("payload").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "public_lead_outbox_website_tenant_fk",
+      columns: [table.tenantId, table.websiteId],
+      foreignColumns: [websites.tenantId, websites.id],
+    }),
+    foreignKey({
+      name: "public_lead_outbox_lead_tenant_fk",
+      columns: [table.tenantId, table.leadId],
+      foreignColumns: [leads.tenantId, leads.id],
+    }),
+    unique("public_lead_outbox_lead_event_unique").on(table.tenantId, table.leadId, table.eventType),
+    index("public_lead_outbox_pending_idx").on(table.status, table.createdAt),
+    check("public_lead_outbox_event_type_check", sql`${table.eventType} in ('lead.created')`),
+    check("public_lead_outbox_status_check", sql`${table.status} in ('pending', 'processing', 'completed', 'failed')`),
+    check("public_lead_outbox_payload_check", sql`jsonb_typeof(${table.payload}) = 'object'`),
   ],
 );
 

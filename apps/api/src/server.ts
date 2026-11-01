@@ -25,6 +25,9 @@ import { createTenantOwnerInvitationRepository } from "./platform/tenantOwnerInv
 import { findTenant } from "./tenants/tenantLoader.js";
 import { createOrganizationContactRepository } from "./crm/organizationContactRepository.js";
 import { createTeamMemberRepository } from "./team/teamMemberRepository.js";
+import { createCrmSettingsRepository } from "./crm/settingsRepository.js";
+import { createPublicLead } from "./leads/publicLeadRepository.js";
+import { findActiveWebsiteContext } from "./websites/websiteResolver.js";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4000;
@@ -64,6 +67,9 @@ const app = buildApp({
   leadReader: createLeadReader(db),
   organizationContactRepository: createOrganizationContactRepository(db),
   teamMemberRepository: createTeamMemberRepository(db),
+  crmSettingsRepository: createCrmSettingsRepository(db),
+  websiteResolver: (publicKey) => findActiveWebsiteContext(db, publicKey),
+  publicLeadCreator: (website, idempotencyKey, input) => createPublicLead(db, website, idempotencyKey, input),
   onboardingStore: {
     findCurrent: (tenantId) => findCurrentOnboarding(db, tenantId),
     saveDraft: (input) => saveOnboardingDraft(db, input),

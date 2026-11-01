@@ -9,7 +9,9 @@ const RLS_CONTEXT_SQL = `
     set_config('app.rls_scope', $1, true),
     set_config('app.rls_subject', $2, true),
     set_config('app.rls_tenant_id', $3, true),
-    set_config('app.rls_invitation_token_hash', $4, true)
+    set_config('app.rls_invitation_token_hash', $4, true),
+    set_config('app.rls_website_public_key', $5, true),
+    set_config('app.rls_public_contact_email', $6, true)
 `;
 
 type QueryMethod = PoolClient["query"];
@@ -85,6 +87,8 @@ function wrapClient(client: PoolClient): PoolClient {
       context.subject ?? "",
       context.tenantId ?? "",
       context.invitationTokenHash ?? "",
+      context.websitePublicKey ?? "",
+      context.publicContactEmail ?? "",
     ];
 
     if (transactionState.inTransaction) {
@@ -283,6 +287,40 @@ export function createTestDb(
   }
 
   return createDb(databaseUrl, { testMode: true });
+}
+
+/**
+ * Creates the explicitly test-only maintenance connection used for fixture cleanup.
+ * The maintenance role is never used by application repositories and its cleanup
+ * privileges are granted only in conversion_engine_test by the local bootstrap.
+ */
+export function createTestMaintenanceDb(
+  databaseUrl = process.env.DATABASE_TEST_URL,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  if (!databaseUrl) {
+    throw new Error("DATABASE_TEST_URL is required for the explicit test maintenance context");
+  }
+
+  const databaseName = databaseNameFromUrl(databaseUrl);
+  if (databaseName !== TEST_DATABASE) {
+    throw new Error("The explicit test maintenance context requires conversion_engine_test");
+  }
+  if (env.NODE_ENV !== "test" || env.CE_RLS_TEST_MODE !== "on") {
+    throw new Error(
+      "The explicit test maintenance context requires NODE_ENV=test and CE_RLS_TEST_MODE=on",
+    );
+  }
+
+  const maintenancePassword = env.CE_MAINTENANCE_PASSWORD?.trim();
+  if (!maintenancePassword) {
+    throw new Error("CE_MAINTENANCE_PASSWORD is required for test fixture cleanup");
+  }
+
+  const maintenanceUrl = new URL(databaseUrl);
+  maintenanceUrl.username = POSTGRES_ROLE_NAMES.maintenance;
+  maintenanceUrl.password = maintenancePassword;
+  return createDb(maintenanceUrl.toString(), { testMode: true });
 }
 
 export function createTestObserverDb(databaseUrl: string) {

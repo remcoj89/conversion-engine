@@ -7,7 +7,11 @@ import { readCode } from "../errors.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
-export type Lead = typeof schema.leads.$inferSelect;
+type DatabaseLead = typeof schema.leads.$inferSelect;
+// Public-intake metadata was added after the authenticated lead contract. Keep these fields
+// optional in the shared test-facing model so existing authenticated fixtures remain valid.
+export type Lead = Omit<DatabaseLead, "websiteId" | "contactId" | "organizationName" | "privacyConsent" | "marketingConsent"> &
+  Partial<Pick<DatabaseLead, "websiteId" | "contactId" | "organizationName" | "privacyConsent" | "marketingConsent">>;
 
 // Read models deliberately exclude tenantId. The route already enforces tenant scope and the
 // client has no reason to receive an internal isolation key.

@@ -10,16 +10,16 @@ const PHONE_PATTERN = /^\+?[\d\s()-]+$/;
 export type ContactValues = Readonly<{
   name: string;
   email: string;
-  reason: string;
+  organization: string;
   message: string;
   phone: string;
   privacy: boolean;
   marketing: boolean;
 }>;
 
-export type ContactField = "name" | "email" | "reason" | "message" | "phone" | "privacy";
+export type ContactField = "name" | "email" | "organization" | "message" | "phone" | "privacy";
 
-export function validateContact(values: ContactValues, reasons: readonly string[]): FieldErrors<ContactField> {
+export function validateContact(values: ContactValues): FieldErrors<ContactField> {
   const errors: FieldErrors<ContactField> = {};
   if (values.name.trim() === "") {
     errors.name = "Vul je naam in.";
@@ -30,8 +30,11 @@ export function validateContact(values: ContactValues, reasons: readonly string[
   if (emailError) {
     errors.email = emailError;
   }
-  if (!reasons.includes(values.reason)) {
-    errors.reason = "Kies waar je vraag over gaat.";
+  if (values.organization.trim().length > 120) {
+    errors.organization = "Gebruik maximaal 120 tekens.";
+  }
+  if (values.message.trim() === "") {
+    errors.message = "Vul je bericht in.";
   }
   if (values.message.length > 1000) {
     errors.message = "Gebruik maximaal 1000 tekens.";

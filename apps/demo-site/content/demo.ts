@@ -25,7 +25,7 @@ export const site = {
   mark: "S",
   coach: "Mara",
   tagline: "Training die meebeweegt met je leven.",
-  demoNotice: "Demowebsite met een fictieve coach. Formulieren versturen en bewaren niets.",
+  demoNotice: "Demowebsite met een fictieve coach. Het contactformulier werkt zodra de publieke Conversion Engine-configuratie is ingesteld.",
   primaryCta,
   leadmagnetCta,
   offerCta,
@@ -370,8 +370,7 @@ export const contact = {
   },
   form: {
     title: "Liever eerst een vraag stellen?",
-    text: "Laat een kort bericht achter. Mara reageert binnen twee werkdagen (fictieve termijn).",
-    reasons: ["Kennismaking aanvragen", "Vraag over het coachingtraject", "Andere vraag"],
+    text: "Laat een kort bericht achter. Je naam, e-mailadres en bericht zijn voldoende; je organisatie en telefoonnummer zijn optioneel.",
     submitLabel: "Verstuur mijn vraag",
   },
   responder: "Je bericht wordt gelezen en beantwoord door Mara zelf (fictief).",
@@ -388,7 +387,7 @@ export const contact = {
     { question: "Is het gesprek echt vrijblijvend?", answer: "Ja. Je zit nergens aan vast en beslist zelf of je verder wilt." },
     { question: "Wat moet ik voorbereiden?", answer: "Niets bijzonders. Denk alleen even na over je doel en hoeveel tijd je per week hebt." },
     { question: "Wat kost een traject daarna?", answer: "De (fictieve) prijzen staan op de aanbodpagina. In het gesprek hoor je welke vorm past." },
-    { question: "Wat gebeurt er met mijn gegevens?", answer: "Op deze demowebsite niets: formulieren versturen en bewaren geen gegevens." },
+    { question: "Wat gebeurt er met mijn gegevens?", answer: "Als het formulier is geconfigureerd, wordt je vraag via de Conversion Engine doorgestuurd om te worden beantwoord. Zonder configuratie wordt niets verstuurd." },
   ] satisfies readonly Faq[],
   finalCta: {
     title: "Wil je weten wat voor jou de beste volgende stap is?",
@@ -584,7 +583,7 @@ export const thankYou = {
     eyebrow: "Gelukt",
     title: "Je vraag is goed ontvangen",
     text: "Bedankt voor je bericht.",
-    delivery: "Mara reageert binnen twee werkdagen (fictieve termijn). In deze demo is niets verstuurd.",
+    delivery: "Mara reageert binnen twee werkdagen (fictieve termijn). Je bericht is door het formulier bevestigd.",
     nextStep: {
       title: "Alvast ontdekken welk ritme bij je past?",
       text: "Doe intussen de Ritme-check en neem je resultaat mee naar het gesprek.",
@@ -598,7 +597,7 @@ export const thankYou = {
 export const privacy = {
   title: "Privacy (demo)",
   paragraphs: [
-    "Dit is een demowebsite met fictieve content. Formulieren op deze website versturen geen gegevens naar een server of externe dienst en slaan niets op.",
+    "Dit is een demowebsite met fictieve content. Als de publieke API-configuratie is ingesteld, verstuurt het contactformulier de ingevulde naam, het e-mailadres, het bericht en eventueel de organisatie en het telefoonnummer naar de Conversion Engine om de vraag te beantwoorden. Zonder configuratie wordt niets verstuurd.",
     "Het resultaat van de Ritme-check wordt alleen tijdelijk in je eigen browser bewaard (sessionStorage), zodat de bedankpagina het kan tonen. Sluit je het tabblad, dan is het weg.",
     "Een klantwebsite vervangt deze tekst door de eigen privacyverklaring.",
   ],
