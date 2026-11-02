@@ -1,6 +1,7 @@
 import { and, desc, eq, gt, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "../db/schema.js";
+import { runWithDatabaseContext } from "../db/requestContext.js";
 
 export const PLATFORM_ADMIN_CONFIRM_FLAG = "--confirm-local";
 
@@ -144,7 +145,8 @@ export function drizzlePlatformAdminTransactionRunner(db: Db): RunPlatformAdminT
   return (fn) => db.transaction((tx) => fn(drizzlePlatformAdminTx(tx)));
 }
 
-function drizzlePlatformAdminTx(tx: DbTx): PlatformAdminProvisioningTx {
+// Exported for database tests that exercise the real queries as ce_maintenance.
+export function drizzlePlatformAdminTx(tx: DbTx): PlatformAdminProvisioningTx {
   return {
     async findActiveSessionSubjects() {
       const rows = await tx
@@ -165,9 +167,20 @@ function drizzlePlatformAdminTx(tx: DbTx): PlatformAdminProvisioningTx {
         .select({ id: schema.users.id, status: schema.users.status })
         .from(schema.users)
         .where(eq(schema.users.authProviderUserId, subject))
-        .for("update")
         .limit(1);
-      return user ?? null;
+      if (!user || user.status !== "active") return user ?? null;
+
+      // A row lock needs the users UPDATE policy, which only exists for the identity-only
+      // scope of that same (active) subject. The assignment stays under the maintenance context.
+      return runWithDatabaseContext({ scope: "identity_only", subject }, async () => {
+        const [locked] = await tx
+          .select({ id: schema.users.id, status: schema.users.status })
+          .from(schema.users)
+          .where(eq(schema.users.authProviderUserId, subject))
+          .for("update")
+          .limit(1);
+        return locked ?? null;
+      });
     },
 
     async findAssignment(userId) {

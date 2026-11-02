@@ -36,6 +36,11 @@ export function readCode(value: unknown): string | undefined {
   return typeof value.code === "string" ? value.code : undefined;
 }
 
+export function readConstraint(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || !("constraint" in value)) return undefined;
+  return typeof value.constraint === "string" ? value.constraint : undefined;
+}
+
 // Stack without its first line, which repeats the message.
 function stackFrames(error: unknown): string[] | undefined {
   if (!(error instanceof Error) || !error.stack) return undefined;

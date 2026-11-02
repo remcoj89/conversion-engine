@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getAuthContext } from "../auth/authHook.js";
 import { authorizeForUser } from "../auth/authorization.js";
 import { UUID_PATTERN } from "../auth/requestContext.js";
+import { DuplicateContactEmailError } from "../crm/organizationContactRepository.js";
 import type {
   Contact,
   CreateContactInput,
@@ -64,10 +65,18 @@ export function registerContactRoutes(
       if (!organization) return reply.code(400).send({ error: "invalid_organization" });
     }
 
-    const contact = await organizationContactRepository.createContact({
-      tenantId: context.tenantId,
-      ...input,
-    });
+    let contact: Contact;
+    try {
+      contact = await organizationContactRepository.createContact({
+        tenantId: context.tenantId,
+        ...input,
+      });
+    } catch (error) {
+      if (error instanceof DuplicateContactEmailError) {
+        return reply.code(409).send({ error: "duplicate_contact_email" });
+      }
+      throw error;
+    }
     return reply.code(201).send(toContactResponse(contact));
   });
 
@@ -104,11 +113,19 @@ export function registerContactRoutes(
       if (!organization) return reply.code(400).send({ error: "invalid_organization" });
     }
 
-    const contact = await organizationContactRepository.updateContact({
-      tenantId: context.tenantId,
-      contactId,
-      ...input,
-    });
+    let contact: Contact | null;
+    try {
+      contact = await organizationContactRepository.updateContact({
+        tenantId: context.tenantId,
+        contactId,
+        ...input,
+      });
+    } catch (error) {
+      if (error instanceof DuplicateContactEmailError) {
+        return reply.code(409).send({ error: "duplicate_contact_email" });
+      }
+      throw error;
+    }
     if (!contact) return reply.code(404).send({ error: "not_found" });
     return toContactResponse(contact);
   });
@@ -233,7 +250,7 @@ function isAllowedContactBody(value: unknown): value is Record<string, unknown> 
 
 function parseEmail(value: unknown): string | null {
   const email = requiredText(value, 320);
-  return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+  return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email.toLowerCase() : null;
 }
 
 function requiredText(value: unknown, maxLength: number): string | null {

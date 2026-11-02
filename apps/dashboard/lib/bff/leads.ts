@@ -8,9 +8,26 @@ export type LeadRecord = Readonly<{
   phone: string | null;
   message: string;
   source: string;
-  status: string;
+  status: LeadLifecycleStatus;
+  next_action: LeadNextAction | null;
   created_at: string;
   updated_at: string;
+}>;
+
+export const LEAD_LIFECYCLE_STATUSES = [
+  "new",
+  "qualified",
+  "appointment_scheduled",
+  "proposal",
+  "won",
+  "lost",
+] as const;
+
+export type LeadLifecycleStatus = (typeof LEAD_LIFECYCLE_STATUSES)[number];
+
+export type LeadNextAction = Readonly<{
+  label: string;
+  due_at: string | null;
 }>;
 
 export type LeadListResponse = Readonly<{
@@ -20,19 +37,40 @@ export type LeadListResponse = Readonly<{
 
 export type LeadQuery = Readonly<{
   q?: string;
-  status?: string;
+  status?: LeadLifecycleStatus;
   limit?: string;
   cursor?: string;
 }>;
 
 export type LeadListResult = Readonly<
   | { status: "ready"; data: LeadListResponse }
-  | { status: "unauthenticated" | "forbidden" | "invalid_query" | "unavailable"; data: null }
+  | { status: "unauthenticated" | "forbidden" | "invalid_query" | "error" | "unavailable"; data: null }
 >;
 
 export type LeadDetailResult = Readonly<
   | { status: "ready"; data: LeadRecord }
-  | { status: "unauthenticated" | "forbidden" | "not_found" | "unavailable"; data: null }
+  | { status: "unauthenticated" | "forbidden" | "not_found" | "error" | "unavailable"; data: null }
+>;
+
+export type LeadStatusMutationResponse = Readonly<{
+  id: string;
+  status: LeadLifecycleStatus;
+  next_action: null;
+  updated_at: string;
+}>;
+
+export type LeadStatusUpdateResult = Readonly<
+  | { status: "updated"; data: LeadStatusMutationResponse }
+  | {
+      status:
+        | "unauthenticated"
+        | "forbidden"
+        | "not_found"
+        | "invalid_status_transition"
+        | "invalid_request"
+        | "unavailable";
+      data: null;
+    }
 >;
 
 export const LEAD_QUERY_KEYS = ["q", "status", "limit", "cursor"] as const;
@@ -49,6 +87,14 @@ const forwardedDetailErrors: readonly ForwardedError[] = [
   { status: 401, error: "unauthorized" },
   { status: 403, error: "forbidden" },
   { status: 404, error: "not_found" },
+  { status: 502, error: "api_unavailable" },
+  { status: 503, error: "api_unavailable" },
+];
+const forwardedStatusMutationErrors: readonly ForwardedError[] = [
+  { status: 401, error: "unauthorized" },
+  { status: 403, error: "forbidden" },
+  { status: 404, error: "not_found" },
+  { status: 409, error: "invalid_status_transition" },
   { status: 502, error: "api_unavailable" },
   { status: 503, error: "api_unavailable" },
 ];
@@ -85,6 +131,29 @@ export function createLeadDetailHandler(dependencies: ApiProxyDependencies): Lea
 
     if (!response.ok) return response;
     const parsed = parseLeadRecord(await response.json().catch(() => null));
+    return parsed ? reply(parsed, response.status) : reply({ error: "api_unavailable" }, 503);
+  };
+}
+
+export function createLeadStatusHandler(dependencies: ApiProxyDependencies): LeadHandler {
+  return async (request) => {
+    const leadId = new URL(request.url).pathname.split("/").at(-2) ?? "";
+    if (!UUID_PATTERN.test(leadId)) return reply({ error: "not_found" }, 404);
+
+    const body = await readLeadStatusBody(request);
+    if (body === null) return reply({ error: "invalid_body" }, 400);
+
+    const response = await createApiProxy(dependencies, {
+      apiPath: `/v1/leads/${encodeURIComponent(leadId)}/status`,
+      method: "PATCH",
+      forwardedErrors: forwardedStatusMutationErrors,
+      forwardTenantHeader: false,
+      requireSameOrigin: true,
+      maxBodyBytes: 8 * 1024,
+    })(withJsonBody(request, body));
+
+    if (!response.ok) return response;
+    const parsed = parseLeadStatusMutationResponse(await response.json().catch(() => null));
     return parsed ? reply(parsed, response.status) : reply({ error: "api_unavailable" }, 503);
   };
 }
@@ -128,6 +197,7 @@ export function parseLeadListResponseResult(response: Response): Promise<LeadLis
     if (response.status === 401) return { status: "unauthenticated", data: null };
     if (response.status === 403) return { status: "forbidden", data: null };
     if (response.status === 400 && isErrorBody(body, "invalid_query")) return { status: "invalid_query", data: null };
+    if (response.status === 400 && isErrorBody(body, "api_error")) return { status: "error", data: null };
     if (!response.ok) return { status: "unavailable", data: null };
     const data = parseLeadListResponse(body);
     return data ? { status: "ready", data } : { status: "unavailable", data: null };
@@ -139,10 +209,43 @@ export function parseLeadDetailResponseResult(response: Response): Promise<LeadD
     if (response.status === 401) return { status: "unauthenticated", data: null };
     if (response.status === 403) return { status: "forbidden", data: null };
     if (response.status === 404 && isErrorBody(body, "not_found")) return { status: "not_found", data: null };
+    if (response.status === 400 && isErrorBody(body, "api_error")) return { status: "error", data: null };
     if (!response.ok) return { status: "unavailable", data: null };
     const data = parseLeadDetailResponse(body);
     return data ? { status: "ready", data } : { status: "unavailable", data: null };
   });
+}
+
+export async function updateLeadStatus(
+  fetcher: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+  leadId: string,
+  status: LeadLifecycleStatus,
+): Promise<LeadStatusUpdateResult> {
+  if (!UUID_PATTERN.test(leadId) || !isLeadLifecycleStatus(status)) {
+    return { status: "invalid_request", data: null };
+  }
+
+  try {
+    const response = await fetcher(`/api/leads/${encodeURIComponent(leadId)}/status`, {
+      method: "PATCH",
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    const body = await response.json().catch(() => null);
+    if (response.status === 401) return { status: "unauthenticated", data: null };
+    if (response.status === 403) return { status: "forbidden", data: null };
+    if (response.status === 404 && isErrorBody(body, "not_found")) return { status: "not_found", data: null };
+    if (response.status === 409 && isErrorBody(body, "invalid_status_transition")) {
+      return { status: "invalid_status_transition", data: null };
+    }
+    if (response.status === 400 && isErrorBody(body, "invalid_body")) return { status: "invalid_request", data: null };
+    if (!response.ok) return { status: "unavailable", data: null };
+    const data = parseLeadStatusMutationResponse(body);
+    return data ? { status: "updated", data } : { status: "unavailable", data: null };
+  } catch {
+    return { status: "unavailable", data: null };
+  }
 }
 
 function appendWhitelistedQuery(params: URLSearchParams, query: LeadQuery): void {
@@ -156,20 +259,21 @@ function appendWhitelistedQuery(params: URLSearchParams, query: LeadQuery): void
 
 function isValidQueryValue(key: (typeof LEAD_QUERY_KEYS)[number], value: string): boolean {
   if (key === "q") return value.length <= 100;
-  if (key === "status") return /^[a-z][a-z0-9_-]{0,31}$/.test(value);
+  if (key === "status") return isLeadLifecycleStatus(value);
   if (key === "limit") return /^(?:[1-9]|[1-4][0-9]|50)$/.test(value);
   return value.length <= 512;
 }
 
 function parseLeadRecord(value: unknown): LeadRecord | null {
   if (!isRecord(value)) return null;
-  if (!hasExactKeys(value, ["id", "name", "email", "phone", "message", "source", "status", "created_at", "updated_at"])) return null;
+  if (!hasExactKeys(value, ["id", "name", "email", "phone", "message", "source", "status", "next_action", "created_at", "updated_at"])) return null;
   if (
     typeof value.id !== "string" || !UUID_PATTERN.test(value.id) ||
     !isBoundedString(value.name, 200) || !isBoundedString(value.email, 320) ||
     (value.phone !== null && !isBoundedString(value.phone, 80)) ||
     !isBoundedString(value.message, 5_000) || !isBoundedString(value.source, 100) ||
-    !isBoundedString(value.status, 64) || !isDateString(value.created_at) || !isDateString(value.updated_at)
+    typeof value.status !== "string" || !isLeadLifecycleStatus(value.status) || !isValidLeadNextAction(value.next_action) ||
+    !isDateString(value.created_at) || !isDateString(value.updated_at)
   ) return null;
 
   return {
@@ -179,10 +283,46 @@ function parseLeadRecord(value: unknown): LeadRecord | null {
     phone: value.phone === null ? null : value.phone.trim(),
     message: value.message,
     source: value.source.trim(),
-    status: value.status.trim(),
+    status: value.status,
+    next_action: parseLeadNextAction(value.next_action),
     created_at: value.created_at,
     updated_at: value.updated_at,
   };
+}
+
+export function parseLeadStatusMutationResponse(value: unknown): LeadStatusMutationResponse | null {
+  if (!isRecord(value) || !hasExactKeys(value, ["id", "status", "next_action", "updated_at"])) return null;
+  if (
+    typeof value.id !== "string" || !UUID_PATTERN.test(value.id) ||
+    typeof value.status !== "string" || !isLeadLifecycleStatus(value.status) ||
+    value.next_action !== null || !isDateString(value.updated_at)
+  ) return null;
+
+  return {
+    id: value.id,
+    status: value.status,
+    next_action: null,
+    updated_at: value.updated_at,
+  };
+}
+
+function parseLeadNextAction(value: unknown): LeadNextAction | null {
+  if (value === null) return null;
+  if (!isRecord(value) || !hasExactKeys(value, ["label", "due_at"])) return null;
+  if (!isBoundedString(value.label, 200)) return null;
+  if (value.due_at !== null && !isDateString(value.due_at)) return null;
+  return {
+    label: value.label.trim(),
+    due_at: value.due_at,
+  };
+}
+
+function isValidLeadNextAction(value: unknown): boolean {
+  return value === null || parseLeadNextAction(value) !== null;
+}
+
+export function isLeadLifecycleStatus(value: string): value is LeadLifecycleStatus {
+  return (LEAD_LIFECYCLE_STATUSES as readonly string[]).includes(value);
 }
 
 function isErrorBody(value: unknown, error: string): boolean {
@@ -208,4 +348,24 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
 
 function reply(body: unknown, status: number): Response {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
+}
+
+async function readLeadStatusBody(request: NextRequest): Promise<string | null> {
+  if (!request.headers.get("content-type")?.toLowerCase().includes("application/json")) return null;
+
+  try {
+    const raw = await request.text();
+    if (new TextEncoder().encode(raw).byteLength > 8 * 1024) return null;
+    const value: unknown = JSON.parse(raw);
+    if (!isRecord(value) || !hasExactKeys(value, ["status"]) || typeof value.status !== "string" || !isLeadLifecycleStatus(value.status)) {
+      return null;
+    }
+    return JSON.stringify({ status: value.status });
+  } catch {
+    return null;
+  }
+}
+
+function withJsonBody(request: NextRequest, body: string): NextRequest {
+  return new NextRequest(request.url, { method: "PATCH", headers: request.headers, body });
 }

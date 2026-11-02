@@ -7,6 +7,10 @@ import {
   buildDatabaseAndDrizzleOwnershipSql,
   LOCAL_ROLE_CONFIRM_FLAG,
   LocalRoleBootstrapError,
+  ADMIN_DATABASE_URL_ENV,
+  LOCAL_MAINTENANCE_CLI_TABLE_GRANTS,
+  LOCAL_MAINTENANCE_FUNCTION_ALLOWLIST,
+  localMaintenanceTablePrivileges,
   RUNTIME_FUNCTION_ALLOWLISTS,
   RUNTIME_TABLE_ALLOWLISTS,
   runtimeTablePrivileges,
@@ -27,7 +31,7 @@ const rolePasswords = {
 
 const baseEnvironment = {
   NODE_ENV: "development",
-  DATABASE_URL: "postgresql://conversion_engine:local@127.0.0.1:5432/conversion_engine",
+  DATABASE_ADMIN_URL: "postgresql://conversion_engine:local@127.0.0.1:5432/conversion_engine",
   ...rolePasswords,
 };
 
@@ -54,7 +58,7 @@ test("local role bootstrap enforces the expected database name before connecting
   assert.throws(
     () =>
       assertLocalRoleBootstrapInvocation(
-        { ...baseEnvironment, DATABASE_URL: "postgresql://conversion_engine:local@127.0.0.1:5432/other_database" },
+        { ...baseEnvironment, DATABASE_ADMIN_URL: "postgresql://conversion_engine:local@127.0.0.1:5432/other_database" },
         [LOCAL_ROLE_CONFIRM_FLAG],
       ),
     (error: unknown) => error instanceof LocalRoleBootstrapError && error.code === "database_guard_failed",
@@ -132,12 +136,25 @@ test("local bootstrap grants only the explicit runtime table and function allowl
     assert.match(sql, new RegExp(`GRANT ${runtimeTablePrivileges("api", tableName).join(", ")} ON TABLE public\\."${tableName}" TO ce_api_runtime`));
   }
   assert.match(sql, /GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public\."bff_sessions" TO ce_bff_runtime/);
+  for (const [tableName, privileges] of Object.entries(localMaintenanceTablePrivileges())) {
+    assert.match(
+      sql,
+      new RegExp(`GRANT ${privileges.join(", ")} ON TABLE public\\."${tableName}" TO ce_maintenance`),
+    );
+  }
+  // Outside the test-only cleanup block, maintenance never receives websites or lead/CRM tables.
+  const nonTestSql = sql.slice(0, sql.indexOf("$test_fixture_cleanup_grants$"));
+  for (const tableName of ["websites", "leads", "contacts", "organizations", "public_lead_outbox"]) {
+    assert.doesNotMatch(nonTestSql, new RegExp(`ON TABLE public\\."${tableName}" TO ce_maintenance`));
+  }
+  assert.match(sql, /GRANT USAGE ON SCHEMA public TO ce_api_runtime, ce_bff_runtime, ce_maintenance/);
   assert.doesNotMatch(sql, /TO ce_api_runtime, ce_maintenance/);
   assert.doesNotMatch(sql, /TO ce_bff_runtime, ce_maintenance/);
-  assert.match(
-    sql,
-    /IF current_database\(\) = 'conversion_engine_test' THEN\s+EXECUTE 'GRANT USAGE ON SCHEMA public TO ce_maintenance';\s+EXECUTE 'GRANT SELECT ON TABLE public\.public_lead_outbox TO ce_api_runtime';\s+EXECUTE 'GRANT EXECUTE ON FUNCTION public\.ce_rls_test_bypass\(\) TO ce_maintenance';\s+EXECUTE 'GRANT EXECUTE ON FUNCTION public\.ce_rls_scope\(\), public\.ce_rls_tenant_allowed\(uuid\), public\.ce_rls_public_tenant_active\(uuid\), public\.ce_rls_website_public_key\(\), public\.ce_rls_crm_scope_allowed\(uuid\), public\.ce_rls_public_website_allowed\(uuid\), public\.ce_rls_public_contact_email\(\), public\.ce_rls_customer_can_read_lead\(uuid, uuid\), public\.ce_rls_public_lead_allowed\(uuid, uuid\), public\.ce_rls_public_website_id_allowed\(uuid\) TO ce_maintenance';\s+EXECUTE 'GRANT SELECT ON TABLE public\.tenants, public\.websites, public\.contacts, public\.leads, public\.public_lead_idempotency_keys, public\.public_lead_rate_limits, public\.public_lead_outbox TO ce_maintenance';\s+EXECUTE 'GRANT DELETE ON TABLE public\.tenants, public\.websites, public\.contacts, public\.leads/,
-  );
+  assert.match(sql, /IF current_database\(\) = 'conversion_engine_test' THEN/);
+  assert.match(sql, /EXECUTE 'GRANT USAGE ON SCHEMA public TO ce_maintenance'/);
+  assert.match(sql, /EXECUTE 'GRANT INSERT ON TABLE public\.platform_admin_assignments TO ce_api_runtime'/);
+  assert.match(sql, /EXECUTE 'GRANT EXECUTE ON FUNCTION public\.ce_rls_test_bypass\(\) TO ce_maintenance'/);
+  assert.match(sql, /EXECUTE 'GRANT DELETE ON TABLE public\.tenants, public\.websites, public\.contacts, public\.leads/);
 
   for (const functionSignature of RUNTIME_FUNCTION_ALLOWLISTS.api) {
     const [functionName, argumentsList] = functionSignature.replace(")", "").split("(");
@@ -146,11 +163,75 @@ test("local bootstrap grants only the explicit runtime table and function allowl
   assert.match(sql, /to_regprocedure\('public\.ce_test_add_forced_failure\(text\)'\)/);
 });
 
-test("runtime allowlists keep bff sessions exclusive and maintenance empty", () => {
+test("runtime allowlists keep bff sessions exclusive and local maintenance narrow", () => {
   assert.deepEqual(RUNTIME_TABLE_ALLOWLISTS.bff, ["bff_sessions"]);
   assert.deepEqual(RUNTIME_TABLE_ALLOWLISTS.maintenance, []);
+  assert.deepEqual(localMaintenanceTablePrivileges(), {
+    bff_sessions: ["SELECT"],
+    memberships: ["SELECT", "INSERT"],
+    onboarding_reviewer_assignments: ["SELECT", "INSERT", "UPDATE"],
+    platform_admin_assignments: ["SELECT", "INSERT", "UPDATE"],
+    tenants: ["SELECT", "INSERT"],
+    users: ["SELECT", "INSERT", "UPDATE"],
+  });
+  assert.deepEqual(Object.keys(LOCAL_MAINTENANCE_CLI_TABLE_GRANTS), [
+    "provision:local",
+    "provision:platform-admin",
+    "provision:reviewer",
+    "revoke:reviewer",
+  ]);
+  for (const grants of Object.values(LOCAL_MAINTENANCE_CLI_TABLE_GRANTS)) {
+    for (const privileges of Object.values(grants)) {
+      assert.equal((privileges as readonly string[]).includes("DELETE"), false);
+    }
+  }
   assert.deepEqual(RUNTIME_FUNCTION_ALLOWLISTS.bff, []);
   assert.deepEqual(RUNTIME_FUNCTION_ALLOWLISTS.maintenance, []);
+  assert.deepEqual(LOCAL_MAINTENANCE_FUNCTION_ALLOWLIST, [
+    "ce_rls_test_bypass()",
+    "ce_rls_scope()",
+    "ce_rls_subject()",
+    "ce_rls_current_user_id()",
+    "ce_rls_platform_access()",
+    "ce_rls_tenant_allowed(uuid)",
+    "ce_rls_public_website_tenant_allowed(uuid)",
+  ]);
+  assert.ok(RUNTIME_FUNCTION_ALLOWLISTS.api.includes("ce_rls_public_website_tenant_allowed(uuid)"));
+});
+
+test("local role bootstrap requires a dedicated admin URL and never uses DATABASE_URL", () => {
+  const environment: NodeJS.ProcessEnv = {
+    ...baseEnvironment,
+    DATABASE_URL: "postgresql://conversion_engine:local@127.0.0.1:5432/conversion_engine",
+  };
+  delete environment[ADMIN_DATABASE_URL_ENV];
+  assert.throws(
+    () => assertLocalRoleBootstrapInvocation(environment, [LOCAL_ROLE_CONFIRM_FLAG]),
+    (error: unknown) => error instanceof LocalRoleBootstrapError && error.code === "database_url_required",
+  );
+
+  for (const roleName of Object.values(POSTGRES_ROLE_NAMES)) {
+    assert.throws(
+      () =>
+        assertLocalRoleBootstrapInvocation(
+          { ...baseEnvironment, DATABASE_ADMIN_URL: `postgresql://${roleName}:local@127.0.0.1:5432/conversion_engine` },
+          [LOCAL_ROLE_CONFIRM_FLAG],
+        ),
+      (error: unknown) => {
+        assert.ok(error instanceof LocalRoleBootstrapError);
+        assert.equal(error.code, "database_guard_failed");
+        assert.equal(error.message.includes("local@"), false);
+        return true;
+      },
+    );
+  }
+
+  // Peer authentication over the local socket needs no password in the URL.
+  const input = assertLocalRoleBootstrapInvocation(
+    { ...baseEnvironment, DATABASE_ADMIN_URL: "postgresql:///conversion_engine?host=/var/run/postgresql" },
+    [LOCAL_ROLE_CONFIRM_FLAG],
+  );
+  assert.equal(input.expectedDatabase, "conversion_engine");
 });
 
 test("role membership SQL removes stale owner memberships and restores only the migrator boundary", () => {

@@ -46,7 +46,14 @@
 .settingsFormGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 24px;
+}
+
+.formFieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 .workingDays {
@@ -55,10 +62,29 @@
   font-size: 14px;
 }
 
+.settingsFieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settingsLegend {
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .checkboxGroup,
 .sourceList {
   display: grid;
   gap: 10px;
+}
+
+.sourceList {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 24px;
 }
 
 .checkboxRow {
@@ -75,14 +101,30 @@
 }
 
 .feedback {
-  margin: 16px 0 0;
+  margin: 24px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
   color: var(--text-primary);
+  font-weight: 600;
+}
+
+.feedbackError {
+  border-color: #f4c7c3;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.feedbackSuccess {
+  border-color: #b7e1cd;
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 .formActions {
   display: flex;
   justify-content: flex-end;
-  margin-top: 16px;
+  margin-top: 24px;
 }
 
 .settingsCardContent h2,
@@ -115,5 +157,24 @@
 
   .settingsCardContent {
     padding: 18px;
+  }
+
+  .sourceList {
+    grid-template-columns: 1fr;
+  }
+
+  .formActions {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin-inline: -18px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface-page) 92%, transparent);
+    backdrop-filter: blur(8px);
+  }
+
+  .formActions .button {
+    width: 100%;
   }
 }

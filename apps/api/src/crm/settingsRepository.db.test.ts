@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { createTestDb } from "../db.js";
 import * as schema from "../db/schema.js";
 import { runWithDatabaseContext } from "../db/requestContext.js";
-import { createDefaultCrmSettings } from "./settings.js";
+import { createDefaultCrmSettings, CrmSettingsValidationError } from "./settings.js";
 import {
   getOrCreateCrmSettingsInTransaction,
   updateCrmSettingsInTransaction,
@@ -60,6 +60,21 @@ test("CRM settings are tenant-bound, defaulted and audited in one transaction", 
     assert.equal(events.length, 1);
     assert.equal(events[0]?.actorUserId, actorUserId);
     assert.equal((events[0]?.settings as { timezone?: string }).timezone, "UTC");
+
+    await assert.rejects(
+      updateCrmSettingsInTransaction(tx, {
+        tenantId,
+        actorUserId,
+        settings: { ...changedSettings, timezone: "Not/A-Timezone" },
+      }),
+      (error: unknown) => error instanceof CrmSettingsValidationError,
+    );
+
+    const [afterInvalidUpdate] = await tx
+      .select()
+      .from(schema.crmSettings)
+      .where(eq(schema.crmSettings.tenantId, tenantId));
+    assert.equal((afterInvalidUpdate?.settings as { timezone?: string }).timezone, "UTC");
 
     const [otherTenantStored] = await tx
       .select()

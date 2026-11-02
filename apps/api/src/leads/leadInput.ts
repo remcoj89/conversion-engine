@@ -41,14 +41,14 @@ export function parseLeadInput(body: unknown): LeadInputResult {
     values[field] = value;
   }
 
-  if (!EMAIL_PATTERN.test(values.email!)) return { ok: false };
+  if (!EMAIL_PATTERN.test(values.email!.toLowerCase())) return { ok: false };
   if (values.phone !== undefined && !PHONE_PATTERN.test(values.phone)) return { ok: false };
 
   return {
     ok: true,
     lead: {
       name: values.name!,
-      email: values.email!,
+      email: values.email!.toLowerCase(),
       phone: values.phone ?? null,
       message: values.message!,
       source: values.source!,

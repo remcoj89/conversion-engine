@@ -6,42 +6,10 @@ import { buildApp, type AppDependencies } from "./app.js";
 import type { AuthAdapter, Membership, MembershipResolver } from "./auth/types.js";
 import { apiErrorHandler } from "./errors.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
-import type { Lead, NewLead } from "./leads/leadRepository.js";
+import type { Lead, LeadDashboardSummary, LeadRead, LeadReader, NewLead } from "./leads/leadRepository.js";
 import type { LeadCreator } from "./routes/leads.js";
 import type { OnboardingStore } from "./routes/onboarding.js";
 import type { TenantLoader, TenantSummary } from "./tenants/tenantLoader.js";
-
-// Kaarten blijven unavailable; alleen de tenant komt uit de database.
-const todayCards = {
-  actionRequired: [
-    {
-      id: "leads-needing-attention",
-      label: "Leads die aandacht vragen",
-      value: null,
-      status: "unavailable",
-      source: "CRM",
-    },
-    {
-      id: "open-tasks",
-      label: "Open taken",
-      value: null,
-      status: "unavailable",
-      source: "CRM",
-    },
-    {
-      id: "confirmed-appointments",
-      label: "Bevestigde afspraken",
-      value: null,
-      status: "unavailable",
-      source: "Boekingsprovider",
-    },
-  ],
-  directFollowUp: {
-    status: "empty",
-    message:
-      "CRM- en leaddata zijn nog niet beschikbaar. Zodra die bron is gekoppeld, verschijnen hier de aanvragen die opvolging nodig hebben.",
-  },
-};
 
 // Test-only: identity uit een testheader. Bestaat alleen in dit testbestand, nooit in server.ts.
 const TEST_IDENTITY_HEADER = "x-test-identity";
@@ -77,7 +45,87 @@ const tenantsById: Record<string, TenantSummary> = {
   [tenantA]: { id: tenantA, name: "Tenant A Coaching", status: "active" },
   [tenantB]: { id: tenantB, name: "Tenant B Training", status: "active" },
 };
-const todayFor = (tenantId: string) => ({ tenant: tenantsById[tenantId], ...todayCards });
+
+function dashboardLead(id: string, name: string, createdAt: string): LeadRead {
+  const date = new Date(createdAt);
+  return {
+    id,
+    name,
+    email: `${id}@example.test`,
+    phone: null,
+    message: "Ik wil graag kennismaken.",
+    source: "contact-formulier",
+    status: "new",
+    nextAction: null,
+    createdAt: date,
+    updatedAt: date,
+  };
+}
+
+const todaySummaries: Record<string, LeadDashboardSummary> = {
+  [tenantA]: {
+    newLeadCount: 2,
+    newestNewLeads: [
+      dashboardLead("lead-a-newest", "Lead A Nieuwste", "2026-10-30T10:00:00.000Z"),
+      dashboardLead("lead-a-older", "Lead A Ouder", "2026-10-29T10:00:00.000Z"),
+    ],
+  },
+  [tenantB]: {
+    newLeadCount: 1,
+    newestNewLeads: [
+      dashboardLead("lead-b-newest", "Lead B Nieuwste", "2026-10-30T09:00:00.000Z"),
+    ],
+  },
+};
+
+function dashboardLeadResponse(lead: LeadRead) {
+  return {
+    id: lead.id,
+    name: lead.name,
+    message: lead.message,
+    source: lead.source,
+    created_at: lead.createdAt.toISOString(),
+  };
+}
+
+function todayFor(tenantId: string) {
+  const summary = todaySummaries[tenantId]!;
+  return {
+    tenant: tenantsById[tenantId],
+    actionRequired: [
+      {
+        id: "leads-needing-attention",
+        label: "Leads die aandacht vragen",
+        value: summary.newLeadCount,
+        status: "available",
+        source: "CRM",
+      },
+      {
+        id: "open-tasks",
+        label: "Open taken",
+        value: null,
+        status: "unavailable",
+        source: "CRM",
+      },
+      {
+        id: "confirmed-appointments",
+        label: "Bevestigde afspraken",
+        value: null,
+        status: "unavailable",
+        source: "Boekingsprovider",
+      },
+    ],
+    directFollowUp: summary.newestNewLeads.length > 0
+      ? { status: "available", leads: summary.newestNewLeads.map(dashboardLeadResponse) }
+      : { status: "empty", message: "Er zijn geen nieuwe aanvragen om op te volgen." },
+  };
+}
+
+const todayLeadReader: LeadReader = {
+  list: async () => ({ items: [], nextCursor: null }),
+  findDetail: async () => null,
+  getTodaySummary: async (tenantId) => todaySummaries[tenantId] ?? { newLeadCount: 0, newestNewLeads: [] },
+};
 
 // Geeft de loader plus de lijst tenant-ID's waarmee hij is aangeroepen.
 function spyTenantLoader(lookup: TenantLoader = async (tenantId) => tenantsById[tenantId] ?? null) {
@@ -120,6 +168,7 @@ function setup(t: TestContext, dependencies: Partial<AppDependencies> = {}) {
       membershipResolver: testMembershipResolver,
       tenantLoader: spyTenantLoader().tenantLoader,
       leadCreator: spyLeadCreator().leadCreator,
+      leadReader: todayLeadReader,
       onboardingStore: unusedOnboardingStore,
       reviewerAssignmentResolver: async () => [],
       reviewStore: {
@@ -247,6 +296,50 @@ test("GET /v1/dashboard/today: Team Member krijgt dashboard:read", async (t) => 
 
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), todayFor(tenantA));
+});
+
+test("GET /v1/dashboard/today geeft een lege CRM-samenvatting voor een tenant zonder nieuwe leads", async (t) => {
+  const leadReader: LeadReader = {
+    ...todayLeadReader,
+    getTodaySummary: async () => ({ newLeadCount: 0, newestNewLeads: [] }),
+  };
+  const response = await setup(t, { leadReader }).inject({
+    method: "GET",
+    url: "/v1/dashboard/today",
+    headers: { [TEST_IDENTITY_HEADER]: "owner" },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().actionRequired[0].value, 0);
+  assert.equal(response.json().actionRequired[0].status, "available");
+  assert.deepEqual(response.json().directFollowUp, {
+    status: "empty",
+    message: "Er zijn geen nieuwe aanvragen om op te volgen.",
+  });
+});
+
+test("GET /v1/dashboard/today geeft maximaal vijf nieuwste leads voor direct opvolgen", async (t) => {
+  const newestNewLeads = Array.from({ length: 7 }, (_, index) =>
+    dashboardLead(`lead-${index}`, `Lead ${index}`, `2026-10-${String(30 - index).padStart(2, "0")}T10:00:00.000Z`));
+  const calls: string[] = [];
+  const leadReader: LeadReader = {
+    ...todayLeadReader,
+    getTodaySummary: async (tenantId) => {
+      calls.push(tenantId);
+      return { newLeadCount: 7, newestNewLeads };
+    },
+  };
+  const response = await setup(t, { leadReader }).inject({
+    method: "GET",
+    url: "/v1/dashboard/today",
+    headers: { [TEST_IDENTITY_HEADER]: "owner" },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().actionRequired[0].value, 7);
+  assert.equal(response.json().directFollowUp.status, "available");
+  assert.equal(response.json().directFollowUp.leads.length, 5);
+  assert.deepEqual(calls, [tenantA]);
 });
 
 test("tenantisolatie: de loader krijgt alleen de tenant uit de auth-context", async (t) => {

@@ -94,7 +94,7 @@ De beveiligingsgrens van de Fastify API, bijgewerkt naar de huidige code (23 okt
 - Alle andere routes staan achter een auth-hook. De API authenticeert requests via de ZITADEL-adapter: het `Bearer`-access token wordt als JWT gevalideerd (RS256, issuer en audience uit de configuratie, sleutels via OIDC-discovery). Zonder geldige configuratie start de API niet.
 - Een geauthenticeerde identity wordt via de lokale user en actieve membership in een actieve tenant vertaald naar een immutable `RequestContext` met tenant en rol.
 - Bij één actieve membership wordt de tenant automatisch gekozen. Bij meerdere actieve memberships kan de gebruiker de tenant kiezen via `x-tenant-id`; deze waarde wordt server-side gecontroleerd tegen actieve memberships. Tenantwaarden uit body en query worden niet gebruikt.
-- De rolcontrole gebruikt een deny-by-default permission map met `dashboard:read` en `leads:create`, beide voor Owner en Team Member, plus `onboarding:manage` voor Owner.
+- De rolcontrole gebruikt een deny-by-default permission map met tenant-CRM-rechten. Lifecyclemutaties gebruiken `crm:update`; Team Members hebben daarvoor een expliciete grant nodig. Legacy lead-routes blijven `leads:create`/`leads:read` gebruiken; `onboarding:manage` blijft Owner-only.
 - `GET /v1/dashboard/today` toont alleen de tenant uit de auth-context.
 - `POST /v1/leads` is alleen beschikbaar voor geauthenticeerde gebruikers met een actieve membership en `leads:create`. De lead wordt opgeslagen bij de tenant uit de auth-context; tenant-ID, status, lead-ID, timestamps en onbekende velden in de requestbody worden geweigerd en een nieuwe lead krijgt altijd status `new`.
 - De HTTP-laag is onafhankelijk van Drizzle door dependency injection van de membership resolver, tenant-loader en lead-repository.
@@ -105,7 +105,7 @@ MFA/AAL-enforcement is lokaal server-side geïmplementeerd voor alle beschermde 
 
 Voor onboarding zijn echte uploads/private opslag, prefill en productiehandoff nog niet aanwezig; draftopslag, officieel indienen, audit-events en de eerste reviewerworkflow zijn er wel. De huidige draftopslag is lokaal gebouwd en getest. De handmatige smoketest met een echte ZITADEL-sessie is geslaagd: login, conceptopslag, refresh en opnieuw inloggen behouden de ingevulde antwoorden.
 
-Websites kunnen server-side worden geregistreerd met een opaque publieke key; een resolver koppelt een actieve key aan precies één actieve tenant. Voor leads staan nog open: de publieke formulier-endpoint, anti-spam, rate limiting, outbox, externe verwerking en idempotency/duplicate prevention.
+Websites kunnen server-side worden geregistreerd met een opaque publieke key; een resolver koppelt een actieve key aan precies één actieve tenant. De publieke lead-intake, rate limiting, outbox en idempotency zijn gebouwd maar wachten op lokale migratie- en role-bootstrap-gates. Externe outbox-verwerking en verdere abuse-hardening blijven open.
 
 De BFF geeft de relevante API-statussen door: `401` voor authenticatie, `403` voor toegang, `400` voor tenantkeuze en `502`/`503` voor API- of netwerkproblemen. Een `Authorization`-header uit de browser wordt niet doorgestuurd; de BFF gebruikt alleen de server-side sessie (zie [ZITADEL-login, sessies en token refresh](#zitadel-login-sessies-en-token-refresh--22-oktober-2026)).
 
@@ -228,12 +228,34 @@ De admin-interface verzendt nog geen e-mail: de link wordt één keer aan de Pla
 De klantomgeving gebruikt voor leads geen demo-data meer. De API biedt `GET /v1/leads` voor een tenantgebonden lijst en `GET /v1/leads/:leadId` voor een detailweergave. De routes vereisen `leads:read`, valideren zoek-, status-, limiet- en cursorparameters server-side en geven bij een onbekende of niet-toegankelijke lead dezelfde generieke `404 not_found` terug.
 
 - Owners lezen alle leads binnen de gekozen tenant.
-- Team Members zien alleen leads waarvoor een actieve `lead_assignments`-rij bestaat. Een nieuwe lead die via de geauthenticeerde productieflow wordt aangemaakt, krijgt in dezelfde transactie een assignment voor de actor.
+- Owners en Team Members lezen alle actieve leads binnen de gekozen tenant. `lead_assignments` beschrijft verantwoordelijkheid en meldingen, niet de zichtbaarheid; een nieuwe geauthenticeerde lead krijgt in dezelfde transactie een assignment voor de actor.
 - De assignmenttabel gebruikt samengestelde tenantveilige foreign keys naar `leads` en `memberships`; ingetrokken assignments blijven traceerbaar.
 - De Next.js BFF forwardt uitsluitend de whitelisted leadfilters en gebruikt alleen de HttpOnly-sessie. De klantpagina’s hebben geen fallback naar fictieve data en tonen loading-, empty-, unauthorized-, forbidden-, not-found- en unavailable-states.
 - De lead-read slice is onafhankelijk gecontroleerd met API-lint, typecheck, build en 235 tests; dashboard-lint, typecheck, build en 236 tests; plus `git diff --check` en desktop-/mobiele screenshotcontrole.
 
 Migraties `0019` t/m `0021` en de RLS-migraties `0022` t/m `0025` zijn lokaal toegepast op zowel de ontwikkel- als testdatabase. De database-integratiesuites zijn daarna sequentieel uitgevoerd; parallelle uitvoering blijft ongeschikt omdat suites dezelfde testdatabase gebruiken.
+
+## Lead lifecycle/statusmutaties — 2 november 2026
+
+De klantomgeving kan een lead via `PATCH /v1/leads/:leadId/status` gecontroleerd door de CRM-pipeline bewegen. De API gebruikt uitsluitend de geselecteerde tenant uit de auth-context, vereist `crm:update` en schrijft iedere geldige overgang transactioneel vast in een immutable `status_changed`-audit-event.
+
+- De toegestane voorwaartse route is `new` → `qualified` → `appointment_scheduled` → `proposal` → `won`/`lost`.
+- `won` en `lost` zijn in deze slice terminaal. Heropenen en een vroegtijdige `lost`-keuze blijven productbeslissingen.
+- `next_action` is voorlopig nullable en read-only; taak- en follow-up-CRUD volgt in een latere slice.
+- `/pipeline` toont dezelfde live tenantgebonden leads als een read-only Kanban over de zes lifecycle-statussen, met bestaande leadfilters, detaillinks en expliciete loading-, lege-, auth- en unavailable-states. Drag-and-drop, pipelineconfiguratie en taak/follow-up-CRUD vallen nog buiten scope.
+- De backend-foundation voor deals is toegevoegd: tenantgebonden deals horen bij één bestaand contact, gebruiken dezelfde zes lifecycle-fasen, ondersteunen EUR-bedragen, optionele actieve owner, verwachte sluitdatum, optionele verliesreden en soft-archiving. `POST/GET/PATCH /v1/deals` en `POST /v1/deals/:dealId/archive` gebruiken het bestaande `crm:*`-permissioncontract. Won/lost zijn alleen bereikbaar via de bestaande voorwaartse stage-overgangen; een deal start standaard in `new`. Iedere stagewijziging schrijft een immutable audit-event.
+- De klantomgeving toont op `/pipeline` naast de leads een afzonderlijke deal-Kanban. De dashboard-BFF gebruikt uitsluitend de HttpOnly-sessie, forwardt alleen de expliciete `include_archived`-flag, dwingt same-origin JSON-mutaties af en geeft na strikte parsing alleen veilige velden door. Nieuwe deals gebruiken een live selectie van actieve contactpersonen; `/pipeline/[id]` ondersteunt server-confirmed bewerken en soft-archiveren. De UI biedt geen ownerkeuze zonder functionele live teamdata, kan `won`/`lost` niet heropenen en toont validatie-, conflict- en unavailable-states. Drag-and-drop, pipelineconfiguratie en taken zijn nog niet beschikbaar.
+- Migraties `0042_lead_lifecycle_status_audit.sql` en `0043_crm_deals_foundation.sql` zijn gegenereerd maar nog niet lokaal uitgevoerd.
+
+## CRM deals backend foundation — 2 november 2026
+
+De deal-kern is bewust klein gehouden voor de latere frontend: een deal hoort bij precies één tenant en één bestaand contact. `owner_user_id` is nullable, maar bij toewijzing moet de gebruiker een actieve membership in dezelfde tenant hebben. De database bewaakt tenantveilige composite foreign keys, niet-negatieve EUR-bedragen, `active`/`archived`-metadata en dat `loss_reason` alleen bij stage `lost` aanwezig kan zijn.
+
+- De stagecontracten zijn dezelfde als bij leads: `new`, `qualified`, `appointment_scheduled`, `proposal`, `won`, `lost`.
+- Deals kunnen alleen voorwaarts door de pipeline; `won` en `lost` zijn terminaal. Directe creatie als `won` of `lost` is niet toegestaan.
+- De API geeft bij deals geen `tenant_id` terug. Cross-tenant contact- en ownercombinaties, ontbrekende CRM-rechten, platform/reviewer-contexten en archived updates worden geweigerd.
+- `0043_crm_deals_foundation.sql` bevat de tabellen, owner-validatietrigger, immutable stage-audit, `ENABLE/FORCE RLS` en policies. De runtime allowlist geeft `ce_api_runtime` alleen `SELECT/INSERT/UPDATE` op deals en `SELECT/INSERT` op de audit-tabel.
+- De lokale development- en testmigratie, role-bootstrap en `npm --workspace api run db:test` blijven handmatige gates; productie/VPS is niet geraakt.
 
 ## Westend-review: wijzigingen aanvragen — 27 oktober 2026
 

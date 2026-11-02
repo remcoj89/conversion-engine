@@ -26,6 +26,9 @@ const RLS_TABLES = [
   "contacts",
   "leads",
   "lead_assignments",
+  "lead_lifecycle_audit_events",
+  "deals",
+  "deal_lifecycle_audit_events",
   "onboarding_projects",
   "onboarding_versions",
   "onboarding_reviewer_assignments",
@@ -147,6 +150,120 @@ test("public scope is limited to the active opaque website and does not expose b
         assert.deepEqual((await client.query("select id from public_lead_outbox")).rows, []);
         assert.deepEqual((await client.query("select website_id from public_lead_rate_limits")).rows, []);
 
+        await client.query("savepoint public_website_delete");
+        try {
+          await assert.rejects(
+            client.query("delete from websites where id = $1", [websiteA]),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint public_website_delete");
+        }
+
+        await client.query("savepoint public_tenant_delete");
+        try {
+          const deleted = await client.query("delete from tenants where id = $1", [tenantA]);
+          assert.equal(deleted.rowCount, 0);
+        } finally {
+          await client.query("rollback to savepoint public_tenant_delete");
+        }
+
+        await client.query("savepoint public_rate_limit_mutation");
+        try {
+          await client.query(
+            `insert into public_lead_rate_limits (website_id, bucket_start, request_count)
+             values ($1, '2026-11-02T12:00:00Z', 1)`,
+            [websiteA],
+          );
+          await client.query(
+            `update public_lead_rate_limits
+                set request_count = request_count + 1
+              where website_id = $1
+                and bucket_start = '2026-11-02T12:00:00Z'`,
+            [websiteA],
+          );
+          await client.query("savepoint public_rate_limit_reset");
+          try {
+            await assert.rejects(
+              client.query(
+                `update public_lead_rate_limits
+                    set request_count = 0
+                  where website_id = $1
+                    and bucket_start = '2026-11-02T12:00:00Z'`,
+                [websiteA],
+              ),
+              (error: { code?: string }) => error.code === "P0001",
+            );
+          } finally {
+            await client.query("rollback to savepoint public_rate_limit_reset");
+          }
+          await assert.rejects(
+            client.query("delete from public_lead_rate_limits where website_id = $1", [websiteA]),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint public_rate_limit_mutation");
+        }
+
+        await client.query("savepoint public_cross_website_internal_records");
+        try {
+          await client.query("savepoint public_cross_website_idempotency");
+          try {
+            await assert.rejects(
+              client.query(
+                `insert into public_lead_idempotency_keys (tenant_id, website_id, idempotency_key, request_hash, lead_id)
+                 values ($1, $2, 'wrong-website-key', repeat('c', 64), $3)`,
+                [tenantA, websiteA, leadB],
+              ),
+              (error: { code?: string }) => error.code === "23503",
+            );
+          } finally {
+            await client.query("rollback to savepoint public_cross_website_idempotency");
+          }
+
+          await client.query("savepoint public_cross_website_outbox");
+          try {
+            await assert.rejects(
+              client.query(
+                `insert into public_lead_outbox
+                  (tenant_id, website_id, lead_id, event_type, status, payload)
+                 values ($1, $2, $3, 'lead.created', 'pending', $4::jsonb)`,
+                [
+                  tenantA,
+                  websiteA,
+                  leadB,
+                  JSON.stringify({ event: "lead.created", leadId: leadB, websiteId: websiteA, source: "website_contact" }),
+                ],
+              ),
+              (error: { code?: string }) => error.code === "23503",
+            );
+          } finally {
+            await client.query("rollback to savepoint public_cross_website_outbox");
+          }
+        } finally {
+          await client.query("rollback to savepoint public_cross_website_internal_records");
+        }
+
+        await client.query("savepoint public_outbox_payload");
+        try {
+          await assert.rejects(
+            client.query(
+              `insert into public_lead_outbox
+                (tenant_id, website_id, lead_id, event_type, status, payload)
+               values ($1, $2, $3, 'lead.created', 'pending', $4::jsonb)`,
+              [
+                tenantA,
+                websiteA,
+                leadA,
+                JSON.stringify({ event: "lead.created", leadId: leadA, websiteId: websiteA, source: "manual" }),
+              ],
+            ),
+            (error: { code?: string }) => error.code === "42501",
+          );
+        } finally {
+          await client.query("rollback to savepoint public_outbox_payload");
+        }
+
         await client.query("savepoint public_cross_tenant_contact");
         try {
           await assert.rejects(
@@ -178,9 +295,9 @@ test("public scope is limited to the active opaque website and does not expose b
         try {
           await assert.rejects(
             client.query(
-              `insert into leads (tenant_id, website_id, name, email, message, source, status)
-               values ($1, $2, 'Cross tenant', 'cross@example.test', 'x', 'website_contact', 'new')`,
-              [tenantB, websiteB],
+              `insert into leads (tenant_id, website_id, contact_id, name, email, message, source, status)
+               values ($1, $2, $3, 'Cross tenant', 'cross@example.test', 'x', 'website_contact', 'new')`,
+              [tenantB, websiteB, contactB],
             ),
             (error: { code?: string }) => error.code === "42501",
           );
@@ -246,6 +363,9 @@ test("public scope is limited to the active opaque website and does not expose b
       },
     );
 
+    // The public context is transaction-local. Reset it before switching back to
+    // test-fixture mode; otherwise the update would be evaluated as a public write.
+    await client.query("set local app.rls_scope = ''");
     await client.query("set local app.rls_test_mode = 'on'");
     await client.query("update tenants set status = 'disabled' where id = $1", [tenantA]);
     await client.query("set local app.rls_test_mode = 'off'");
@@ -262,9 +382,9 @@ test("public scope is limited to the active opaque website and does not expose b
         assert.deepEqual((await client.query("select id from leads")).rows, []);
         await assert.rejects(
           client.query(
-            `insert into leads (tenant_id, website_id, name, email, message, source, status)
-             values ($1, $2, 'Disabled tenant', 'disabled@example.test', 'x', 'website_contact', 'new')`,
-            [tenantA, websiteA],
+            `insert into leads (tenant_id, website_id, contact_id, name, email, message, source, status)
+             values ($1, $2, $3, 'Disabled tenant', 'disabled@example.test', 'x', 'website_contact', 'new')`,
+            [tenantA, websiteA, contactA],
           ),
           (error: { code?: string }) => error.code === "42501",
         );
@@ -435,6 +555,8 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
   const invitationUser = randomUUID();
   const leadA = randomUUID();
   const leadB = randomUUID();
+  const contactA = randomUUID();
+  const contactB = randomUUID();
   const invitationTokenHash = "a".repeat(64);
 
   try {
@@ -469,10 +591,16 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
       [invitationId, tenantA, invitationTokenHash, userA],
     );
     await client.query(
-      `insert into leads (id, tenant_id, name, email, message, source, status) values
-        ($1, $3, 'Lead A', 'a@example.test', 'A', 'test', 'new'),
-        ($2, $4, 'Lead B', 'b@example.test', 'B', 'test', 'new')`,
-      [leadA, leadB, tenantA, tenantB],
+      `insert into contacts (id, tenant_id, full_name, email, status) values
+        ($1, $3, 'Contact A', 'rls-a@example.test', 'active'),
+        ($2, $4, 'Contact B', 'rls-b@example.test', 'active')`,
+      [contactA, contactB, tenantA, tenantB],
+    );
+    await client.query(
+      `insert into leads (id, tenant_id, contact_id, name, email, message, source, status) values
+        ($1, $3, $5, 'Lead A', 'a@example.test', 'A', 'test', 'new'),
+        ($2, $4, $6, 'Lead B', 'b@example.test', 'B', 'test', 'new')`,
+      [leadA, leadB, tenantA, tenantB, contactA, contactB],
     );
     await client.query(
       `insert into lead_assignments (tenant_id, lead_id, user_id, assigned_by, status)
@@ -514,9 +642,9 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
         try {
           await assert.rejects(
             client.query(
-              `insert into leads (tenant_id, name, email, message, source, status)
-               values ($1, 'Cross tenant', 'cross@example.test', 'x', 'test', 'new')`,
-              [tenantB],
+              `insert into leads (tenant_id, contact_id, name, email, message, source, status)
+               values ($1, $2, 'Cross tenant', 'cross@example.test', 'x', 'test', 'new')`,
+              [tenantB, contactB],
             ),
             (error: { code?: string }) => error.code === "42501",
           );
@@ -597,9 +725,9 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
         try {
           await assert.rejects(
             client.query(
-              `insert into leads (tenant_id, name, email, message, source, status)
-               values ($1, 'Platform lead', 'platform@example.test', 'x', 'test', 'new')`,
-              [tenantA],
+              `insert into leads (tenant_id, contact_id, name, email, message, source, status)
+               values ($1, $2, 'Platform lead', 'platform@example.test', 'x', 'test', 'new')`,
+              [tenantA, contactA],
             ),
             (error: { code?: string }) => error.code === "42501",
           );
@@ -636,9 +764,9 @@ test("RLS isolates customers, rejects missing context and preserves platform sco
         try {
           await assert.rejects(
             client.query(
-              `insert into leads (tenant_id, name, email, message, source, status)
-               values ($1, 'Reviewer lead', 'reviewer@example.test', 'x', 'test', 'new')`,
-              [tenantA],
+              `insert into leads (tenant_id, contact_id, name, email, message, source, status)
+               values ($1, $2, 'Reviewer lead', 'reviewer@example.test', 'x', 'test', 'new')`,
+              [tenantA, contactA],
             ),
             (error: { code?: string }) => error.code === "42501",
           );

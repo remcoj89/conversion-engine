@@ -1,6 +1,7 @@
 import { and, desc, eq, gt, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "../db/schema.js";
+import { runWithDatabaseContext } from "../db/requestContext.js";
 
 export const LOCAL_TENANT_NAME = "Local development tenant";
 export const CONFIRM_FLAG = "--confirm-local";
@@ -8,7 +9,7 @@ export const CONFIRM_FLAG = "--confirm-local";
 // Fixed messages only; never subjects, tokens or session IDs.
 export class ProvisioningError extends Error {
   constructor(
-    readonly code: "production_refused" | "confirmation_required" | "no_active_session",
+    readonly code: "production_refused" | "confirmation_required" | "no_active_session" | "tenant_unavailable",
     message: string,
   ) {
     super(message);
@@ -69,7 +70,8 @@ export function drizzleTransactionRunner(db: Db): RunInTransaction {
   return (fn) => db.transaction((tx) => fn(drizzleProvisioningTx(tx)));
 }
 
-function drizzleProvisioningTx(tx: DbTx): ProvisioningTx {
+// Exported for database tests that exercise the real queries as ce_maintenance.
+export function drizzleProvisioningTx(tx: DbTx): ProvisioningTx {
   return {
     async findLatestActiveSessionSubject() {
       const [row] = await tx
@@ -87,22 +89,26 @@ function drizzleProvisioningTx(tx: DbTx): ProvisioningTx {
     },
 
     async ensureUser(subject) {
-      const inserted = await tx
-        .insert(schema.users)
-        .values({ authProviderUserId: subject })
-        .onConflictDoNothing({ target: schema.users.authProviderUserId })
-        .returning({ id: schema.users.id });
+      // User creation uses the existing identity-only RLS rule. Tenant and
+      // membership changes remain under the outer maintenance context.
+      return runWithDatabaseContext({ scope: "identity_only", subject }, async () => {
+        const inserted = await tx
+          .insert(schema.users)
+          .values({ authProviderUserId: subject })
+          .onConflictDoNothing({ target: schema.users.authProviderUserId })
+          .returning({ id: schema.users.id });
 
-      // Row lock: a concurrent run for the same user waits here, then sees the committed membership.
-      const [user] = await tx
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(eq(schema.users.authProviderUserId, subject))
-        .for("update");
-      if (!user) {
-        throw new Error("User row missing after insert");
-      }
-      return { userId: user.id, created: inserted.length === 1 };
+        // Row lock: a concurrent run for the same user waits here, then sees the committed membership.
+        const [user] = await tx
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(eq(schema.users.authProviderUserId, subject))
+          .for("update");
+        if (!user) {
+          throw new Error("User row missing after insert");
+        }
+        return { userId: user.id, created: inserted.length === 1 };
+      });
     },
 
     // Same definition as the API's membership resolver: active membership in an active tenant.
@@ -125,7 +131,11 @@ function drizzleProvisioningTx(tx: DbTx): ProvisioningTx {
     async createTenant(name) {
       const [tenant] = await tx.insert(schema.tenants).values({ name }).returning({ id: schema.tenants.id });
       if (!tenant) {
-        throw new Error("Tenant insert returned no row");
+        // RETURNING is filtered by the tenants SELECT policy; no row means the policy hid it.
+        throw new ProvisioningError(
+          "tenant_unavailable",
+          "De lokale tenant kon niet worden aangemaakt of is niet zichtbaar voor ce_maintenance. Pas de migraties toe en voer de role-bootstrap opnieuw uit.",
+        );
       }
       return tenant.id;
     },

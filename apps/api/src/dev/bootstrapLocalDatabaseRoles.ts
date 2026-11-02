@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   databaseNameFromUrl,
   LOCAL_DATABASE_DEFAULT,
+  POSTGRES_ROLE_NAMES,
   readRequiredLocalRolePasswords,
   type LocalRolePasswords,
 } from "./postgresRoleContract.js";
@@ -31,6 +32,9 @@ export const RUNTIME_TABLE_ALLOWLISTS = {
     "contacts",
     "leads",
     "lead_assignments",
+    "lead_lifecycle_audit_events",
+    "deals",
+    "deal_lifecycle_audit_events",
     "onboarding_projects",
     "onboarding_versions",
     "onboarding_reviewer_assignments",
@@ -44,27 +48,116 @@ export const RUNTIME_TABLE_ALLOWLISTS = {
   maintenance: [],
 } as const;
 
+type TablePrivilege = "SELECT" | "INSERT" | "UPDATE" | "DELETE";
+
+/**
+ * Local maintenance CLIs each get an explicit grantset. It is intentionally not part
+ * of the production runtime privilege contract and is only applied by this local bootstrap.
+ * UPDATE is listed where a CLI takes a row lock (SELECT ... FOR UPDATE), because PostgreSQL
+ * requires UPDATE privilege for row locks.
+ */
+export const LOCAL_MAINTENANCE_CLI_TABLE_GRANTS = {
+  "provision:local": {
+    bff_sessions: ["SELECT"],
+    users: ["SELECT", "INSERT", "UPDATE"],
+    tenants: ["SELECT", "INSERT"],
+    memberships: ["SELECT", "INSERT"],
+  },
+  "provision:platform-admin": {
+    bff_sessions: ["SELECT"],
+    users: ["SELECT", "UPDATE"],
+    platform_admin_assignments: ["SELECT", "INSERT", "UPDATE"],
+  },
+  "provision:reviewer": {
+    tenants: ["SELECT"],
+    users: ["SELECT"],
+    onboarding_reviewer_assignments: ["SELECT", "INSERT", "UPDATE"],
+  },
+  "revoke:reviewer": {
+    tenants: ["SELECT"],
+    users: ["SELECT"],
+    onboarding_reviewer_assignments: ["SELECT", "UPDATE"],
+  },
+} as const satisfies Readonly<Record<string, Readonly<Record<string, readonly TablePrivilege[]>>>>;
+
+/**
+ * Policy expressions are evaluated with the invoking role's privileges, so ce_maintenance
+ * needs EXECUTE on exactly the helpers that the policies of its granted tables call
+ * directly. Helpers called inside a SECURITY DEFINER helper run as ce_owner and need no grant.
+ */
+export const LOCAL_MAINTENANCE_FUNCTION_ALLOWLIST = [
+  "ce_rls_test_bypass()",
+  "ce_rls_scope()",
+  "ce_rls_subject()",
+  "ce_rls_current_user_id()",
+  "ce_rls_platform_access()",
+  "ce_rls_tenant_allowed(uuid)",
+  "ce_rls_public_website_tenant_allowed(uuid)",
+] as const;
+
+// Union of the per-CLI grantsets, in a stable table order.
+export function localMaintenanceTablePrivileges(): Readonly<Record<string, readonly TablePrivilege[]>> {
+  const order: readonly TablePrivilege[] = ["SELECT", "INSERT", "UPDATE"];
+  const union = new Map<string, Set<TablePrivilege>>();
+  for (const grants of Object.values(LOCAL_MAINTENANCE_CLI_TABLE_GRANTS)) {
+    for (const [tableName, privileges] of Object.entries(grants)) {
+      const tablePrivileges = union.get(tableName) ?? new Set<TablePrivilege>();
+      for (const privilege of privileges as readonly TablePrivilege[]) tablePrivileges.add(privilege);
+      union.set(tableName, tablePrivileges);
+    }
+  }
+  return Object.fromEntries(
+    [...union.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([tableName, privileges]) => [tableName, order.filter((privilege) => privileges.has(privilege))]),
+  );
+}
+
 export const RUNTIME_TABLE_PRIVILEGE_ALLOWLISTS = {
   api: {
+    tenants: ["SELECT", "INSERT", "UPDATE"],
+    users: ["SELECT", "INSERT", "UPDATE"],
+    memberships: ["SELECT", "INSERT", "UPDATE"],
+    team_member_crm_permissions: ["SELECT", "INSERT", "UPDATE"],
+    websites: ["SELECT", "INSERT", "UPDATE"],
     crm_settings: ["SELECT", "INSERT", "UPDATE"],
     crm_settings_audit_events: ["SELECT", "INSERT"],
+    tenant_owner_invitations: ["SELECT", "INSERT", "UPDATE"],
+    organizations: ["SELECT", "INSERT", "UPDATE"],
+    contacts: ["SELECT", "INSERT", "UPDATE"],
+    leads: ["SELECT", "INSERT", "UPDATE"],
+    lead_assignments: ["SELECT", "INSERT", "UPDATE"],
+    lead_lifecycle_audit_events: ["SELECT", "INSERT"],
+    deals: ["SELECT", "INSERT", "UPDATE"],
+    deal_lifecycle_audit_events: ["SELECT", "INSERT"],
+    onboarding_projects: ["SELECT", "INSERT", "UPDATE"],
+    onboarding_versions: ["SELECT", "INSERT"],
+    onboarding_reviewer_assignments: ["SELECT"],
+    platform_admin_assignments: ["SELECT"],
+    onboarding_audit_events: ["SELECT", "INSERT"],
+    onboarding_review_requests: ["SELECT", "INSERT", "UPDATE"],
+    onboarding_review_actions: ["SELECT", "INSERT"],
+    onboarding_review_access_events: ["SELECT", "INSERT"],
     public_lead_idempotency_keys: ["SELECT", "INSERT"],
     public_lead_rate_limits: ["SELECT", "INSERT", "UPDATE"],
     public_lead_outbox: ["INSERT"],
   },
-  bff: {},
+  bff: {
+    bff_sessions: ["SELECT", "INSERT", "UPDATE", "DELETE"],
+  },
   maintenance: {},
 } as const satisfies Readonly<Record<keyof typeof RUNTIME_TABLE_ALLOWLISTS, Readonly<Record<string, readonly string[]>>>>;
-
-const ALL_RUNTIME_TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE"] as const;
 
 export function runtimeTablePrivileges(
   role: keyof typeof RUNTIME_TABLE_PRIVILEGE_ALLOWLISTS,
   tableName: string,
 ): readonly string[] {
   const rolePrivileges = RUNTIME_TABLE_PRIVILEGE_ALLOWLISTS[role] as Readonly<Record<string, readonly string[]>>;
-  return rolePrivileges[tableName]
-    ?? ALL_RUNTIME_TABLE_PRIVILEGES;
+  const privileges = rolePrivileges[tableName];
+  if (!privileges) {
+    throw new Error(`Missing runtime table privilege allowlist for ${role}.${tableName}`);
+  }
+  return privileges;
 }
 
 export const RUNTIME_SEQUENCE_ALLOWLISTS = {
@@ -93,6 +186,7 @@ export const RUNTIME_FUNCTION_ALLOWLISTS = {
     "ce_rls_public_website_id_allowed(uuid)",
     "ce_rls_public_tenant_active(uuid)",
     "ce_rls_public_lead_allowed(uuid, uuid)",
+    "ce_rls_public_website_tenant_allowed(uuid)",
   ],
   bff: [],
   maintenance: [],
@@ -143,6 +237,18 @@ export class LocalRoleBootstrapError extends Error {
   }
 }
 
+export const ADMIN_DATABASE_URL_ENV = "DATABASE_ADMIN_URL";
+const RESTRICTED_ROLE_NAMES: ReadonlySet<string> = new Set(Object.values(POSTGRES_ROLE_NAMES));
+
+function databaseUserFromUrl(databaseUrl: string): string | undefined {
+  try {
+    const username = new URL(databaseUrl).username;
+    return username ? decodeURIComponent(username) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function requiredEnvironmentValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
   const value = env[name]?.trim();
   return value || undefined;
@@ -162,20 +268,29 @@ export function assertLocalRoleBootstrapInvocation(
     throw new LocalRoleBootstrapError("local_environment_required", "NODE_ENV must be development or test");
   }
 
-  const databaseUrl = requiredEnvironmentValue(env, "DATABASE_URL");
+  // A dedicated admin connection. DATABASE_URL is the API runtime connection and is never
+  // used here, so the bootstrap cannot silently run as (or depend on) an application role.
+  const databaseUrl = requiredEnvironmentValue(env, ADMIN_DATABASE_URL_ENV);
   if (!databaseUrl) {
-    throw new LocalRoleBootstrapError("database_url_required", "DATABASE_URL is required");
+    throw new LocalRoleBootstrapError("database_url_required", `${ADMIN_DATABASE_URL_ENV} is required`);
   }
   const databaseName = databaseNameFromUrl(databaseUrl);
   if (!databaseName) {
-    throw new LocalRoleBootstrapError("database_url_invalid", "DATABASE_URL must be a PostgreSQL URL");
+    throw new LocalRoleBootstrapError("database_url_invalid", `${ADMIN_DATABASE_URL_ENV} must be a PostgreSQL URL`);
+  }
+  const adminRole = databaseUserFromUrl(databaseUrl);
+  if (adminRole && RESTRICTED_ROLE_NAMES.has(adminRole)) {
+    throw new LocalRoleBootstrapError(
+      "database_guard_failed",
+      `${ADMIN_DATABASE_URL_ENV} must use a local admin role, not an application role`,
+    );
   }
 
   const expectedDatabase = requiredEnvironmentValue(env, "EXPECTED_LOCAL_DATABASE") ?? LOCAL_DATABASE_DEFAULT;
   if (databaseName !== expectedDatabase) {
     throw new LocalRoleBootstrapError(
       "database_guard_failed",
-      `DATABASE_URL must target the expected local database ${expectedDatabase}`,
+      `${ADMIN_DATABASE_URL_ENV} must target the expected local database ${expectedDatabase}`,
     );
   }
 
@@ -302,8 +417,16 @@ function buildExplicitTableGrants(): string {
   for (const tableName of RUNTIME_TABLE_ALLOWLISTS.bff) {
     appendGrant(tableName, "ce_bff_runtime");
   }
-  for (const tableName of RUNTIME_TABLE_ALLOWLISTS.maintenance) {
-    appendGrant(tableName, "ce_maintenance");
+  for (const [tableName, privileges] of Object.entries(localMaintenanceTablePrivileges())) {
+    const qualifiedName = `public.${quoteIdentifier(tableName)}`;
+    grants.push(`
+    DO $local_maintenance_table_${tableName}$
+    BEGIN
+      IF to_regclass(${sqlStringLiteral(qualifiedName)}) IS NOT NULL THEN
+        EXECUTE ${sqlStringLiteral(`GRANT ${privileges.join(", ")} ON TABLE ${qualifiedName} TO ce_maintenance`)};
+      END IF;
+    END
+    $local_maintenance_table_${tableName}$;`);
   }
   return grants.join("\n    ");
 }
@@ -362,6 +485,7 @@ function buildExplicitFunctionGrants(): string {
   appendGrants(RUNTIME_FUNCTION_ALLOWLISTS.api, "ce_api_runtime");
   appendGrants(RUNTIME_FUNCTION_ALLOWLISTS.bff, "ce_bff_runtime");
   appendGrants(RUNTIME_FUNCTION_ALLOWLISTS.maintenance, "ce_maintenance");
+  appendGrants(LOCAL_MAINTENANCE_FUNCTION_ALLOWLIST, "ce_maintenance");
   return grants.join("\n    ");
 }
 
@@ -373,11 +497,19 @@ function buildTestFixtureCleanupGrants(): string {
     BEGIN
       IF current_database() = 'conversion_engine_test' THEN
         EXECUTE 'GRANT USAGE ON SCHEMA public TO ce_maintenance';
+        -- These test-only DML grants let the API-role fixtures reach their database
+        -- constraints and immutable triggers. The production allowlist stays narrow.
         EXECUTE 'GRANT SELECT ON TABLE public.public_lead_outbox TO ce_api_runtime';
+        EXECUTE 'GRANT INSERT ON TABLE public.platform_admin_assignments TO ce_api_runtime';
+        EXECUTE 'GRANT INSERT, UPDATE ON TABLE public.onboarding_reviewer_assignments TO ce_api_runtime';
+        EXECUTE 'GRANT UPDATE ON TABLE public.onboarding_versions TO ce_api_runtime';
+        EXECUTE 'GRANT UPDATE, DELETE ON TABLE public.onboarding_audit_events, public.onboarding_review_access_events TO ce_api_runtime';
+        EXECUTE 'GRANT DELETE ON TABLE public.tenants, public.users, public.memberships, public.organizations, public.team_member_crm_permissions TO ce_api_runtime';
+        EXECUTE 'GRANT DELETE ON TABLE public.tenants, public.users, public.memberships, public.websites, public.platform_admin_assignments TO ce_maintenance';
         EXECUTE 'GRANT EXECUTE ON FUNCTION public.ce_rls_test_bypass() TO ce_maintenance';
         EXECUTE 'GRANT EXECUTE ON FUNCTION public.ce_rls_scope(), public.ce_rls_tenant_allowed(uuid), public.ce_rls_public_tenant_active(uuid), public.ce_rls_website_public_key(), public.ce_rls_crm_scope_allowed(uuid), public.ce_rls_public_website_allowed(uuid), public.ce_rls_public_contact_email(), public.ce_rls_customer_can_read_lead(uuid, uuid), public.ce_rls_public_lead_allowed(uuid, uuid), public.ce_rls_public_website_id_allowed(uuid) TO ce_maintenance';
-        EXECUTE 'GRANT SELECT ON TABLE public.tenants, public.websites, public.contacts, public.leads, public.public_lead_idempotency_keys, public.public_lead_rate_limits, public.public_lead_outbox TO ce_maintenance';
-        EXECUTE 'GRANT DELETE ON TABLE public.tenants, public.websites, public.contacts, public.leads, public.public_lead_idempotency_keys, public.public_lead_rate_limits, public.public_lead_outbox TO ce_maintenance';
+        EXECUTE 'GRANT SELECT ON TABLE public.tenants, public.websites, public.contacts, public.leads, public.public_lead_idempotency_keys, public.public_lead_rate_limits, public.public_lead_outbox, public.deals, public.deal_lifecycle_audit_events TO ce_maintenance';
+        EXECUTE 'GRANT DELETE ON TABLE public.tenants, public.websites, public.contacts, public.leads, public.public_lead_idempotency_keys, public.public_lead_rate_limits, public.public_lead_outbox, public.deals, public.deal_lifecycle_audit_events TO ce_maintenance';
       END IF;
     END
     $test_fixture_cleanup_grants$;
@@ -412,7 +544,7 @@ export function buildDatabaseAndDrizzleOwnershipSql(databaseName: string): strin
     GRANT USAGE, CREATE ON SCHEMA public TO ce_owner;
     REVOKE ALL ON SCHEMA public FROM ce_migrator;
     REVOKE ALL ON SCHEMA public FROM ce_api_runtime, ce_bff_runtime, ce_maintenance, PUBLIC;
-    GRANT USAGE ON SCHEMA public TO ce_api_runtime, ce_bff_runtime;
+    GRANT USAGE ON SCHEMA public TO ce_api_runtime, ce_bff_runtime, ce_maintenance;
 
     ALTER DEFAULT PRIVILEGES FOR ROLE ce_owner IN SCHEMA public REVOKE ALL ON TABLES FROM PUBLIC, ce_api_runtime, ce_bff_runtime, ce_maintenance;
     ALTER DEFAULT PRIVILEGES FOR ROLE ce_owner IN SCHEMA public REVOKE ALL ON SEQUENCES FROM PUBLIC, ce_api_runtime, ce_bff_runtime, ce_maintenance;

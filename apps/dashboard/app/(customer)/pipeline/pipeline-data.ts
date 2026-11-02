@@ -1,84 +1,108 @@
-export type PipelineStage = Readonly<{
-  id: string;
+import {
+  LEAD_LIFECYCLE_STATUSES,
+  type LeadLifecycleStatus,
+  type LeadListResult,
+  type LeadRecord,
+} from "../../../lib/bff/leads";
+import {
+  type DealListResult,
+  type DealRecord,
+  type DealStage,
+} from "../../../lib/bff/deals";
+import { formatLeadStatus, leadStatusTone } from "../leads/lead-lifecycle";
+
+export type PipelineColumn = Readonly<{
+  status: LeadLifecycleStatus;
   label: string;
-  position: number;
+  tone: "neutral" | "warning" | "success";
+  leads: readonly LeadRecord[];
 }>;
 
-export type PipelineDeal = Readonly<{
-  id: string;
-  title: string;
-  stageId: string;
-  contactName: string;
-  valueEur: number | null;
-  nextActionAt: string | null;
+export type PipelineState =
+  | { kind: "ready"; data: readonly PipelineColumn[]; hasLeads: boolean; hasNextPage: boolean }
+  | { kind: "unauthenticated" | "forbidden" | "error" | "unavailable" };
+
+export type DealColumn = Readonly<{
+  stage: DealStage;
+  label: string;
+  tone: "neutral" | "warning" | "success";
+  deals: readonly DealRecord[];
 }>;
 
-export type PipelineResponse = Readonly<{
-  pipeline: Readonly<{ id: string; name: string }>;
-  stages: readonly PipelineStage[];
-  deals: readonly PipelineDeal[];
-}>;
+export type DealPipelineState =
+  | { kind: "ready"; data: readonly DealColumn[]; hasDeals: boolean }
+  | { kind: "loading" | "unauthenticated" | "forbidden" | "error" | "unavailable" | "empty" };
 
-export function parsePipelineResponse(value: unknown): PipelineResponse | null {
-  if (!isRecord(value) || !hasExactKeys(value, ["pipeline", "stages", "deals"])) return null;
-  const pipeline = parsePipeline(value.pipeline);
-  const stages = parseStages(value.stages);
-  const deals = parseDeals(value.deals);
-  if (!pipeline || !stages || !deals) return null;
-  if (deals.some((deal) => !stages.some((stage) => stage.id === deal.stageId))) return null;
-  return { pipeline, stages, deals };
+export function groupLeadsByStatus(leads: readonly LeadRecord[]): readonly PipelineColumn[] {
+  const grouped = new Map<LeadLifecycleStatus, LeadRecord[]>(
+    LEAD_LIFECYCLE_STATUSES.map((status) => [status, []]),
+  );
+
+  for (const lead of leads) {
+    grouped.get(lead.status)?.push(lead);
+  }
+
+  return LEAD_LIFECYCLE_STATUSES.map((status) => ({
+    status,
+    label: formatLeadStatus(status),
+    tone: leadStatusTone(status),
+    leads: grouped.get(status) ?? [],
+  }));
 }
 
-function parsePipeline(value: unknown): PipelineResponse["pipeline"] | null {
-  if (!isRecord(value) || !hasExactKeys(value, ["id", "name"])) return null;
-  if (!isBoundedString(value.id, 100) || !isBoundedString(value.name, 120)) return null;
-  return { id: value.id.trim(), name: value.name.trim() };
+export function mapPipelineResult(result: LeadListResult): PipelineState {
+  if (result.status !== "ready") {
+    return { kind: result.status === "invalid_query" ? "error" : result.status };
+  }
+
+  return {
+    kind: "ready",
+    data: groupLeadsByStatus(result.data.items),
+    hasLeads: result.data.items.length > 0,
+    hasNextPage: result.data.next_cursor !== null,
+  };
 }
 
-function parseStages(value: unknown): readonly PipelineStage[] | null {
-  if (!Array.isArray(value) || value.length === 0) return null;
-  const stages = value.map((stage) => {
-    if (!isRecord(stage) || !hasExactKeys(stage, ["id", "label", "position"])) return null;
-    if (!isBoundedString(stage.id, 100) || !isBoundedString(stage.label, 120) || typeof stage.position !== "number" || !Number.isInteger(stage.position) || stage.position < 0) return null;
-    return { id: stage.id.trim(), label: stage.label.trim(), position: stage.position };
-  });
-  if (stages.some((stage): stage is null => stage === null)) return null;
-  const parsed = stages as PipelineStage[];
-  if (new Set(parsed.map((stage) => stage.id)).size !== parsed.length) return null;
-  return [...parsed].sort((left, right) => left.position - right.position);
+export function groupDealsByStage(deals: readonly DealRecord[]): readonly DealColumn[] {
+  const grouped = new Map<DealStage, DealRecord[]>(
+    LEAD_LIFECYCLE_STATUSES.map((stage) => [stage, []]),
+  );
+
+  for (const deal of deals) {
+    grouped.get(deal.stage)?.push(deal);
+  }
+
+  return LEAD_LIFECYCLE_STATUSES.map((stage) => ({
+    stage,
+    label: formatLeadStatus(stage),
+    tone: leadStatusTone(stage),
+    deals: grouped.get(stage) ?? [],
+  }));
 }
 
-function parseDeals(value: unknown): readonly PipelineDeal[] | null {
-  if (!Array.isArray(value)) return null;
-  const deals = value.map((deal) => {
-    if (!isRecord(deal) || !hasExactKeys(deal, ["id", "title", "stageId", "contactName", "valueEur", "nextActionAt"])) return null;
-    if (!isBoundedString(deal.id, 100) || !isBoundedString(deal.title, 200) || !isBoundedString(deal.stageId, 100) || !isBoundedString(deal.contactName, 200)) return null;
-    if (deal.valueEur !== null && (typeof deal.valueEur !== "number" || !Number.isFinite(deal.valueEur) || deal.valueEur < 0)) return null;
-    if (deal.nextActionAt !== null && (typeof deal.nextActionAt !== "string" || Number.isNaN(Date.parse(deal.nextActionAt)))) return null;
-    return {
-      id: deal.id.trim(),
-      title: deal.title.trim(),
-      stageId: deal.stageId.trim(),
-      contactName: deal.contactName.trim(),
-      valueEur: deal.valueEur,
-      nextActionAt: deal.nextActionAt,
-    };
-  });
-  if (deals.some((deal): deal is null => deal === null)) return null;
-  const parsed = deals as PipelineDeal[];
-  return new Set(parsed.map((deal) => deal.id)).size === parsed.length ? parsed : null;
+export function mapDealPipelineResult(result: DealListResult): DealPipelineState {
+  if (result.status !== "ready") {
+    return { kind: result.status === "error" ? "error" : result.status };
+  }
+
+  return {
+    kind: "ready",
+    data: groupDealsByStage(result.data.items),
+    hasDeals: result.data.items.length > 0,
+  };
 }
 
-function isBoundedString(value: unknown, maxLength: number): value is string {
-  return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
+export function buildPipelineQuery(query: { q?: string; status?: LeadLifecycleStatus }): string {
+  const params = new URLSearchParams({ limit: "50" });
+  if (query.q) params.set("q", query.q);
+  if (query.status) params.set("status", query.status);
+  return params.toString();
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+export function buildLeadDetailHref(leadId: string): string {
+  return `/leads/${encodeURIComponent(leadId)}`;
 }
 
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const sortedExpected = [...expected].sort();
-  return actual.length === sortedExpected.length && actual.every((key, index) => key === sortedExpected[index]);
+export function buildDealDetailHref(dealId: string): string {
+  return `/pipeline/${encodeURIComponent(dealId)}`;
 }

@@ -11,10 +11,10 @@ import type { ExternalIdentity } from "./auth/types.js";
 import { createTestDb } from "./db.js";
 import * as schema from "./db/schema.js";
 import {
-  createLead,
   createLeadInTransaction,
   findLead,
   findLeadDetail,
+  getTodayLeadSummary,
   InvalidLeadTenantError,
   listLeads,
   type NewLead,
@@ -472,7 +472,7 @@ test("findTenant: geeft de opgeslagen status terug", async () => {
 
 const exampleLead = (overrides: Partial<NewLead> = {}): NewLead => ({
   name: "Voorbeeld Persoon",
-  email: "voorbeeld@example.test",
+  email: `${uniqueId("lead")}@example.test`,
   phone: "0612345678",
   message: "Ik wil graag kennismaken.",
   source: "contact_form",
@@ -489,7 +489,7 @@ async function expectInvalidTenant(client: PoolClient, fn: () => Promise<unknown
 test("createLead: slaat de lead op bij de tenant met standaardstatus new", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
-    const lead = await createLead(tx, tenant.id, exampleLead());
+    const lead = await createLeadInTransaction(tx, tenant.id, exampleLead({ email: "voorbeeld@example.test" }));
 
     assert.match(lead.id, /^[0-9a-f-]{36}$/);
     assert.equal(lead.tenantId, tenant.id);
@@ -509,8 +509,8 @@ test("createLead: telefoonnummer is optioneel", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
 
-    assert.equal((await createLead(tx, tenant.id, exampleLead({ phone: undefined }))).phone, null);
-    assert.equal((await createLead(tx, tenant.id, exampleLead({ phone: null }))).phone, null);
+    assert.equal((await createLeadInTransaction(tx, tenant.id, exampleLead({ phone: undefined }))).phone, null);
+    assert.equal((await createLeadInTransaction(tx, tenant.id, exampleLead({ phone: null }))).phone, null);
   });
 });
 
@@ -518,7 +518,7 @@ test("createLead: onbekende, ongeldige of lege tenant wordt geweigerd", async ()
   await withRollback(async (tx, client) => {
     const before = await client.query<{ count: number }>("select count(*)::int as count from leads");
     for (const tenantId of [randomUUID(), "abc", ""]) {
-      await expectInvalidTenant(client, () => createLead(tx, tenantId, exampleLead()));
+      await expectInvalidTenant(client, () => createLeadInTransaction(tx, tenantId, exampleLead()));
     }
     const { rows } = await client.query<{ count: number }>("select count(*)::int as count from leads");
     assert.equal(rows[0]?.count, before.rows[0]?.count);
@@ -528,14 +528,20 @@ test("createLead: onbekende, ongeldige of lege tenant wordt geweigerd", async ()
 test("leads: database weigert een lead zonder tenant of met onbekende status", async () => {
   await withRollback(async (tx, client) => {
     const tenant = await createTenant(tx);
+    const [contact] = await tx.insert(schema.contacts).values({
+      tenantId: tenant.id,
+      fullName: "Status test contact",
+      email: `${uniqueId("status-contact")}@example.test`,
+    }).returning();
+    assert.ok(contact);
     // Ruwe SQL, omdat de TypeScript-types deze waarden al tegenhouden.
     await expectPgError(client, "23502", () =>
       client.query("insert into leads (name, email, message, source) values ('n', 'e', 'm', 's')"),
     );
     await expectPgError(client, "23514", () =>
       client.query(
-        "insert into leads (tenant_id, name, email, message, source, status) values ($1, 'n', 'e', 'm', 's', 'won')",
-        [tenant.id],
+        "insert into leads (tenant_id, contact_id, name, email, message, source, status) values ($1, $2, 'n', 'e', 'm', 's', 'not_a_status')",
+        [tenant.id, contact.id],
       ),
     );
   });
@@ -545,8 +551,8 @@ test("findLead: lead van tenant A is nooit zichtbaar voor tenant B", async () =>
   await withRollback(async (tx) => {
     const tenantA = await createTenant(tx);
     const tenantB = await createTenant(tx);
-    const leadA = await createLead(tx, tenantA.id, exampleLead({ name: "Lead A" }));
-    const leadB = await createLead(tx, tenantB.id, exampleLead({ name: "Lead B" }));
+    const leadA = await createLeadInTransaction(tx, tenantA.id, exampleLead({ name: "Lead A" }));
+    const leadB = await createLeadInTransaction(tx, tenantB.id, exampleLead({ name: "Lead B" }));
 
     assert.equal((await findLead(tx, tenantA.id, leadA.id))?.name, "Lead A");
     assert.equal((await findLead(tx, tenantB.id, leadB.id))?.name, "Lead B");
@@ -558,7 +564,7 @@ test("findLead: lead van tenant A is nooit zichtbaar voor tenant B", async () =>
 test("findLead: onbekende lead of onbekende tenant geeft null", async () => {
   await withRollback(async (tx) => {
     const tenant = await createTenant(tx);
-    const lead = await createLead(tx, tenant.id, exampleLead());
+    const lead = await createLeadInTransaction(tx, tenant.id, exampleLead());
 
     assert.equal(await findLead(tx, tenant.id, randomUUID()), null);
     assert.equal(await findLead(tx, randomUUID(), lead.id), null);
@@ -569,9 +575,9 @@ test("listLeads: tenantisolatie, server-side zoekvelden en stabiele cursorpagine
   await withRollback(async (tx) => {
     const tenantA = await createTenant(tx);
     const tenantB = await createTenant(tx);
-    await createLead(tx, tenantA.id, exampleLead({ name: "Alpha", message: "eerste aanvraag" }));
-    await createLead(tx, tenantA.id, exampleLead({ name: "Bravo", source: "website" }));
-    const foreignLead = await createLead(tx, tenantB.id, exampleLead({ name: "Tenant B geheim" }));
+    await createLeadInTransaction(tx, tenantA.id, exampleLead({ name: "Alpha", message: "eerste aanvraag" }));
+    await createLeadInTransaction(tx, tenantA.id, exampleLead({ name: "Bravo", source: "website" }));
+    const foreignLead = await createLeadInTransaction(tx, tenantB.id, exampleLead({ name: "Tenant B geheim" }));
 
     const firstPage = await listLeads(tx, { tenantId: tenantA.id, limit: 1 });
     assert.equal(firstPage.items.length, 1);
@@ -597,11 +603,33 @@ test("listLeads: tenantisolatie, server-side zoekvelden en stabiele cursorpagine
   });
 });
 
+test("getTodayLeadSummary: telt alleen nieuwe leads van de gekozen tenant en begrenst opvolging", async () => {
+  await withRollback(async (tx) => {
+    const tenantA = await createTenant(tx);
+    const tenantB = await createTenant(tx);
+
+    for (let index = 0; index < 6; index += 1) {
+      await createLeadInTransaction(tx, tenantA.id, exampleLead({ name: `Tenant A lead ${index}` }));
+    }
+    await createLeadInTransaction(tx, tenantB.id, exampleLead({ name: "Tenant B lead" }));
+
+    const summary = await getTodayLeadSummary(tx, tenantA.id);
+
+    assert.equal(summary.newLeadCount, 6);
+    assert.equal(summary.newestNewLeads.length, 5);
+    assert.ok(summary.newestNewLeads.every((lead) => lead.name.startsWith("Tenant A lead")));
+    assert.ok(summary.newestNewLeads.every((lead) => !("tenantId" in lead)));
+
+    const empty = await getTodayLeadSummary(tx, randomUUID());
+    assert.deepEqual(empty, { newLeadCount: 0, newestNewLeads: [] });
+  });
+});
+
 test("findLeadDetail: geeft alleen expliciete leadvelden en weigert cross-tenant detail", async () => {
   await withRollback(async (tx) => {
     const tenantA = await createTenant(tx);
     const tenantB = await createTenant(tx);
-    const lead = await createLead(tx, tenantA.id, exampleLead());
+    const lead = await createLeadInTransaction(tx, tenantA.id, exampleLead());
 
     const detail = await findLeadDetail(tx, tenantA.id, lead.id);
     assert.ok(detail);
@@ -624,7 +652,7 @@ test("lead assignments: team member ziet alle leads; assignment blijft verantwoo
 
     const assigned = await createLeadInTransaction(tx, tenant.id, exampleLead({ name: "Toegewezen" }), teamMember.user.id);
     const ownerLead = await createLeadInTransaction(tx, tenant.id, exampleLead({ name: "Owner lead" }), owner.user.id);
-    const unassigned = await createLead(tx, tenant.id, exampleLead({ name: "Niet toegewezen" }));
+    const unassigned = await createLeadInTransaction(tx, tenant.id, exampleLead({ name: "Niet toegewezen" }));
 
     const visibleToTeamMember = await listLeads(tx, {
       tenantId: tenant.id,
@@ -679,7 +707,7 @@ test("HTTP met echte resolver en loader: eigen tenant 200, andere tenant en disa
         tenantLoader: (tenantId) => findTenant(tx, tenantId),
         leadCreator: (tenantId, lead, actorUserId) => actorUserId
           ? createLeadInTransaction(tx, tenantId, lead, actorUserId)
-          : createLead(tx, tenantId, lead),
+          : createLeadInTransaction(tx, tenantId, lead),
         onboardingStore: onboardingStoreFor(tx),
         reviewerAssignmentResolver: (identity) => findActiveReviewerAssignments(tx, identity),
         reviewStore: reviewStoreFor(tx),
@@ -740,7 +768,7 @@ test("HTTP POST /v1/leads met echte repository: lead komt bij de eigen tenant, n
         tenantLoader: (tenantId) => findTenant(tx, tenantId),
         leadCreator: (tenantId, lead, actorUserId) => actorUserId
           ? createLeadInTransaction(tx, tenantId, lead, actorUserId)
-          : createLead(tx, tenantId, lead),
+          : createLeadInTransaction(tx, tenantId, lead),
         onboardingStore: onboardingStoreFor(tx),
         reviewerAssignmentResolver: (identity) => findActiveReviewerAssignments(tx, identity),
         reviewStore: reviewStoreFor(tx),
@@ -922,7 +950,7 @@ const appWithRealRepositories = (tx: Tx) =>
       tenantLoader: (tenantId) => findTenant(tx, tenantId),
       leadCreator: (tenantId, lead, actorUserId) => actorUserId
         ? createLeadInTransaction(tx, tenantId, lead, actorUserId)
-        : createLead(tx, tenantId, lead),
+        : createLeadInTransaction(tx, tenantId, lead),
       onboardingStore: onboardingStoreFor(tx),
       reviewerAssignmentResolver: (identity) => findActiveReviewerAssignments(tx, identity),
       reviewStore: reviewStoreFor(tx),

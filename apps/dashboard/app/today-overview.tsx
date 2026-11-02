@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   EmptyState,
@@ -9,6 +10,29 @@ import {
   UnauthenticatedState,
   UnavailableState,
 } from "./ui-states";
+import type { LeadRecord } from "../lib/bff/leads";
+
+export const MAX_DIRECT_FOLLOW_UP_ITEMS = 5;
+
+type TodayActionCard = Readonly<{
+  id: string;
+  label: string;
+  value: number | null;
+  status: "available" | "not-connected";
+  source: string;
+}>;
+
+type TodayFollowUpItem = Readonly<Pick<LeadRecord, "id" | "name" | "message" | "source"> & {
+  createdAt: string;
+}>;
+
+type TodayDirectFollowUp = Readonly<{
+  status: "empty";
+  message: string;
+}> | Readonly<{
+  status: "available";
+  leads: readonly TodayFollowUpItem[];
+}>;
 
 export type TodayResponse = Readonly<{
   tenant: {
@@ -16,17 +40,8 @@ export type TodayResponse = Readonly<{
     name: string;
     status: string;
   };
-  actionRequired: readonly {
-    id: string;
-    label: string;
-    value: number | null;
-    status: "available" | "unavailable";
-    source: string;
-  }[];
-  directFollowUp: Readonly<{
-    status: "empty";
-    message: string;
-  }>;
+  actionRequired: readonly TodayActionCard[];
+  directFollowUp: TodayDirectFollowUp;
 }>;
 
 type SessionTenant = Readonly<{
@@ -84,30 +99,91 @@ function isSessionContextResponse(value: unknown): value is SessionContextRespon
   );
 }
 
-function isTodayResponse(value: unknown): value is TodayResponse {
-  return (
+function parseTodayFollowUpItem(value: unknown): TodayFollowUpItem | null {
+  if (
     isRecord(value)
-    && isRecord(value.tenant)
-    && typeof value.tenant.id === "string"
-    && typeof value.tenant.name === "string"
-    && typeof value.tenant.status === "string"
-    && Array.isArray(value.actionRequired)
-    && value.actionRequired.every((card) => (
-      isRecord(card)
-      && typeof card.id === "string"
-      && typeof card.label === "string"
-      && (typeof card.value === "number" || card.value === null)
-      && (card.status === "available" || card.status === "unavailable")
-      && typeof card.source === "string"
-    ))
-    && isRecord(value.directFollowUp)
-    && value.directFollowUp.status === "empty"
-    && typeof value.directFollowUp.message === "string"
-  );
+    && typeof value.id === "string"
+    && typeof value.name === "string"
+    && typeof value.message === "string"
+    && typeof value.source === "string"
+    && typeof value.created_at === "string"
+  ) {
+    return {
+      id: value.id,
+      name: value.name,
+      message: value.message,
+      source: value.source,
+      createdAt: value.created_at,
+    };
+  }
+
+  return null;
+}
+
+export function parseTodayResponse(value: unknown): TodayResponse | null {
+  if (
+    !isRecord(value)
+    || !isRecord(value.tenant)
+    || typeof value.tenant.id !== "string"
+    || typeof value.tenant.name !== "string"
+    || typeof value.tenant.status !== "string"
+    || !Array.isArray(value.actionRequired)
+  ) return null;
+
+  const actionRequired = value.actionRequired.map(parseTodayActionCard);
+  if (actionRequired.some((card): card is null => card === null)) return null;
+
+  const directFollowUp = parseDirectFollowUp(value.directFollowUp);
+  if (!directFollowUp) return null;
+
+  return {
+    tenant: {
+      id: value.tenant.id,
+      name: value.tenant.name,
+      status: value.tenant.status,
+    },
+    actionRequired: actionRequired as TodayActionCard[],
+    directFollowUp,
+  };
 }
 
 export function hasAvailableTodayData(today: TodayResponse): boolean {
   return today.actionRequired.some((card) => card.status === "available" && card.value !== null);
+}
+
+export function limitDirectFollowUpItems(items: readonly TodayFollowUpItem[]): readonly TodayFollowUpItem[] {
+  return items.slice(0, MAX_DIRECT_FOLLOW_UP_ITEMS);
+}
+
+function parseTodayActionCard(value: unknown): TodayActionCard | null {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.id !== "string"
+    || typeof value.label !== "string"
+    || (typeof value.value !== "number" && value.value !== null)
+    || (value.status !== "available" && value.status !== "unavailable" && value.status !== "not-connected")
+    || typeof value.source !== "string"
+  ) return null;
+
+  return {
+    id: value.id,
+    label: value.label,
+    value: value.value,
+    status: value.status === "available" ? "available" : "not-connected",
+    source: value.source,
+  };
+}
+
+function parseDirectFollowUp(value: unknown): TodayDirectFollowUp | null {
+  if (!isRecord(value) || typeof value.status !== "string") return null;
+  if (value.status === "empty" && typeof value.message === "string") {
+    return { status: "empty", message: value.message };
+  }
+  if (value.status !== "available" || !Array.isArray(value.leads)) return null;
+
+  const items = value.leads.map(parseTodayFollowUpItem);
+  if (items.some((item): item is null => item === null)) return null;
+  return { status: "available", leads: limitDirectFollowUpItems(items as TodayFollowUpItem[]) };
 }
 
 function stateForHttpStatus(status: number): RequestErrorState | null {
@@ -145,8 +221,8 @@ async function loadTodayState(selectedTenantId: string | undefined, signal: Abor
     if (todayError) return todayError;
     if (!todayResponse.ok) return { status: "unavailable" };
 
-    const todayData: unknown = await todayResponse.json();
-    if (!isTodayResponse(todayData)) return { status: "unavailable" };
+    const todayData = parseTodayResponse(await todayResponse.json());
+    if (!todayData) return { status: "unavailable" };
 
     return hasAvailableTodayData(todayData)
       ? { status: "ready", tenant: contextData.tenant, today: todayData }
@@ -182,10 +258,10 @@ function TodayData({ today }: { today: TodayResponse }) {
               <h3 className="stat-label">{card.label}</h3>
               <p className="stat-value">{card.status === "available" && card.value !== null ? card.value : "—"}</p>
               <p className="stat-meta">
-                {card.status === "unavailable" ? (
-                  <span className="badge badge-neutral">Bron niet beschikbaar</span>
+                {card.status === "not-connected" ? (
+                  <span className="badge badge-neutral">Nog niet gekoppeld</span>
                 ) : null}
-                Bron: {card.source}
+                {card.status === "available" ? `Bron: ${card.source}` : card.source}
               </p>
             </article>
           ))}
@@ -202,7 +278,23 @@ function TodayData({ today }: { today: TodayResponse }) {
             <h3>Nog geen aanvragen</h3>
             <p>{today.directFollowUp.message}</p>
           </div>
-        ) : null}
+        ) : (
+          <div role="region" aria-label="Direct op te volgen CRM-aanvragen">
+            <ul className="today-follow-up-list">
+              {today.directFollowUp.leads.map((lead) => (
+                <li className="today-follow-up-item" key={lead.id}>
+                  <Link className="today-follow-up-link" href={`/leads/${encodeURIComponent(lead.id)}`} aria-label={`Open lead ${lead.name}`}>
+                    <span className="today-follow-up-content">
+                      <strong>{lead.name}</strong>
+                      <span>{lead.message}</span>
+                      <span className="today-follow-up-meta">Bron: {lead.source}</span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
     </>
   );

@@ -53,6 +53,7 @@ export function registerPublicLeadRoutes(
       const result = await publicLeadCreator(website, idempotencyKey, input.input);
       if (isPublicLeadRateLimited(result)) return reply.code(429).send({ error: "rate_limited" });
       if (result.status === "replayed") return reply.code(200).send({ accepted: true });
+      if (result.status === "duplicate") return reply.code(200).send({ accepted: true });
       return reply.code(201).send({ accepted: true });
     } catch (error) {
       if (error instanceof PublicLeadIdempotencyConflictError) {

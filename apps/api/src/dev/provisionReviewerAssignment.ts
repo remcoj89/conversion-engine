@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createMaintenanceDb } from "../db.js";
 import { runWithDatabaseContext } from "../db/requestContext.js";
+import { formatMaintenanceFailure } from "./maintenanceFailureMessage.js";
 import {
   drizzleReviewerAssignmentTransactionRunner,
   parseReviewerAssignmentInvocation,
@@ -50,11 +51,11 @@ async function main(): Promise<number> {
       await pool.end();
     }
   } catch (error) {
-    // Database errors can quote parameter values, so only fixed messages are printed.
+    // Database errors can quote SQL and parameter values; only allowlisted fields are printed.
     console.error(
       error instanceof ReviewerAssignmentProvisioningError
         ? error.message
-        : "Reviewer-provisioning mislukt; de transactie is teruggedraaid.",
+        : formatMaintenanceFailure("Reviewer-provisioning", error),
     );
     return 1;
   }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { test } from "node:test";
-import { createTestDb, createTestMaintenanceDb } from "../db.js";
+import { createApiRuntimeDb, createTestDb, createTestMaintenanceDb } from "../db.js";
 import * as schema from "../db/schema.js";
 import { runWithDatabaseContext } from "../db/requestContext.js";
 import {
@@ -59,7 +59,7 @@ test("public lead repository dedupliceert contacten, replayt idempotent en schri
         );
 
         const second = await createPublicLeadInTransaction(db, website, "request-2", input);
-        assert.equal(second.status, "accepted");
+        assert.equal(second.status, "duplicate");
         await client.query("set local app.rls_test_mode = 'on'");
         const counts = await client.query<{ contacts: string; leads: string; outbox: string; keys: string }>(
           `select
@@ -69,7 +69,7 @@ test("public lead repository dedupliceert contacten, replayt idempotent en schri
              (select count(*) from public_lead_idempotency_keys where tenant_id = $1) as keys`,
           [tenantId],
         );
-        assert.deepEqual(counts.rows[0], { contacts: "1", leads: "2", outbox: "2", keys: "2" });
+        assert.deepEqual(counts.rows[0], { contacts: "1", leads: "1", outbox: "1", keys: "1" });
         await client.query("set local app.rls_test_mode = 'off'");
       },
     );
@@ -124,8 +124,7 @@ test("public lead repository dedupliceert hetzelfde e-mailadres bij gelijktijdig
       ),
     ]);
 
-    assert.equal(first.status, "accepted");
-    assert.equal(second.status, "accepted");
+    assert.deepEqual([first.status, second.status].sort(), ["accepted", "duplicate"].sort());
     const counts = await setupClient.query<{ contacts: string; leads: string; outbox: string }>(
       `select
          (select count(*) from contacts where tenant_id = $1 and email = $2) as contacts,
@@ -133,7 +132,7 @@ test("public lead repository dedupliceert hetzelfde e-mailadres bij gelijktijdig
          (select count(*) from public_lead_outbox where tenant_id = $1) as outbox`,
       [tenantId, concurrentInput.email],
     );
-    assert.deepEqual(counts.rows[0], { contacts: "1", leads: "2", outbox: "2" });
+    assert.deepEqual(counts.rows[0], { contacts: "1", leads: "1", outbox: "1" });
   } finally {
     const cleanupClient = await cleanupPool.connect();
     try {
@@ -206,5 +205,73 @@ test("public lead repository rolt contact, lead, outbox en idempotency terug bij
     await client.query("rollback");
     client.release();
     await pool.end();
+  }
+});
+
+test("public lead repository serialiseert gelijktijdige retries met dezelfde Idempotency-Key via de runtime-verbinding", async () => {
+  const databaseUrl = process.env.DATABASE_TEST_URL;
+  assert.ok(databaseUrl, "DATABASE_TEST_URL is required");
+  // The real API runtime factory: ce_api_runtime, no test mode, so no RLS bypass.
+  const runtime = await createApiRuntimeDb(databaseUrl, { ...process.env, EXPECTED_API_DATABASE: "conversion_engine_test" });
+  const { pool: fixturePool } = createTestDb(databaseUrl);
+  const cleanupPool = createTestMaintenanceDb(databaseUrl).pool;
+  const fixtureClient = await fixturePool.connect();
+  const tenantId = randomUUID();
+  const websiteId = randomUUID();
+  const websiteKey = `site_${randomUUID().replaceAll("-", "").slice(0, 32)}`;
+  const retryInput = { ...input, email: "retry@example.test" };
+  const context = { scope: "public" as const, tenantId, websitePublicKey: websiteKey, publicContactEmail: retryInput.email };
+
+  try {
+    await fixtureClient.query(
+      `insert into tenants (id, name, status) values ($1, 'Idempotency retry tenant', 'active')`,
+      [tenantId],
+    );
+    await fixtureClient.query(
+      `insert into websites (id, tenant_id, public_key, status) values ($1, $2, $3, 'active')`,
+      [websiteId, tenantId, websiteKey],
+    );
+
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        runWithDatabaseContext(context, () =>
+          createPublicLead(runtime.db, { tenantId, websiteId }, "same-retry-key", retryInput),
+        ),
+      ),
+    );
+
+    const statuses = results.map((result) => result.status).sort();
+    assert.deepEqual(statuses, ["accepted", "replayed", "replayed", "replayed"]);
+    assert.equal(new Set(results.map((result) => "leadId" in result ? result.leadId : undefined)).size, 1);
+
+    // Counted through the test-only cleanup session, which may see these internal tables.
+    const counts = await cleanupPool.query<{ leads: string; outbox: string; keys: string }>(
+      `select
+         (select count(*) from leads where tenant_id = $1) as leads,
+         (select count(*) from public_lead_outbox where tenant_id = $1) as outbox,
+         (select count(*) from public_lead_idempotency_keys where tenant_id = $1) as keys`,
+      [tenantId],
+    );
+    assert.deepEqual(counts.rows[0], { leads: "1", outbox: "1", keys: "1" });
+  } finally {
+    const cleanupClient = await cleanupPool.connect();
+    try {
+      await cleanupClient.query("begin");
+      await cleanupClient.query("delete from public_lead_outbox where tenant_id = $1", [tenantId]);
+      await cleanupClient.query("delete from public_lead_idempotency_keys where tenant_id = $1", [tenantId]);
+      await cleanupClient.query("delete from public_lead_rate_limits where website_id = $1", [websiteId]);
+      await cleanupClient.query("delete from leads where tenant_id = $1", [tenantId]);
+      await cleanupClient.query("delete from contacts where tenant_id = $1", [tenantId]);
+      await cleanupClient.query("delete from websites where id = $1", [websiteId]);
+      await cleanupClient.query("delete from tenants where id = $1", [tenantId]);
+      await cleanupClient.query("commit");
+    } finally {
+      await cleanupClient.query("rollback").catch(() => undefined);
+      cleanupClient.release();
+      await cleanupPool.end();
+    }
+    fixtureClient.release();
+    await fixturePool.end();
+    await runtime.pool.end();
   }
 });

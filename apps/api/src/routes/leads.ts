@@ -1,14 +1,21 @@
 import type { FastifyInstance } from "fastify";
 import { getAuthContext } from "../auth/authHook.js";
-import { authorize } from "../auth/authorization.js";
+import { authorize, authorizeForUser } from "../auth/authorization.js";
 import { parseLeadInput } from "../leads/leadInput.js";
 import {
+  DuplicateLeadEmailError,
+  InvalidLeadStatusActorError,
+  InvalidLeadStatusTransitionError,
+  isLeadStatus,
+  LeadNotFoundError,
   decodeLeadCursor,
   encodeLeadCursor,
   type Lead,
   type LeadListQuery,
   type LeadReader,
   type NewLead,
+  type LeadStatus,
+  type LeadStatusUpdater,
 } from "../leads/leadRepository.js";
 
 // Keeps the HTTP layer independent of Drizzle/PostgreSQL. Always called with context.tenantId.
@@ -16,6 +23,7 @@ export type LeadCreator = (tenantId: string, lead: NewLead, actorUserId?: string
 
 export type LeadRouteDependencies = Readonly<{
   leadCreator: LeadCreator;
+  leadStatusUpdater?: LeadStatusUpdater;
   // Existing non-CRM test fixtures may omit reads; production wiring always supplies it.
   leadReader?: LeadReader;
 }>;
@@ -29,7 +37,7 @@ const ALLOWED_QUERY_KEYS = new Set(["q", "status", "limit", "cursor"]);
 
 // Must be registered behind the auth hook; without it getAuthContext fails closed.
 // Not a public form endpoint: there is no trusted site-to-tenant resolver yet.
-export function registerLeadRoutes(app: FastifyInstance, { leadCreator }: LeadRouteDependencies) {
+export function registerLeadRoutes(app: FastifyInstance, { leadCreator, leadStatusUpdater }: LeadRouteDependencies) {
   app.post("/v1/leads", { bodyLimit: BODY_LIMIT_BYTES }, async (request, reply) => {
     const context = getAuthContext(request);
     if (!authorize(context.role, "leads:create")) {
@@ -42,9 +50,54 @@ export function registerLeadRoutes(app: FastifyInstance, { leadCreator }: LeadRo
     }
 
     // The tenant only ever comes from the auth context, never from the body.
-    const lead = await leadCreator(context.tenantId, input.lead, context.userId);
+    let lead: Lead;
+    try {
+      lead = await leadCreator(context.tenantId, input.lead, context.userId);
+    } catch (error) {
+      if (error instanceof DuplicateLeadEmailError) {
+        return reply.code(409).send({ error: "duplicate_lead_email" });
+      }
+      throw error;
+    }
     return reply.code(201).send({ id: lead.id, status: lead.status, createdAt: lead.createdAt.toISOString() });
   });
+
+  if (leadStatusUpdater) {
+    app.patch("/v1/leads/:leadId/status", { bodyLimit: BODY_LIMIT_BYTES }, async (request, reply) => {
+      const context = getAuthContext(request);
+      if (!authorizeForUser(context.role, "crm:update", context.teamMemberPermissions)) {
+        return reply.code(403).send({ error: "forbidden" });
+      }
+
+      const leadId = parseLeadId((request.params as Record<string, unknown>).leadId);
+      if (!leadId) return reply.code(400).send({ error: "invalid_lead_id" });
+
+      const input = parseLeadStatusMutation(request.body);
+      if (!input) return reply.code(400).send({ error: "invalid_body" });
+
+      try {
+        const updated = await leadStatusUpdater({
+          tenantId: context.tenantId,
+          leadId,
+          actorUserId: context.userId,
+          toStatus: input.status,
+        });
+        return reply.code(200).send({
+          id: updated.id,
+          status: updated.status,
+          next_action: null,
+          updated_at: updated.updatedAt.toISOString(),
+        });
+      } catch (error) {
+        if (error instanceof LeadNotFoundError) return reply.code(404).send({ error: "not_found" });
+        if (error instanceof InvalidLeadStatusTransitionError) {
+          return reply.code(409).send({ error: "invalid_status_transition" });
+        }
+        if (error instanceof InvalidLeadStatusActorError) return reply.code(403).send({ error: "forbidden" });
+        throw error;
+      }
+    });
+  }
 }
 
 export function registerLeadReadRoutes(app: FastifyInstance, leadReader: LeadReader) {
@@ -124,9 +177,16 @@ function parseSearch(value: unknown): string | undefined | null {
   return normalized;
 }
 
-function parseStatus(value: unknown): "new" | undefined | null {
+function parseStatus(value: unknown): LeadListQuery["status"] | undefined | null {
   if (value === undefined) return undefined;
-  return value === "new" ? "new" : null;
+  return isLeadStatus(value) ? value : null;
+}
+
+export function parseLeadStatusMutation(value: unknown): { status: LeadStatus } | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const body = value as Record<string, unknown>;
+  if (Object.keys(body).length !== 1 || !Object.hasOwn(body, "status") || !isLeadStatus(body.status)) return null;
+  return { status: body.status };
 }
 
 function parseLimit(value: unknown): number | null {
@@ -159,6 +219,7 @@ function toLeadResponse(lead: Awaited<ReturnType<LeadReader["findDetail"]>> exte
     message: lead.message,
     source: lead.source,
     status: lead.status,
+    next_action: null,
     created_at: lead.createdAt.toISOString(),
     updated_at: lead.updatedAt.toISOString(),
   };

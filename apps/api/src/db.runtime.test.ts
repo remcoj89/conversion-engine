@@ -6,6 +6,7 @@ import {
   createTestObserverDb,
   createTestDb,
   createMaintenanceDb,
+  queryTextOf,
   readMaintenanceDatabaseContract,
   readApiRuntimeDatabaseContract,
 } from "./db.js";
@@ -299,4 +300,12 @@ test("test observer rejects the migration role and enables read-only sessions", 
   } finally {
     await pool.end();
   }
+});
+
+test("queryTextOf herkent transactiecontrole in zowel SQL-strings als Drizzle-queryobjecten", () => {
+  assert.equal(queryTextOf("  BEGIN "), "begin");
+  assert.equal(queryTextOf({ text: "commit", values: [] }), "commit");
+  assert.equal(queryTextOf({ name: undefined, text: "rollback to savepoint sp1", rowMode: "array" }), "rollback to savepoint sp1");
+  assert.equal(queryTextOf({ values: [] }), "");
+  assert.equal(queryTextOf(null), "");
 });

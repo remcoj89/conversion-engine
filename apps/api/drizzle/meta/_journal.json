@@ -274,6 +274,55 @@
       "when": 1793453000000,
       "tag": "0038_test_public_lead_cleanup_visibility",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1793454000000,
+      "tag": "0039_tenant_public_website_helper",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1793610000000,
+      "tag": "0040_tenant_unique_contact_lead_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793611000000,
+      "tag": "0041_public_lead_rls_boundary_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793612000000,
+      "tag": "0042_lead_lifecycle_status_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793613000000,
+      "tag": "0043_crm_deals_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1793614000000,
+      "tag": "0044_public_tenant_policy_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1793615000000,
+      "tag": "0045_public_tenant_policy_lookup",
+      "breakpoints": true
     }
   ]
 }

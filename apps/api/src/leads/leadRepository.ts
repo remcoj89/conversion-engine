@@ -1,13 +1,35 @@
-import { and, desc, eq, ilike, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, ilike, lt, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "../db/schema.js";
 import { UUID_PATTERN } from "../auth/requestContext.js";
 import type { TenantRole } from "../auth/types.js";
-import { readCode } from "../errors.js";
+import { findOrCreateContactByEmail } from "../crm/organizationContactRepository.js";
+import { readCode, readConstraint } from "../errors.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
 type DatabaseLead = typeof schema.leads.$inferSelect;
+export type LeadStatus = (typeof schema.leadStatuses)[number];
+
+// The functional CRM plan defines one forward pipeline. Closed states are terminal until a
+// separate product decision defines a controlled reopen flow.
+const LEAD_STATUS_TRANSITIONS: Readonly<Record<LeadStatus, readonly LeadStatus[]>> = {
+  new: ["qualified"],
+  qualified: ["appointment_scheduled"],
+  appointment_scheduled: ["proposal"],
+  proposal: ["won", "lost"],
+  won: [],
+  lost: [],
+};
+
+export function isLeadStatus(value: unknown): value is LeadStatus {
+  return typeof value === "string" && (schema.leadStatuses as readonly string[]).includes(value);
+}
+
+export function isValidLeadStatusTransition(fromStatus: LeadStatus, toStatus: LeadStatus): boolean {
+  return LEAD_STATUS_TRANSITIONS[fromStatus].includes(toStatus);
+}
+
 // Public-intake metadata was added after the authenticated lead contract. Keep these fields
 // optional in the shared test-facing model so existing authenticated fixtures remain valid.
 export type Lead = Omit<DatabaseLead, "websiteId" | "contactId" | "organizationName" | "privacyConsent" | "marketingConsent"> &
@@ -15,7 +37,16 @@ export type Lead = Omit<DatabaseLead, "websiteId" | "contactId" | "organizationN
 
 // Read models deliberately exclude tenantId. The route already enforces tenant scope and the
 // client has no reason to receive an internal isolation key.
-export type LeadRead = Pick<Lead, "id" | "name" | "email" | "phone" | "message" | "source" | "status" | "createdAt" | "updatedAt">;
+export type LeadRead = Pick<Lead, "id" | "name" | "email" | "phone" | "message" | "source" | "status" | "createdAt" | "updatedAt"> & {
+  // Task/follow-up CRUD is deliberately a later slice. The current API contract is explicit
+  // and stable, so clients receive null instead of an omitted or fabricated action.
+  nextAction: null;
+};
+
+export type LeadDashboardSummary = Readonly<{
+  newLeadCount: number;
+  newestNewLeads: readonly LeadRead[];
+}>;
 
 export type LeadCursor = Readonly<{
   // Keep PostgreSQL's microsecond precision. JavaScript Date only preserves milliseconds,
@@ -29,7 +60,7 @@ export type LeadListQuery = Readonly<{
   role?: TenantRole;
   userId?: string;
   q?: string;
-  status?: "new";
+  status?: LeadStatus;
   limit: number;
   cursor?: LeadCursor;
 }>;
@@ -42,6 +73,8 @@ export type LeadListResult = Readonly<{
 export type LeadReader = Readonly<{
   list: (query: LeadListQuery) => Promise<LeadListResult>;
   findDetail: (tenantId: string, leadId: string, role?: TenantRole, userId?: string) => Promise<LeadRead | null>;
+  // Optional for backwards-compatible test doubles; production wiring supplies this method.
+  getTodaySummary?: (tenantId: string) => Promise<LeadDashboardSummary>;
 }>;
 
 const CURSOR_MAX_LENGTH = 256;
@@ -72,14 +105,67 @@ export class InvalidLeadActorError extends Error {
   }
 }
 
+export class DuplicateLeadEmailError extends Error {
+  readonly code = "duplicate_lead_email";
+
+  constructor() {
+    super("duplicate_lead_email");
+    this.name = "DuplicateLeadEmailError";
+  }
+}
+
+export class LeadNotFoundError extends Error {
+  readonly code = "lead_not_found";
+
+  constructor() {
+    super("lead_not_found");
+    this.name = "LeadNotFoundError";
+  }
+}
+
+export class InvalidLeadStatusTransitionError extends Error {
+  readonly code = "invalid_status_transition";
+
+  constructor(
+    readonly fromStatus: LeadStatus,
+    readonly toStatus: LeadStatus,
+  ) {
+    super("invalid_status_transition");
+    this.name = "InvalidLeadStatusTransitionError";
+  }
+}
+
+export class InvalidLeadStatusActorError extends Error {
+  readonly code = "invalid_lead_status_actor";
+
+  constructor() {
+    super("invalid_lead_status_actor");
+    this.name = "InvalidLeadStatusActorError";
+  }
+}
+
+export type LeadStatusMutation = Readonly<{
+  id: string;
+  status: LeadStatus;
+  nextAction: null;
+  updatedAt: Date;
+}>;
+
+export type LeadStatusUpdater = (input: Readonly<{
+  tenantId: string;
+  leadId: string;
+  actorUserId: string;
+  toStatus: LeadStatus;
+}>) => Promise<LeadStatusMutation>;
+
 // PostgreSQL: 23503 = foreign key violation (unknown tenant), 22P02 = invalid uuid syntax.
 const INVALID_TENANT_CODES = new Set(["23503", "22P02"]);
 
 // Stores a lead for exactly this tenant. tenantId must come from the auth context, never from input.
 export async function createLead(db: Db, tenantId: string, lead: NewLead, actorUserId?: string): Promise<Lead> {
+  assertValidTenantId(tenantId);
   try {
-    if (!actorUserId) return await insertLead(db, tenantId, lead);
-    return await db.transaction((tx) => insertLeadWithAssignment(tx, tenantId, lead, actorUserId));
+    return await db.transaction((tx) => insertLeadWithOptionalAssignment(tx, tenantId, lead, actorUserId));
   } catch (error) {
     // Drizzle wraps the driver error; the SQLSTATE sits on the cause.
     const code = readCode(error instanceof Error ? error.cause : undefined) ?? readCode(error);
@@ -94,10 +180,11 @@ export async function createLeadInTransaction(
   db: Db,
   tenantId: string,
   lead: NewLead,
-  actorUserId: string,
+  actorUserId?: string,
 ): Promise<Lead> {
+  assertValidTenantId(tenantId);
   try {
-    return await insertLeadWithAssignment(db, tenantId, lead, actorUserId);
+    return await insertLeadWithOptionalAssignment(db, tenantId, lead, actorUserId);
   } catch (error) {
     const code = readCode(error instanceof Error ? error.cause : undefined) ?? readCode(error);
     if (code && INVALID_TENANT_CODES.has(code)) throw new InvalidLeadTenantError();
@@ -105,47 +192,96 @@ export async function createLeadInTransaction(
   }
 }
 
-async function insertLead(db: Db, tenantId: string, lead: NewLead): Promise<Lead> {
-  const [created] = await db
-    .insert(schema.leads)
-    .values({
-      tenantId,
-      name: lead.name,
-      email: lead.email,
-      phone: lead.phone ?? null,
-      message: lead.message,
-      source: lead.source,
-    })
-    .returning();
-  if (!created) throw new Error("Lead insert returned no row");
-  return created;
-}
-
-async function insertLeadWithAssignment(
+async function insertLeadWithOptionalAssignment(
   db: Db,
   tenantId: string,
   lead: NewLead,
-  actorUserId: string,
+  actorUserId?: string,
 ): Promise<Lead> {
-  const [actor] = await db
-    .select({ userId: schema.memberships.userId })
-    .from(schema.memberships)
+  const email = normalizeLeadEmail(lead.email);
+  await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${tenantId}:${email}`}, 0))`);
+
+  const [existing] = await db
+    .select({ id: schema.leads.id })
+    .from(schema.leads)
     .where(and(
-      eq(schema.memberships.tenantId, tenantId),
-      eq(schema.memberships.userId, actorUserId),
-      eq(schema.memberships.status, "active"),
+      eq(schema.leads.tenantId, tenantId),
+      sql`lower(btrim(${schema.leads.email})) = ${email}`,
     ))
     .limit(1);
-  if (!actor) throw new InvalidLeadActorError();
+  if (existing) throw new DuplicateLeadEmailError();
 
-  const created = await insertLead(db, tenantId, lead);
-  await db.insert(schema.leadAssignments).values({
+  if (actorUserId) {
+    const [actor] = await db
+      .select({ userId: schema.memberships.userId })
+      .from(schema.memberships)
+      .where(and(
+        eq(schema.memberships.tenantId, tenantId),
+        eq(schema.memberships.userId, actorUserId),
+        eq(schema.memberships.status, "active"),
+      ))
+      .limit(1);
+    if (!actor) throw new InvalidLeadActorError();
+  }
+
+  const contact = await findOrCreateContactByEmail(db, {
     tenantId,
-    leadId: created.id,
-    userId: actorUserId,
-    assignedBy: actorUserId,
+    fullName: lead.name,
+    email,
+    phone: lead.phone,
   });
+  const created = await insertLead(db, tenantId, lead, contact.id, email);
+  if (actorUserId) {
+    await db.insert(schema.leadAssignments).values({
+      tenantId,
+      leadId: created.id,
+      userId: actorUserId,
+      assignedBy: actorUserId,
+    });
+  }
   return created;
+}
+
+async function insertLead(
+  db: Db,
+  tenantId: string,
+  lead: NewLead,
+  contactId: string,
+  email: string,
+): Promise<Lead> {
+  try {
+    const [created] = await db
+      .insert(schema.leads)
+      .values({
+        tenantId,
+        contactId,
+        name: lead.name,
+        email,
+        phone: lead.phone ?? null,
+        message: lead.message,
+        source: lead.source,
+      })
+      .returning();
+    if (!created) throw new Error("Lead insert returned no row");
+    return created;
+  } catch (error) {
+    const cause = error instanceof Error ? error.cause : undefined;
+    if ([error, cause].some((candidate) =>
+      readCode(candidate) === "23505"
+      && readConstraint(candidate) === "leads_tenant_normalized_email_unique"
+    )) {
+      throw new DuplicateLeadEmailError();
+    }
+    throw error;
+  }
+}
+
+function normalizeLeadEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function assertValidTenantId(tenantId: string): void {
+  if (!UUID_PATTERN.test(tenantId)) throw new InvalidLeadTenantError();
 }
 
 // Tenant isolation: the lead is only found when both id and tenant_id match.
@@ -201,6 +337,107 @@ export function createLeadReader(db: Db): LeadReader {
   return {
     list: (query) => listLeads(db, query),
     findDetail: (tenantId, leadId, role, userId) => findLeadDetail(db, tenantId, leadId, role, userId),
+    getTodaySummary: (tenantId) => getTodayLeadSummary(db, tenantId),
+  };
+}
+
+export function createLeadStatusUpdater(db: Db): LeadStatusUpdater {
+  return (input) => updateLeadStatus(db, input);
+}
+
+export async function updateLeadStatus(
+  db: Db,
+  input: Readonly<{
+    tenantId: string;
+    leadId: string;
+    actorUserId: string;
+    toStatus: LeadStatus;
+  }>,
+): Promise<LeadStatusMutation> {
+  assertValidTenantId(input.tenantId);
+  return db.transaction((tx) => updateLeadStatusInTransaction(tx, input));
+}
+
+export async function updateLeadStatusInTransaction(
+  db: Db,
+  input: Readonly<{
+    tenantId: string;
+    leadId: string;
+    actorUserId: string;
+    toStatus: LeadStatus;
+  }>,
+): Promise<LeadStatusMutation> {
+  assertValidTenantId(input.tenantId);
+
+  const [actor] = await db
+    .select({ userId: schema.memberships.userId })
+    .from(schema.memberships)
+    .where(and(
+      eq(schema.memberships.tenantId, input.tenantId),
+      eq(schema.memberships.userId, input.actorUserId),
+      eq(schema.memberships.status, "active"),
+    ))
+    .limit(1);
+  if (!actor) throw new InvalidLeadStatusActorError();
+
+  const [current] = await db
+    .select({ id: schema.leads.id, status: schema.leads.status })
+    .from(schema.leads)
+    .where(and(eq(schema.leads.tenantId, input.tenantId), eq(schema.leads.id, input.leadId)))
+    .for("update")
+    .limit(1);
+  if (!current) throw new LeadNotFoundError();
+
+  if (!isValidLeadStatusTransition(current.status, input.toStatus)) {
+    throw new InvalidLeadStatusTransitionError(current.status, input.toStatus);
+  }
+
+  const [updated] = await db
+    .update(schema.leads)
+    .set({ status: input.toStatus, updatedAt: new Date() })
+    .where(and(eq(schema.leads.tenantId, input.tenantId), eq(schema.leads.id, input.leadId)))
+    .returning({ id: schema.leads.id, status: schema.leads.status, updatedAt: schema.leads.updatedAt });
+  if (!updated) throw new LeadNotFoundError();
+
+  await db.insert(schema.leadLifecycleAuditEvents).values({
+    tenantId: input.tenantId,
+    leadId: updated.id,
+    actorUserId: input.actorUserId,
+    eventType: "status_changed",
+    fromStatus: current.status,
+    toStatus: updated.status,
+  });
+
+  return {
+    id: updated.id,
+    status: updated.status,
+    nextAction: null,
+    updatedAt: updated.updatedAt,
+  };
+}
+
+export async function getTodayLeadSummary(db: Db, tenantId: string): Promise<LeadDashboardSummary> {
+  const newLeadCondition = and(
+    eq(schema.leads.tenantId, tenantId),
+    eq(schema.leads.status, "new"),
+  );
+
+  const [countRows, newestNewLeads] = await Promise.all([
+    db
+      .select({ count: count(schema.leads.id).mapWith(Number) })
+      .from(schema.leads)
+      .where(newLeadCondition),
+    db
+      .select(leadReadSelection)
+      .from(schema.leads)
+      .where(newLeadCondition)
+      .orderBy(desc(schema.leads.createdAt), desc(schema.leads.id))
+      .limit(5),
+  ]);
+
+  return {
+    newLeadCount: countRows[0]?.count ?? 0,
+    newestNewLeads,
   };
 }
 
@@ -252,6 +489,7 @@ export async function listLeads(db: Db, query: LeadListQuery): Promise<LeadListR
     message: row.message,
     source: row.source,
     status: row.status,
+    nextAction: null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }));
@@ -290,6 +528,7 @@ const leadReadSelection = {
   message: schema.leads.message,
   source: schema.leads.source,
   status: schema.leads.status,
+  nextAction: sql<null>`null`.as("next_action"),
   createdAt: schema.leads.createdAt,
   updatedAt: schema.leads.updatedAt,
 };

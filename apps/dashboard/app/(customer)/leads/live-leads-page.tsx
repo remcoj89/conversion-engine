@@ -10,11 +10,14 @@ import {
   UnavailableState,
 } from "../../ui-states";
 import {
+  isLeadLifecycleStatus,
   parseLeadListResponseResult,
+  type LeadLifecycleStatus,
   type LeadListResult,
   type LeadQuery,
   type LeadRecord,
 } from "../../../lib/bff/leads";
+import { formatLeadStatus, leadStatusTone } from "./lead-lifecycle";
 import { useWorkspaceContext } from "../../workspace-context";
 import { CustomerPage, StatusBadge } from "../customer-ui";
 import styles from "../customer.module.css";
@@ -22,12 +25,17 @@ import styles from "../customer.module.css";
 const statusFilters = [
   { value: "all", label: "Alle statussen" },
   { value: "new", label: "Nieuw" },
+  { value: "qualified", label: "Gekwalificeerd" },
+  { value: "appointment_scheduled", label: "Afspraak gepland" },
+  { value: "proposal", label: "Voorstel" },
+  { value: "won", label: "Gewonnen" },
+  { value: "lost", label: "Verloren" },
 ] as const;
 
 type LeadsState =
   | { kind: "loading" }
   | { kind: "ready"; data: Extract<LeadListResult, { status: "ready" }>["data"] }
-  | { kind: "unauthenticated" | "forbidden" | "unavailable" };
+  | { kind: "unauthenticated" | "forbidden" | "error" | "unavailable" };
 
 export default function LiveLeadsPage({ query }: { query: LeadQuery }) {
   const router = useRouter();
@@ -47,7 +55,7 @@ export default function LiveLeadsPage({ query }: { query: LeadQuery }) {
         setState(
           result.status === "ready"
             ? { kind: "ready", data: result.data }
-            : { kind: result.status === "unauthenticated" || result.status === "forbidden" ? result.status : "unavailable" },
+            : { kind: result.status === "unauthenticated" || result.status === "forbidden" || result.status === "error" ? result.status : "unavailable" },
         );
       } catch {
         if (!cancelled) setState({ kind: "unavailable" });
@@ -61,6 +69,7 @@ export default function LiveLeadsPage({ query }: { query: LeadQuery }) {
   if (state.kind === "loading") return <LeadsLoading />;
   if (state.kind === "unauthenticated") return <UnauthenticatedState message="Meld je aan om je leads en contacten te bekijken." />;
   if (state.kind === "forbidden") return <ForbiddenState message="Je account heeft geen toegang tot de leads van deze klantomgeving." />;
+  if (state.kind === "error") return <LeadErrorState onRetry={() => router.refresh()} />;
   if (state.kind === "unavailable") return <UnavailableState onRetry={() => router.refresh()} />;
   if (state.kind !== "ready") return null;
 
@@ -118,7 +127,7 @@ export default function LiveLeadsPage({ query }: { query: LeadQuery }) {
           <div className={styles.customerTableWrap} role="region" aria-label="Leads en contacten" tabIndex={0}>
             <table className={styles.customerTable}>
               <caption className="visually-hidden">CRM-leads en contacten</caption>
-              <thead><tr><th scope="col">Contact</th><th scope="col">Bericht</th><th scope="col">Bron</th><th scope="col">Status</th><th scope="col"><span className="visually-hidden">Actie</span></th></tr></thead>
+              <thead><tr><th scope="col">Contact</th><th scope="col">Bericht</th><th scope="col">Bron</th><th scope="col">Status</th><th scope="col">Volgende actie</th><th scope="col"><span className="visually-hidden">Actie</span></th></tr></thead>
               <tbody>{data.items.map((lead) => <LeadRow key={lead.id} lead={lead} />)}</tbody>
             </table>
           </div>
@@ -140,7 +149,8 @@ function LeadRow({ lead }: { lead: LeadRecord }) {
       <td data-label="Contact"><span className={styles.customerTableCellContent}><strong>{lead.name}</strong><span className={styles.customerTableMuted}>{lead.email}</span></span></td>
       <td data-label="Bericht"><span className={styles.customerTableCellContent}><span>{lead.message}</span><span className={styles.customerTableMuted}>{formatDate(lead.created_at)}</span></span></td>
       <td data-label="Bron">{lead.source}</td>
-      <td data-label="Status"><StatusBadge>{formatStatus(lead.status)}</StatusBadge></td>
+      <td data-label="Status"><StatusBadge tone={leadStatusTone(lead.status)}>{formatLeadStatus(lead.status)}</StatusBadge></td>
+      <td data-label="Volgende actie"><NextActionSummary action={lead.next_action} /></td>
       <td data-label="Actie"><Link className={styles.customerTableLink} href={`/leads/${lead.id}`}>Open →</Link></td>
     </tr>
   );
@@ -157,7 +167,7 @@ function submitFilters(event: React.FormEvent<HTMLFormElement>, router: ReturnTy
   const q = String(form.get("q") ?? "").trim();
   const status = String(form.get("status") ?? "all");
   if (q) params.set("q", q.slice(0, 100));
-  if (status !== "all" && status === "new") params.set("status", status);
+  if (status !== "all" && isLeadLifecycleStatusValue(status)) params.set("status", status);
   router.push(params.toString() ? `/leads?${params.toString()}` : "/leads");
 }
 
@@ -170,9 +180,28 @@ function buildLeadsHref(query: LeadQuery, cursor: string): string {
   return `/leads?${params.toString()}`;
 }
 
-function formatStatus(status: string): string {
-  if (status === "new") return "Nieuw";
-  return status.replaceAll("_", " ");
+function isLeadLifecycleStatusValue(value: string): value is LeadLifecycleStatus {
+  return isLeadLifecycleStatus(value);
+}
+
+function NextActionSummary({ action }: { action: LeadRecord["next_action"] }) {
+  if (!action) return <span className={styles.customerTableMuted}>Geen actie gepland</span>;
+  return (
+    <span className={styles.customerTableCellContent}>
+      <strong>{action.label}</strong>
+      <span className={styles.customerTableMuted}>{action.due_at ? `Uiterlijk ${formatDate(action.due_at)}` : "Datum volgt"}</span>
+    </span>
+  );
+}
+
+function LeadErrorState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <section className="ui-state-container ui-state-unavailable" role="alert" aria-live="assertive">
+      <h1 className="ui-state-heading">Leads konden niet worden geladen</h1>
+      <p className="ui-state-message">De ontvangen CRM-respons kon niet veilig worden verwerkt. Probeer het opnieuw.</p>
+      <button className="button button-primary ui-state-action" type="button" onClick={onRetry}>Opnieuw proberen</button>
+    </section>
+  );
 }
 
 function formatDate(value: string): string {

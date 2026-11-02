@@ -207,7 +207,8 @@ export function drizzleReviewerAssignmentTransactionRunner(db: Db): RunReviewerA
   return (fn) => db.transaction((tx) => fn(drizzleReviewerAssignmentTx(tx)));
 }
 
-function drizzleReviewerAssignmentTx(tx: DbTx): ReviewerAssignmentProvisioningTx {
+// Exported for database tests that exercise the real queries as ce_maintenance.
+export function drizzleReviewerAssignmentTx(tx: DbTx): ReviewerAssignmentProvisioningTx {
   return {
     async findTenant(tenantId) {
       const [tenant] = await tx

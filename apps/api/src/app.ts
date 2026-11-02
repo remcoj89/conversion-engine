@@ -10,6 +10,8 @@ import { registerLeadReadRoutes, registerLeadRoutes, type LeadRouteDependencies 
 import { registerOrganizationRoutes } from "./routes/organizations.js";
 import { registerContactRoutes } from "./routes/contacts.js";
 import type { OrganizationContactRepository } from "./crm/organizationContactRepository.js";
+import { registerDealRoutes } from "./routes/deals.js";
+import type { DealRepository } from "./deals/dealRepository.js";
 import { registerTeamMemberRoutes } from "./routes/teamMembers.js";
 import type { TeamMemberRepository } from "./team/teamMemberRepository.js";
 import { registerCrmSettingsRoutes } from "./routes/crmSettings.js";
@@ -28,6 +30,7 @@ import {
 } from "./routes/tenantOwnerInvitations.js";
 import { registerPublicLeadRoutes, type PublicLeadRouteDependencies } from "./routes/publicLeads.js";
 import { createDatabaseRequestContext, enterDatabaseRequestContext } from "./db/requestContext.js";
+import { registerPublicLeadCors } from "./cors.js";
 
 export type AppDependencies = AuthHookDependencies &
   IdentityAuthHookDependencies &
@@ -43,15 +46,20 @@ export type AppDependencies = AuthHookDependencies &
   Partial<PlatformAuditEventRouteDependencies> &
   Partial<TenantOwnerInvitationRouteDependencies> & {
     organizationContactRepository?: OrganizationContactRepository;
+    dealRepository?: DealRepository;
     teamMemberRepository?: TeamMemberRepository;
     crmSettingsRepository?: CrmSettingsRepository;
-  } & Partial<PublicLeadRouteDependencies>;
+  } & Partial<PublicLeadRouteDependencies> & {
+    publicLeadCorsOrigins?: readonly string[];
+  };
 
 export function buildApp(
   dependencies: AppDependencies,
   options: FastifyServerOptions = { logger: true },
 ) {
   const app = Fastify(options);
+
+  registerPublicLeadCors(app, dependencies.publicLeadCorsOrigins ?? []);
 
   // Set on the root before any register, so every encapsulated scope inherits it.
   app.setErrorHandler(apiErrorHandler);
@@ -87,6 +95,9 @@ export function buildApp(
       registerContactRoutes(protectedApp, {
         organizationContactRepository: dependencies.organizationContactRepository,
       });
+    }
+    if (dependencies.dealRepository) {
+      registerDealRoutes(protectedApp, { dealRepository: dependencies.dealRepository });
     }
     if (dependencies.teamMemberRepository) {
       registerTeamMemberRoutes(protectedApp, {

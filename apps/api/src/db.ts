@@ -16,7 +16,21 @@ const RLS_CONTEXT_SQL = `
 
 type QueryMethod = PoolClient["query"];
 type QueryCallback = (error: Error | null, result?: unknown) => void;
-type ClientTransactionState = { inTransaction: boolean };
+// appliedContextKey is the RLS context already set inside the open transaction, so it is
+// set once per transaction and only again when the context changes.
+type ClientTransactionState = { inTransaction: boolean; appliedContextKey: string | undefined };
+
+const TRANSACTION_CONTROL_PATTERN = /^(begin|start\s+transaction|commit|end|rollback|abort|release|savepoint)\b/;
+
+// pg accepts both a SQL string and a query config object. Drizzle sends objects with a
+// `text` property, including for begin/commit/rollback, so both shapes must be recognised.
+export function queryTextOf(query: unknown): string {
+  if (typeof query === "string") return query.trim().toLowerCase();
+  if (typeof query === "object" && query !== null && typeof (query as { text?: unknown }).text === "string") {
+    return (query as { text: string }).text.trim().toLowerCase();
+  }
+  return "";
+}
 type DatabaseQueryClient = {
   query(queryText: string): Promise<{ rows: DatabaseIdentityRow[] }>;
 };
@@ -59,8 +73,15 @@ const transactionStates = new WeakMap<PoolClient, ClientTransactionState>();
 
 function wrapClient(client: PoolClient): PoolClient {
   const originalQuery = client.query.bind(client) as (...args: readonly unknown[]) => unknown;
-  const transactionState = { inTransaction: false };
+  const transactionState: ClientTransactionState = { inTransaction: false, appliedContextKey: undefined };
+  let queryQueue: Promise<void> = Promise.resolve();
   transactionStates.set(client, transactionState);
+
+  function enqueueQuery<T>(task: () => Promise<T>): Promise<T> {
+    const queuedQuery = queryQueue.then(task, task);
+    queryQueue = queuedQuery.then(() => undefined, () => undefined);
+    return queuedQuery;
+  }
 
   function invokeRaw(query: unknown, values?: unknown, callback?: QueryCallback): unknown {
     return callback
@@ -68,18 +89,24 @@ function wrapClient(client: PoolClient): PoolClient {
       : originalQuery(query, values);
   }
 
-  function updateTransactionState(query: unknown): void {
-    if (typeof query !== "string") return;
-    const queryText = query.trim().toLowerCase();
+  function updateTransactionState(queryText: string): void {
     if (/^(begin|start\s+transaction)\b/.test(queryText)) {
       transactionState.inTransaction = true;
-    } else if (/^(commit|rollback)(?!\s+to\b)\b/.test(queryText)) {
+      transactionState.appliedContextKey = undefined;
+    } else if (/^(commit|end|rollback|abort)\b/.test(queryText) && !/^rollback\s+(work\s+|transaction\s+)?to\b/.test(queryText)) {
       transactionState.inTransaction = false;
+      transactionState.appliedContextKey = undefined;
+    } else if (/^rollback\s+(work\s+|transaction\s+)?to\b/.test(queryText)) {
+      // A context set after the savepoint is undone with it; apply it again on the next query.
+      transactionState.appliedContextKey = undefined;
     }
   }
 
-  async function runWithContext(query: unknown, values?: unknown): Promise<unknown> {
-    const context = getDatabaseRequestContext();
+  async function runWithContext(
+    query: unknown,
+    values: unknown,
+    context: ReturnType<typeof getDatabaseRequestContext>,
+  ): Promise<unknown> {
     if (!context || context.scope === "anonymous") return invokeRaw(query, values) as Promise<unknown>;
 
     const contextValues = [
@@ -90,47 +117,80 @@ function wrapClient(client: PoolClient): PoolClient {
       context.websitePublicKey ?? "",
       context.publicContactEmail ?? "",
     ];
+    const contextKey = JSON.stringify(contextValues);
 
     if (transactionState.inTransaction) {
-      await invokeRaw(RLS_CONTEXT_SQL, contextValues);
+      if (transactionState.appliedContextKey !== contextKey) {
+        await invokeRaw(RLS_CONTEXT_SQL, contextValues);
+        transactionState.appliedContextKey = contextKey;
+      }
       return invokeRaw(query, values);
     }
 
+    // A single query outside an explicit transaction gets its own short transaction, so the
+    // transaction-local settings can never outlive this query on a pooled connection.
     transactionState.inTransaction = true;
     await invokeRaw("begin");
     try {
       await invokeRaw(RLS_CONTEXT_SQL, contextValues);
       const result = await invokeRaw(query, values);
       await invokeRaw("commit");
-      transactionState.inTransaction = false;
       return result;
     } catch (error) {
       await Promise.resolve(invokeRaw("rollback")).catch(() => undefined);
-      transactionState.inTransaction = false;
       throw error;
+    } finally {
+      transactionState.inTransaction = false;
+      transactionState.appliedContextKey = undefined;
     }
   }
 
   client.query = ((query: unknown, values?: unknown, callback?: QueryCallback) => {
     const callbackFunction = typeof values === "function" ? values as QueryCallback : callback;
     const queryValues = callbackFunction === values ? undefined : values;
-    const queryText = typeof query === "string" ? query.trim().toLowerCase() : "";
-    const isTransactionControl = /^(begin|start\s+transaction|commit|rollback|release|savepoint)\b/.test(queryText);
-    if (isTransactionControl || !getDatabaseRequestContext()) {
-      const result = invokeRaw(query, queryValues, callbackFunction);
-      updateTransactionState(query);
-      return result;
+    const queryText = queryTextOf(query);
+    const isTransactionControl = TRANSACTION_CONTROL_PATTERN.test(queryText);
+    // A manual RLS setting is sent as-is and invalidates the cached context, which is then
+    // applied again before the next query of this transaction.
+    const isManualRlsSetting = /^set\s+(local\s+|session\s+)?app\.rls_/.test(queryText);
+    if (isTransactionControl || isManualRlsSetting || !getDatabaseRequestContext()) {
+      if (isManualRlsSetting) transactionState.appliedContextKey = undefined;
+      updateTransactionState(queryText);
+
+      if (callbackFunction) {
+        void enqueueQuery(
+          () => new Promise((resolve, reject) => {
+            originalQuery(query, queryValues, (error: Error | null, result: unknown) => {
+              callbackFunction(error, result);
+              if (error) reject(error);
+              else resolve(result);
+            });
+          }),
+        ).catch(() => undefined);
+        return undefined;
+      }
+
+      return enqueueQuery(() => Promise.resolve(invokeRaw(query, queryValues)));
     }
 
+    const context = getDatabaseRequestContext();
     if (callbackFunction) {
-      runWithContext(query, queryValues).then(
-        (result) => callbackFunction(null, result),
-        (error: unknown) => callbackFunction(error instanceof Error ? error : new Error("Database query failed")),
-      );
+      void enqueueQuery(() =>
+        runWithContext(query, queryValues, context).then(
+          (result) => {
+            callbackFunction(null, result);
+            return result;
+          },
+          (error: unknown) => {
+            callbackFunction(error instanceof Error ? error : new Error("Database query failed"));
+            throw error;
+          },
+        ),
+      ).catch(() => undefined);
       return undefined;
     }
 
-    return runWithContext(query, queryValues);
+    return enqueueQuery(() => runWithContext(query, queryValues, context));
   }) as QueryMethod;
   return client;
 }

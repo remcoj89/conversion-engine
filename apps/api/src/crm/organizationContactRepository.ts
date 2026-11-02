@@ -1,11 +1,21 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "../db/schema.js";
+import { readCode, readConstraint } from "../errors.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
 export type Organization = typeof schema.organizations.$inferSelect;
 export type Contact = typeof schema.contacts.$inferSelect;
+
+export class DuplicateContactEmailError extends Error {
+  readonly code = "duplicate_contact_email";
+
+  constructor() {
+    super("duplicate_contact_email");
+    this.name = "DuplicateContactEmailError";
+  }
+}
 
 export type CreateOrganizationInput = Readonly<{
   tenantId: string;
@@ -190,6 +200,7 @@ export async function archiveOrganization(
 }
 
 export async function createContact(db: Db, input: CreateContactInput): Promise<Contact> {
+  const email = normalizeContactEmail(input.email);
   const [contact] = await db
     .insert(schema.contacts)
     .values({
@@ -198,16 +209,47 @@ export async function createContact(db: Db, input: CreateContactInput): Promise<
       fullName: input.fullName,
       firstName: input.firstName ?? null,
       lastName: input.lastName ?? null,
-      email: input.email,
+      email,
       phone: input.phone ?? null,
       function: input.function ?? null,
       notes: input.notes ?? null,
       communicationPreference: input.communicationPreference ?? null,
     })
+    .onConflictDoNothing()
     .returning();
 
-  if (!contact) throw new Error("Contact insert returned no row");
+  if (!contact) throw new DuplicateContactEmailError();
   return contact;
+}
+
+/**
+ * Resolves a tenant-scoped contact identity for lead intake. The unique index is
+ * the final race-safe boundary; ON CONFLICT lets concurrent requests reuse the
+ * same contact instead of creating a second one.
+ */
+export async function findOrCreateContactByEmail(
+  db: Db,
+  input: Readonly<{ tenantId: string; fullName: string; email: string; phone?: string | null }>,
+): Promise<Contact> {
+  const email = normalizeContactEmail(input.email);
+  const [existing] = await findContactByNormalizedEmail(db, input.tenantId, email);
+  if (existing) return reactivateContact(db, existing);
+
+  const [created] = await db
+    .insert(schema.contacts)
+    .values({
+      tenantId: input.tenantId,
+      fullName: input.fullName,
+      email,
+      phone: input.phone ?? null,
+    })
+    .onConflictDoNothing()
+    .returning();
+  if (created) return created;
+
+  const [raced] = await findContactByEmail(db, input.tenantId, email);
+  if (!raced) throw new Error("Contact identity resolution returned no row");
+  return reactivateContact(db, raced);
 }
 
 export async function listContacts(
@@ -252,7 +294,7 @@ export async function updateContact(
     ...(input.fullName === undefined ? {} : { fullName: input.fullName }),
     ...(input.firstName === undefined ? {} : { firstName: input.firstName }),
     ...(input.lastName === undefined ? {} : { lastName: input.lastName }),
-    ...(input.email === undefined ? {} : { email: input.email }),
+    ...(input.email === undefined ? {} : { email: normalizeContactEmail(input.email) }),
     ...(input.phone === undefined ? {} : { phone: input.phone }),
     ...(input.function === undefined ? {} : { function: input.function }),
     ...(input.notes === undefined ? {} : { notes: input.notes }),
@@ -262,16 +304,59 @@ export async function updateContact(
     updatedAt: sql`now()`,
   };
 
-  const [contact] = await db
-    .update(schema.contacts)
-    .set(values)
-    .where(and(
-      eq(schema.contacts.tenantId, input.tenantId),
-      eq(schema.contacts.id, input.contactId),
-    ))
-    .returning();
+  let contact: Contact | undefined;
+  try {
+    [contact] = await db
+      .update(schema.contacts)
+      .set(values)
+      .where(and(
+        eq(schema.contacts.tenantId, input.tenantId),
+        eq(schema.contacts.id, input.contactId),
+      ))
+      .returning();
+  } catch (error) {
+    if (isContactEmailConflict(error)) throw new DuplicateContactEmailError();
+    throw error;
+  }
 
   return contact ?? null;
+}
+
+function normalizeContactEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function findContactByNormalizedEmail(db: Db, tenantId: string, email: string) {
+  return db
+    .select()
+    .from(schema.contacts)
+    .where(and(
+      eq(schema.contacts.tenantId, tenantId),
+      sql`lower(btrim(${schema.contacts.email})) = ${email}`,
+    ))
+    .limit(1);
+}
+
+function findContactByEmail(db: Db, tenantId: string, email: string) {
+  return findContactByNormalizedEmail(db, tenantId, email);
+}
+
+async function reactivateContact(db: Db, contact: Contact): Promise<Contact> {
+  if (contact.status === "active") return contact;
+  const [reactivated] = await db
+    .update(schema.contacts)
+    .set({ status: "active", updatedAt: sql`now()` })
+    .where(eq(schema.contacts.id, contact.id))
+    .returning();
+  return reactivated ?? contact;
+}
+
+function isContactEmailConflict(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : undefined;
+  return [error, cause].some((candidate) =>
+    readCode(candidate) === "23505"
+    && readConstraint(candidate) === "contacts_tenant_normalized_email_unique"
+  );
 }
 
 export async function archiveContact(

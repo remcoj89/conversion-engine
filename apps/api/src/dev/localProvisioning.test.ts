@@ -6,6 +6,7 @@ import {
   LOCAL_TENANT_NAME,
   ProvisioningError,
   assertLocalInvocation,
+  drizzleProvisioningTx,
   provisionLocalUser,
   type ProvisioningTx,
   type RunInTransaction,
@@ -206,4 +207,17 @@ test("fout halverwege draait de hele transactie terug", async () => {
     await assert.rejects(provisionLocalUser(db.run), /simulated failure/);
     assert.deepEqual(db.state(), before, `no partial writes after failure in ${failOn}`);
   }
+});
+
+test("ontbrekende tenant na insert (RLS verbergt RETURNING) geeft een duidelijke provisioningfout", async () => {
+  // Minimal stand-in for the Drizzle insert chain: the policy-filtered RETURNING yields no row.
+  const tx = { insert: () => ({ values: () => ({ returning: async () => [] }) }) };
+  const provisioningTx = drizzleProvisioningTx(tx as unknown as Parameters<typeof drizzleProvisioningTx>[0]);
+
+  await assert.rejects(provisioningTx.createTenant(LOCAL_TENANT_NAME), (error: unknown) => {
+    assert.ok(error instanceof ProvisioningError);
+    assert.equal(error.code, "tenant_unavailable");
+    assert.match(error.message, /role-bootstrap/);
+    return true;
+  });
 });

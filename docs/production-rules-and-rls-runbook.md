@@ -54,7 +54,7 @@ Gebruik een secret manager of private deployment-secrets. Zet geen wachtwoorden 
 De database-rollen zijn clusterobjecten en worden daarom niet door een gewone Drizzle-migratie aangemaakt. Voer de bootstrap één keer uit met een lokale PostgreSQL-beheerverbinding. Gebruik hiervoor een tijdelijke shell-omgeving; zet geen wachtwoorden in Git, documentatie of logs.
 
 ```text
-DATABASE_URL="<lokale-beheerverbinding-naar-conversion_engine>" \
+DATABASE_ADMIN_URL="<lokale-beheerverbinding-naar-conversion_engine>" \
 CE_MIGRATOR_PASSWORD="<lokaal-secret>" \
 CE_API_RUNTIME_PASSWORD="<ander-lokaal-secret>" \
 CE_BFF_RUNTIME_PASSWORD="<bff-lokaal-secret>" \
@@ -62,9 +62,13 @@ CE_MAINTENANCE_PASSWORD="<maintenance-lokaal-secret>" \
 npm --workspace api run db:bootstrap:roles:local -- --confirm-local
 ```
 
-De bootstrap weigert productie, controleert exact de database `conversion_engine`, maakt de vijf rollen idempotent aan, draagt publieke ownership over aan `ce_owner` en verwijdert tijdelijke owner-membership van de uitvoerende beheerrol. Na afloop moeten `DATABASE_URL`, `MIGRATOR_DATABASE_URL`, `MAINTENANCE_DATABASE_URL` en `SESSION_DATABASE_URL` lokaal naar hun respectieve beperkte rollen wijzen. De API mag daarna niet meer met de beheerverbinding starten.
+De bootstrap gebruikt uitsluitend `DATABASE_ADMIN_URL` en nooit `DATABASE_URL`; `DATABASE_URL` blijft de API-runtimeverbinding. Een admin-URL met een applicatierol (`ce_owner`, `ce_migrator`, `ce_api_runtime`, `ce_bff_runtime` of `ce_maintenance`) wordt geweigerd. Met lokale peer-authenticatie volstaat een URL zonder wachtwoord, bijvoorbeeld `postgresql:///conversion_engine?host=/var/run/postgresql`.
 
-Voer dezelfde gecontroleerde bootstrap daarna opnieuw uit met `EXPECTED_LOCAL_DATABASE=conversion_engine_test` en een adminverbinding naar `conversion_engine_test`; zo krijgen de lokale database-integratietests dezelfde beperkte API/BFF-rollen. Gebruik voor beide databases dezelfde rolcredentials uit je lokale secretomgeving, maar zet ze niet in deze documentatie.
+De bootstrap weigert productie, controleert exact de database `conversion_engine`,
+
+`ce_maintenance` krijgt lokaal per CLI een expliciete grantset (`LOCAL_MAINTENANCE_CLI_TABLE_GRANTS` in `bootstrapLocalDatabaseRoles.ts`) en alleen EXECUTE op de policy-helpers die de policies van die tabellen direct aanroepen. Voeg bij een `42501` niet handmatig rechten toe: pas eerst de migraties toe en voer daarna de bootstrap opnieuw uit. Policies mogen geen tabellen rechtstreeks lezen die niet aan iedere evaluerende rol zijn toegekend; gebruik daarvoor een SECURITY DEFINER-helper van `ce_owner` met vaste `search_path`, zoals `ce_rls_public_website_tenant_allowed` (migratie `0039`). maakt de vijf rollen idempotent aan, draagt publieke ownership over aan `ce_owner` en verwijdert tijdelijke owner-membership van de uitvoerende beheerrol. Na afloop moeten `DATABASE_URL`, `MIGRATOR_DATABASE_URL`, `MAINTENANCE_DATABASE_URL` en `SESSION_DATABASE_URL` lokaal naar hun respectieve beperkte rollen wijzen. De API mag daarna niet meer met de beheerverbinding starten.
+
+Voer dezelfde gecontroleerde bootstrap daarna opnieuw uit met `EXPECTED_LOCAL_DATABASE=conversion_engine_test` en `DATABASE_ADMIN_URL` naar `conversion_engine_test`; zo krijgen de lokale database-integratietests dezelfde beperkte API/BFF-rollen. Gebruik voor beide databases dezelfde rolcredentials uit je lokale secretomgeving, maar zet ze niet in deze documentatie.
 
 ## Preflight vóór een production migration
 

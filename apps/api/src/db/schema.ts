@@ -2,10 +2,12 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  date,
   foreignKey,
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   primaryKey,
   text,
@@ -302,6 +304,9 @@ export const contacts = pgTable(
     index("contacts_tenant_status_idx").on(table.tenantId, table.status),
     index("contacts_tenant_name_idx").on(table.tenantId, table.fullName),
     index("contacts_tenant_email_idx").on(table.tenantId, table.email),
+    uniqueIndex("contacts_tenant_normalized_email_unique")
+      .on(table.tenantId, sql`lower(btrim(${table.email}))`)
+      .where(sql`${table.status} = 'active'`),
     index("contacts_organization_idx").on(table.tenantId, table.organizationId),
     unique("contacts_tenant_id_unique").on(table.tenantId, table.id),
     check("contacts_full_name_not_blank_check", sql`length(btrim(${table.fullName})) > 0`),
@@ -313,8 +318,16 @@ export const contacts = pgTable(
   ],
 );
 
-// Minimal start: every lead begins as "new". Later statuses are added with their own migration.
-export const leadStatuses = ["new"] as const;
+// Lead lifecycle follows the approved CRM pipeline. Won and lost are terminal in this slice;
+// reopening a closed lead belongs to a future product decision rather than an implicit API path.
+export const leadStatuses = [
+  "new",
+  "qualified",
+  "appointment_scheduled",
+  "proposal",
+  "won",
+  "lost",
+] as const;
 
 // A lead always belongs to exactly one tenant; tenant_id is required and must reference an existing tenant.
 export const leads = pgTable(
@@ -325,7 +338,7 @@ export const leads = pgTable(
       .notNull()
       .references(() => tenants.id),
     websiteId: uuid("website_id"),
-    contactId: uuid("contact_id"),
+    contactId: uuid("contact_id").notNull(),
     name: text("name").notNull(),
     email: text("email").notNull(),
     phone: text("phone"),
@@ -340,9 +353,14 @@ export const leads = pgTable(
   },
   (table) => [
     index("leads_tenant_id_idx").on(table.tenantId),
+    uniqueIndex("leads_tenant_normalized_email_unique")
+      .on(table.tenantId, sql`lower(btrim(${table.email}))`),
     // Allows tenant-safe foreign keys from assignment records. The lead id is globally unique,
     // but the composite key keeps the tenant boundary explicit in the relational model.
     unique("leads_tenant_id_id_unique").on(table.tenantId, table.id),
+    // Public intake records must also keep the website boundary explicit. The nullable
+    // website_id is intentional for authenticated/manual leads; public leads always set it.
+    unique("leads_tenant_website_id_unique").on(table.tenantId, table.websiteId, table.id),
     foreignKey({
       name: "leads_website_tenant_fk",
       columns: [table.tenantId, table.websiteId],
@@ -353,7 +371,139 @@ export const leads = pgTable(
       columns: [table.tenantId, table.contactId],
       foreignColumns: [contacts.tenantId, contacts.id],
     }),
-    check("leads_status_check", sql`${table.status} in ('new')`),
+    check(
+      "leads_status_check",
+      sql`${table.status} in ('new', 'qualified', 'appointment_scheduled', 'proposal', 'won', 'lost')`,
+    ),
+  ],
+);
+
+export const leadLifecycleAuditEventTypes = ["status_changed"] as const;
+
+// Immutable, content-free audit metadata for tenant-local lead lifecycle transitions.
+// The lead and actor are both composite tenant foreign keys, so an event cannot cross a tenant.
+export const leadLifecycleAuditEvents = pgTable(
+  "lead_lifecycle_audit_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+    leadId: uuid("lead_id").notNull(),
+    actorUserId: uuid("actor_user_id").notNull(),
+    eventType: text("event_type", { enum: leadLifecycleAuditEventTypes }).notNull(),
+    fromStatus: text("from_status", { enum: leadStatuses }).notNull(),
+    toStatus: text("to_status", { enum: leadStatuses }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "lead_lifecycle_audit_events_lead_tenant_fk",
+      columns: [table.tenantId, table.leadId],
+      foreignColumns: [leads.tenantId, leads.id],
+    }),
+    foreignKey({
+      name: "lead_lifecycle_audit_events_actor_membership_fk",
+      columns: [table.tenantId, table.actorUserId],
+      foreignColumns: [memberships.tenantId, memberships.userId],
+    }),
+    index("lead_lifecycle_audit_events_tenant_created_idx").on(table.tenantId, table.createdAt),
+    index("lead_lifecycle_audit_events_tenant_lead_created_idx").on(table.tenantId, table.leadId, table.createdAt),
+    check("lead_lifecycle_audit_events_type_check", sql`${table.eventType} in ('status_changed')`),
+    check(
+      "lead_lifecycle_audit_events_status_check",
+      sql`${table.fromStatus} in ('new', 'qualified', 'appointment_scheduled', 'proposal', 'won', 'lost') and ${table.toStatus} in ('new', 'qualified', 'appointment_scheduled', 'proposal', 'won', 'lost')`,
+    ),
+  ],
+);
+
+export const dealStatuses = ["active", "archived"] as const;
+export const dealStages = leadStatuses;
+
+// A deal is a small, tenant-local sales opportunity. The contact is required, while the
+// owner is optional until a tenant has more than one active team member.
+export const deals = pgTable(
+  "deals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+    contactId: uuid("contact_id").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    amountEur: numeric("amount_eur", { precision: 12, scale: 2, mode: "string" }),
+    ownerUserId: uuid("owner_user_id"),
+    stage: text("stage", { enum: dealStages }).notNull().default("new"),
+    expectedCloseDate: date("expected_close_date", { mode: "string" }),
+    lossReason: text("loss_reason"),
+    status: text("status", { enum: dealStatuses }).notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("deals_tenant_stage_status_idx").on(table.tenantId, table.stage, table.status),
+    index("deals_tenant_contact_idx").on(table.tenantId, table.contactId),
+    index("deals_tenant_owner_idx").on(table.tenantId, table.ownerUserId),
+    unique("deals_tenant_id_unique").on(table.tenantId, table.id),
+    foreignKey({
+      name: "deals_contact_tenant_fk",
+      columns: [table.tenantId, table.contactId],
+      foreignColumns: [contacts.tenantId, contacts.id],
+    }),
+    foreignKey({
+      name: "deals_owner_membership_fk",
+      columns: [table.tenantId, table.ownerUserId],
+      foreignColumns: [memberships.tenantId, memberships.userId],
+    }),
+    check("deals_title_not_blank_check", sql`length(btrim(${table.title})) > 0`),
+    check("deals_amount_eur_non_negative_check", sql`${table.amountEur} is null or ${table.amountEur} >= 0`),
+    check(
+      "deals_stage_check",
+      sql`${table.stage} in ('new', 'qualified', 'appointment_scheduled', 'proposal', 'won', 'lost')`,
+    ),
+    check("deals_status_check", sql`${table.status} in ('active', 'archived')`),
+    check(
+      "deals_archived_at_check",
+      sql`(${table.status} = 'active' and ${table.archivedAt} is null) or (${table.status} = 'archived' and ${table.archivedAt} is not null)`,
+    ),
+    check(
+      "deals_loss_reason_check",
+      sql`${table.stage} = 'lost' or ${table.lossReason} is null`,
+    ),
+  ],
+);
+
+export const dealLifecycleAuditEventTypes = ["stage_changed"] as const;
+
+// Immutable, content-free audit metadata for deal stage transitions.
+export const dealLifecycleAuditEvents = pgTable(
+  "deal_lifecycle_audit_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+    dealId: uuid("deal_id").notNull(),
+    actorUserId: uuid("actor_user_id").notNull(),
+    eventType: text("event_type", { enum: dealLifecycleAuditEventTypes }).notNull(),
+    fromStage: text("from_stage", { enum: dealStages }).notNull(),
+    toStage: text("to_stage", { enum: dealStages }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "deal_lifecycle_audit_events_deal_tenant_fk",
+      columns: [table.tenantId, table.dealId],
+      foreignColumns: [deals.tenantId, deals.id],
+    }),
+    foreignKey({
+      name: "deal_lifecycle_audit_events_actor_membership_fk",
+      columns: [table.tenantId, table.actorUserId],
+      foreignColumns: [memberships.tenantId, memberships.userId],
+    }),
+    index("deal_lifecycle_audit_events_tenant_created_idx").on(table.tenantId, table.createdAt),
+    index("deal_lifecycle_audit_events_tenant_deal_created_idx").on(table.tenantId, table.dealId, table.createdAt),
+    check("deal_lifecycle_audit_events_type_check", sql`${table.eventType} in ('stage_changed')`),
+    check(
+      "deal_lifecycle_audit_events_stage_check",
+      sql`${table.fromStage} in ('new', 'qualified', 'appointment_scheduled', 'proposal', 'won', 'lost') and ${table.toStage} in ('new', 'qualified', 'appointment_scheduled', 'proposal', 'won', 'lost')`,
+    ),
   ],
 );
 
@@ -375,9 +525,9 @@ export const publicLeadIdempotencyKeys = pgTable(
       foreignColumns: [websites.tenantId, websites.id],
     }),
     foreignKey({
-      name: "public_lead_idempotency_lead_tenant_fk",
-      columns: [table.tenantId, table.leadId],
-      foreignColumns: [leads.tenantId, leads.id],
+      name: "public_lead_idempotency_lead_website_tenant_fk",
+      columns: [table.tenantId, table.websiteId, table.leadId],
+      foreignColumns: [leads.tenantId, leads.websiteId, leads.id],
     }),
     check("public_lead_idempotency_key_check", sql`${table.idempotencyKey} ~ '^[A-Za-z0-9._~-]{1,128}$'`),
     check("public_lead_idempotency_hash_check", sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
@@ -421,9 +571,9 @@ export const publicLeadOutbox = pgTable(
       foreignColumns: [websites.tenantId, websites.id],
     }),
     foreignKey({
-      name: "public_lead_outbox_lead_tenant_fk",
-      columns: [table.tenantId, table.leadId],
-      foreignColumns: [leads.tenantId, leads.id],
+      name: "public_lead_outbox_lead_website_tenant_fk",
+      columns: [table.tenantId, table.websiteId, table.leadId],
+      foreignColumns: [leads.tenantId, leads.websiteId, leads.id],
     }),
     unique("public_lead_outbox_lead_event_unique").on(table.tenantId, table.leadId, table.eventType),
     index("public_lead_outbox_pending_idx").on(table.status, table.createdAt),

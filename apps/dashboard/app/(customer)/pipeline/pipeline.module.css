@@ -80,6 +80,111 @@
   font-weight: 800;
 }
 
+.dealSection {
+  display: grid;
+  gap: 16px;
+  margin-top: 40px;
+  padding-top: 32px;
+  border-top: 1px solid var(--border);
+}
+
+.dealCardMeta {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.dealState {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+}
+
+.dealFormStatus,
+.dealFormError,
+.dealSuccess {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+}
+
+.dealFormStatus {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+}
+
+.dealFormError {
+  border: 1px solid #f4c7c3;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 650;
+}
+
+.dealSuccess {
+  border: 1px solid #b9dec9;
+  background: #eefaf2;
+  color: #24663f;
+  font-weight: 650;
+}
+
+.dealDetailCard {
+  display: grid;
+  gap: 28px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+
+.dealDetailHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.dealDetailHeader h2 {
+  margin: 0;
+}
+
+.dealBadgeGroup {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dealDetailGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.dealDetailField {
+  display: grid;
+  gap: 5px;
+  padding: 16px;
+  border-radius: var(--radius-control);
+  background: var(--surface-muted);
+}
+
+.dealDetailField dt {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.dealDetailField dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
 @media (max-width: 900px) {
   .pipelinePreviewGrid {
     grid-template-columns: 1fr;
@@ -94,5 +199,21 @@
 
   .previewCardContent {
     padding: 18px;
+  }
+
+  .dealDetailCard {
+    padding: 18px;
+  }
+
+  .dealDetailHeader {
+    display: grid;
+  }
+
+  .dealBadgeGroup {
+    justify-content: flex-start;
+  }
+
+  .dealDetailGrid {
+    grid-template-columns: 1fr;
   }
 }

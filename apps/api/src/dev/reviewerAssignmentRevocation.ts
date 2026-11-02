@@ -207,7 +207,8 @@ export function drizzleReviewerAssignmentRevocationTransactionRunner(
   return (fn) => db.transaction((tx) => fn(drizzleReviewerAssignmentRevocationTx(tx)));
 }
 
-function drizzleReviewerAssignmentRevocationTx(tx: DbTx): ReviewerAssignmentRevocationTx {
+// Exported for database tests that exercise the real queries as ce_maintenance.
+export function drizzleReviewerAssignmentRevocationTx(tx: DbTx): ReviewerAssignmentRevocationTx {
   return {
     async findTenant(tenantId) {
       const [tenant] = await tx

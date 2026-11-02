@@ -62,6 +62,9 @@ export async function updateCrmSettingsInTransaction(
     settings: CrmSettings;
   }>,
 ): Promise<PersistedCrmSettings> {
+  // Keep the repository boundary safe for non-HTTP callers as well. The route validates
+  // the request contract, but every persistence path must protect the audit snapshot too.
+  const validatedSettings = parseCrmSettings(input.settings);
   const current = await tx
     .select()
     .from(schema.crmSettings)
@@ -72,11 +75,11 @@ export async function updateCrmSettingsInTransaction(
   const [saved] = current.length === 0
     ? await tx
       .insert(schema.crmSettings)
-      .values({ tenantId: input.tenantId, settings: input.settings })
+      .values({ tenantId: input.tenantId, settings: validatedSettings })
       .returning()
     : await tx
       .update(schema.crmSettings)
-      .set({ settings: input.settings, updatedAt: new Date() })
+      .set({ settings: validatedSettings, updatedAt: new Date() })
       .where(eq(schema.crmSettings.tenantId, input.tenantId))
       .returning();
 
@@ -86,7 +89,7 @@ export async function updateCrmSettingsInTransaction(
     tenantId: input.tenantId,
     actorUserId: input.actorUserId,
     eventType: "updated",
-    settings: input.settings,
+    settings: validatedSettings,
   });
 
   return toPersistedSettings(saved);

@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "../db/schema.js";
+import { findOrCreateContactByEmail } from "../crm/organizationContactRepository.js";
 import { hashPublicLeadInput, type PublicLeadInput } from "./publicLeadInput.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
 export type PublicWebsiteContext = Readonly<{ websiteId: string; tenantId: string }>;
 export type PublicLeadResult = Readonly<{
-  status: "accepted" | "replayed" | "rate_limited";
+  status: "accepted" | "replayed" | "duplicate" | "rate_limited";
   leadId?: string;
   createdAt?: Date;
 }>;
@@ -68,7 +69,22 @@ export async function createPublicLeadInTransaction(
     if (rateLimit > RATE_LIMIT_PER_MINUTE) return { status: "rate_limited" };
 
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${website.tenantId}:${input.email}`}, 0))`);
-    const contact = await findOrCreateContact(tx, website.tenantId, input);
+    const [existingLead] = await tx
+      .select({ id: schema.leads.id })
+      .from(schema.leads)
+      .where(and(
+        eq(schema.leads.tenantId, website.tenantId),
+        sql`lower(btrim(${schema.leads.email})) = ${input.email}`,
+      ))
+      .limit(1);
+    if (existingLead) return { status: "duplicate" };
+
+    const contact = await findOrCreateContactByEmail(tx, {
+      tenantId: website.tenantId,
+      fullName: input.name,
+      email: input.email,
+      phone: input.phone,
+    });
 
     // Generate the identifier before inserting. A public lead is intentionally not
     // readable until its idempotency record exists, so RETURNING here would also
@@ -134,29 +150,6 @@ async function claimRateLimit(tx: Db, websiteId: string): Promise<number> {
   const count = Number(result.rows[0]?.request_count);
   if (!Number.isSafeInteger(count)) throw new PublicLeadPersistenceError("rate limit counter missing");
   return count;
-}
-
-async function findOrCreateContact(tx: Db, tenantId: string, input: PublicLeadInput): Promise<{ id: string }> {
-  const [existing] = await tx
-    .select({ id: schema.contacts.id })
-    .from(schema.contacts)
-    .where(and(
-      eq(schema.contacts.tenantId, tenantId),
-      sql`lower(btrim(${schema.contacts.email})) = ${input.email}`,
-      eq(schema.contacts.status, "active"),
-    ))
-    .limit(1);
-  if (existing) return existing;
-
-  const [created] = await tx.insert(schema.contacts).values({
-    tenantId,
-    fullName: input.name,
-    email: input.email,
-    phone: input.phone,
-    status: "active",
-  }).returning({ id: schema.contacts.id });
-  if (!created) throw new PublicLeadPersistenceError("contact insert returned no row");
-  return created;
 }
 
 export function isPublicLeadRateLimited(result: PublicLeadResult): boolean {

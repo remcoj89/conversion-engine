@@ -1,10 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { getAuthContext } from "../auth/authHook.js";
 import { authorize } from "../auth/authorization.js";
+import type { LeadDashboardSummary, LeadReader } from "../leads/leadRepository.js";
 import type { TenantLoader } from "../tenants/tenantLoader.js";
 
-// Vaste fixture tot er een databron is; null betekent "nog niet beschikbaar", nooit 0.
-const todayFixture = {
+// Backwards-compatible fallback for older test doubles that do not provide the CRM reader.
+const legacyTodayFixture = {
   actionRequired: [
     {
       id: "leads-needing-attention",
@@ -37,10 +38,12 @@ const todayFixture = {
 
 export type DashboardRouteDependencies = Readonly<{
   tenantLoader: TenantLoader;
+  // Optional only for older test doubles. Production wiring always provides the reader.
+  leadReader?: LeadReader;
 }>;
 
 // Must be registered behind the auth hook; without it getAuthContext fails closed.
-export function registerDashboardRoutes(app: FastifyInstance, { tenantLoader }: DashboardRouteDependencies) {
+export function registerDashboardRoutes(app: FastifyInstance, { tenantLoader, leadReader }: DashboardRouteDependencies) {
   app.get("/v1/dashboard/today", async (request, reply) => {
     const context = getAuthContext(request);
     if (!authorize(context.role, "dashboard:read")) {
@@ -52,6 +55,54 @@ export function registerDashboardRoutes(app: FastifyInstance, { tenantLoader }: 
       // Removed after the membership check: fail closed without saying why.
       return reply.code(403).send({ error: "forbidden" });
     }
-    return { tenant, ...todayFixture };
+
+    // The tenant only ever comes from the auth context. The reader repeats that boundary in SQL.
+    if (!leadReader?.getTodaySummary) return { tenant, ...legacyTodayFixture };
+    const summary = await leadReader.getTodaySummary(context.tenantId);
+    return { tenant, ...todayDataFor(summary) };
   });
+}
+
+function todayDataFor(summary: LeadDashboardSummary) {
+  const newestNewLeads = summary.newestNewLeads.slice(0, 5);
+  return {
+    actionRequired: [
+      {
+        id: "leads-needing-attention",
+        label: "Leads die aandacht vragen",
+        value: summary.newLeadCount,
+        status: "available" as const,
+        source: "CRM",
+      },
+      {
+        id: "open-tasks",
+        label: "Open taken",
+        value: null,
+        status: "unavailable" as const,
+        source: "CRM",
+      },
+      {
+        id: "confirmed-appointments",
+        label: "Bevestigde afspraken",
+        value: null,
+        status: "unavailable" as const,
+        source: "Boekingsprovider",
+      },
+    ],
+    directFollowUp: newestNewLeads.length > 0
+      ? {
+        status: "available" as const,
+        leads: newestNewLeads.map((lead) => ({
+          id: lead.id,
+          name: lead.name,
+          message: lead.message,
+          source: lead.source,
+          created_at: lead.createdAt.toISOString(),
+        })),
+      }
+      : {
+        status: "empty" as const,
+        message: "Er zijn geen nieuwe aanvragen om op te volgen.",
+      },
+  };
 }

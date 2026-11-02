@@ -561,9 +561,32 @@
   gap: 3px;
 }
 
+.leadStatusForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.leadStatusSuccess,
+.leadStatusError {
+  margin-top: 16px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.leadStatusSuccess {
+  color: #26734d;
+}
+
+.leadStatusError {
+  color: #a33a3a;
+}
+
 .customerKanban {
   display: grid;
-  grid-template-columns: repeat(5, minmax(220px, 1fr));
+  grid-template-columns: repeat(6, minmax(220px, 1fr));
   gap: 12px;
   overflow-x: auto;
   padding-bottom: 8px;
@@ -585,6 +608,63 @@
   margin-bottom: 12px;
   font-size: 13px;
   font-weight: 800;
+}
+
+.customerKanbanHeader h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.pipelineNotice {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border: 1px solid #ead8b6;
+  border-radius: var(--radius-control);
+  background: var(--warning-soft);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.pipelineColumnEmpty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.pipelineLeadList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pipelineLeadItem {
+  min-width: 0;
+}
+
+.pipelineLeadCard {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.pipelineLeadCard:hover,
+.pipelineLeadCard:focus-visible {
+  border-color: var(--brand-primary);
+  box-shadow: 0 8px 20px rgb(18 35 61 / 10%);
+  transform: translateY(-1px);
+}
+
+.pipelineLeadCard:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--brand-primary) 35%, transparent);
+  outline-offset: 2px;
 }
 
 .customerDealCard {
@@ -1011,6 +1091,10 @@
   .customerFilterForm,
   .customerFilterField {
     width: 100%;
+  }
+
+  .leadStatusForm {
+    grid-template-columns: 1fr;
   }
 
   .customerFilterActions .button {

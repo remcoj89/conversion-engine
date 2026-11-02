@@ -6,7 +6,7 @@ import { findActivePlatformAdminAssignments } from "./auth/platformAdminResolver
 import { createDiscoveredKeySet } from "./auth/oidcDiscovery.js";
 import { createZitadelAdapter } from "./auth/zitadelAdapter.js";
 import { createApiRuntimeDb } from "./db.js";
-import { createLead, createLeadReader } from "./leads/leadRepository.js";
+import { createLead, createLeadReader, createLeadStatusUpdater } from "./leads/leadRepository.js";
 import { findCurrentOnboarding, saveOnboardingDraft, submitOnboarding } from "./onboarding/onboardingRepository.js";
 import {
   approveOnboarding,
@@ -26,8 +26,10 @@ import { findTenant } from "./tenants/tenantLoader.js";
 import { createOrganizationContactRepository } from "./crm/organizationContactRepository.js";
 import { createTeamMemberRepository } from "./team/teamMemberRepository.js";
 import { createCrmSettingsRepository } from "./crm/settingsRepository.js";
+import { createDealRepository } from "./deals/dealRepository.js";
 import { createPublicLead } from "./leads/publicLeadRepository.js";
 import { findActiveWebsiteContext } from "./websites/websiteResolver.js";
+import { readPublicLeadCorsOrigins } from "./cors.js";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 4000;
@@ -37,16 +39,21 @@ const port = Number(process.env.PORT ?? DEFAULT_PORT);
 // DATABASE_URL, ZITADEL_ISSUER and API_AUDIENCE are required; there is no fallback or bypass.
 let authConfig: AuthConfig;
 let db: Awaited<ReturnType<typeof createApiRuntimeDb>>["db"];
+let publicLeadCorsOrigins: readonly string[];
 try {
   authConfig = readAuthConfig();
   ({ db } = await createApiRuntimeDb());
+  publicLeadCorsOrigins = readPublicLeadCorsOrigins();
 } catch (error) {
   // Config errors name the missing variable, never its value.
   console.error("Configuratie ongeldig:", error instanceof Error ? error.message : "unknown");
   process.exit(1);
 }
 
+const leadStatusUpdater = createLeadStatusUpdater(db);
+
 const app = buildApp({
+  publicLeadCorsOrigins,
   authAdapter: createZitadelAdapter({
     issuer: authConfig.issuer,
     audience: authConfig.audience,
@@ -64,10 +71,12 @@ const app = buildApp({
   tenantOwnerInvitationRepository: createTenantOwnerInvitationRepository(db),
   tenantLoader: (tenantId) => findTenant(db, tenantId),
   leadCreator: (tenantId, lead, actorUserId) => createLead(db, tenantId, lead, actorUserId),
+  leadStatusUpdater,
   leadReader: createLeadReader(db),
   organizationContactRepository: createOrganizationContactRepository(db),
   teamMemberRepository: createTeamMemberRepository(db),
   crmSettingsRepository: createCrmSettingsRepository(db),
+  dealRepository: createDealRepository(db),
   websiteResolver: (publicKey) => findActiveWebsiteContext(db, publicKey),
   publicLeadCreator: (website, idempotencyKey, input) => createPublicLead(db, website, idempotencyKey, input),
   onboardingStore: {
