@@ -42,11 +42,19 @@ const forwardedMutationErrors: readonly ForwardedError[] = [
   { status: 401, error: "unauthorized" },
   { status: 403, error: "forbidden" },
   { status: 404, error: "not_found" },
+  { status: 409, error: "conflict" },
   { status: 502, error: "api_unavailable" },
   { status: 503, error: "api_unavailable" },
 ];
 
-const organizationBodyFields = {
+type ControlledBodyField = Readonly<{
+  required?: boolean;
+  maxLength?: number;
+  nullable?: boolean;
+  parse?: (value: unknown) => unknown | undefined;
+}>;
+
+const organizationFields: Record<string, ControlledBodyField> = {
   name: { required: true, maxLength: 200 },
   kvk_number: { maxLength: 32, nullable: true },
   website: { maxLength: 2_000, nullable: true },
@@ -55,7 +63,13 @@ const organizationBodyFields = {
   address: { maxLength: 500, nullable: true },
   industry: { maxLength: 160, nullable: true },
   notes: { maxLength: 5_000, nullable: true },
-} as const;
+};
+
+const organizationCreateBodyFields: Record<string, ControlledBodyField> = {
+  ...organizationFields,
+  contact_id: { maxLength: 36, nullable: true, parse: parseUuid },
+  contact: { parse: parseInlineContactBody },
+};
 
 export function createOrganizationsHandler(dependencies: ApiProxyDependencies): OrganizationHandler {
   return async (request) => {
@@ -209,7 +223,11 @@ async function proxyJsonMutation(
 ): Promise<Response> {
   if (!isSameOriginRequest(request)) return reply({ error: "forbidden" }, 403);
 
-  const body = await readControlledBody(request, organizationBodyFields, patch);
+  const body = await readControlledBody(
+    request,
+    patch ? organizationFields : organizationCreateBodyFields,
+    patch,
+  );
   if (body === null) return reply({ error: "invalid_body" }, 400);
 
   return proxyValidatedResponse(
@@ -245,7 +263,7 @@ async function proxyValidatedResponse<T>(
 
 async function readControlledBody(
   request: NextRequest,
-  fields: Record<string, { readonly required?: boolean; readonly maxLength: number; readonly nullable?: boolean }>,
+  fields: Record<string, ControlledBodyField>,
   patch: boolean,
 ): Promise<string | null> {
   if (!request.headers.get("content-type")?.toLowerCase().includes("application/json")) return null;
@@ -265,7 +283,7 @@ async function readControlledBody(
   if (!patch && keys.some((key) => fields[key]?.required && !Object.hasOwn(value, key))) return null;
   if (patch && keys.length === 0) return null;
 
-  const normalized: Record<string, string | null> = {};
+  const normalized: Record<string, unknown> = {};
   for (const key of keys) {
     const field = fields[key]!;
     const fieldValue = value[key];
@@ -274,7 +292,13 @@ async function readControlledBody(
       normalized[key] = null;
       continue;
     }
-    if (!isInputString(fieldValue, field.maxLength)) return null;
+    if (field.parse) {
+      const parsed = field.parse(fieldValue);
+      if (parsed === undefined) return null;
+      normalized[key] = parsed;
+      continue;
+    }
+    if (field.maxLength === undefined || !isInputString(fieldValue, field.maxLength)) return null;
     normalized[key] = fieldValue.trim();
   }
 
@@ -316,8 +340,63 @@ function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
+function parseUuid(value: unknown): string | undefined {
+  return isUuid(value) ? value : undefined;
+}
+
+function parseInlineContactBody(value: unknown): Record<string, string | null> | undefined {
+  const fields = new Set([
+    "full_name",
+    "first_name",
+    "last_name",
+    "email",
+    "phone",
+    "function",
+    "notes",
+    "communication_preference",
+  ]);
+  if (!isRecord(value) || Object.keys(value).some((key) => !fields.has(key))) return undefined;
+
+  const fullName = readRequiredText(value.full_name, 200);
+  const email = readRequiredText(value.email, 320);
+  if (!fullName || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return undefined;
+
+  const normalized: Record<string, string | null> = {
+    full_name: fullName,
+    email: email.toLowerCase(),
+  };
+  const limits: Record<string, number> = {
+    first_name: 120,
+    last_name: 120,
+    phone: 80,
+    function: 160,
+    notes: 5_000,
+    communication_preference: 64,
+  };
+  for (const [key, maxLength] of Object.entries(limits)) {
+    if (!Object.hasOwn(value, key)) continue;
+    const field = value[key];
+    if (field === null) {
+      normalized[key] = null;
+    } else if (isInputString(field, maxLength)) {
+      normalized[key] = field.trim();
+    } else {
+      return undefined;
+    }
+  }
+  return normalized;
+}
+
+function readRequiredText(value: unknown, maxLength: number): string | undefined {
+  return isInputString(value, maxLength) && value.trim() ? value.trim() : undefined;
+}
+
 function isRequiredString(value: unknown, maxLength: number): value is string {
   return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isNullableString(value: unknown, maxLength: number): value is string | null {
@@ -341,10 +420,6 @@ function containsControlCharacter(value: string): boolean {
 
 function isDateString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0 && !Number.isNaN(Date.parse(value));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {

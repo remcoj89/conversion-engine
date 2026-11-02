@@ -145,6 +145,39 @@ test("organizations BFF whitelist bodyvelden voor create, patch en archive", asy
   assert.equal(archive.calls[0]!.init.body, "");
 });
 
+test("organizations BFF accepteert alleen gecontroleerde relationele createvelden", async () => {
+  const create = setup(() => Response.json(organization, { status: 201 }));
+  const response = await create.list(request(
+    "https://app.test/api/organizations",
+    "POST",
+    {
+      name: "Northline Fysio",
+      contact: {
+        full_name: "Lisa de Vries",
+        email: " LISA@example.test ",
+        phone: " 0612345678 ",
+      },
+    },
+    { origin: "https://app.test" },
+  ));
+
+  assert.equal(response.status, 201);
+  assert.equal(create.calls[0]!.init.body, JSON.stringify({
+    name: "Northline Fysio",
+    contact: { full_name: "Lisa de Vries", email: "lisa@example.test", phone: "0612345678" },
+  }));
+
+  const invalid = setup();
+  const invalidResponse = await invalid.list(request(
+    "https://app.test/api/organizations",
+    "POST",
+    { name: "Northline Fysio", contact: { full_name: "Lisa", email: "lisa@example.test", secret: "drop" } },
+    { origin: "https://app.test" },
+  ));
+  assert.equal(invalidResponse.status, 400);
+  assert.equal(invalid.calls.length, 0);
+});
+
 test("organizations BFF weigert mutaties zonder same-origin en onbekende bodyvelden", async () => {
   const { list, calls } = setup();
   const response = await list(request("https://app.test/api/organizations", "POST", { name: "Northline" }, { origin: "https://evil.test" }));
@@ -175,7 +208,7 @@ test("organizations BFF faalt gesloten bij malformed success responses", async (
 });
 
 test("organizations BFF mapt bekende upstreamfouten veilig", async () => {
-  for (const [status, error] of [[401, "unauthorized"], [403, "forbidden"], [404, "not_found"], [502, "api_unavailable"], [503, "api_unavailable"]] as const) {
+  for (const [status, error] of [[401, "unauthorized"], [403, "forbidden"], [404, "not_found"], [409, "conflict"], [502, "api_unavailable"], [503, "api_unavailable"]] as const) {
     const { detail } = setup(() => Response.json({ error, secret: "hidden" }, { status }));
     const response = await detail(request(`https://app.test/api/organizations/${ORGANIZATION_ID}`));
     assert.equal(response.status, status);

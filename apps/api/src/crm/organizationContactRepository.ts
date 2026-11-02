@@ -17,6 +17,24 @@ export class DuplicateContactEmailError extends Error {
   }
 }
 
+export class ContactNotFoundForOrganizationError extends Error {
+  readonly code = "contact_not_found";
+
+  constructor() {
+    super("contact_not_found");
+    this.name = "ContactNotFoundForOrganizationError";
+  }
+}
+
+export class ContactAlreadyLinkedError extends Error {
+  readonly code = "contact_already_linked";
+
+  constructor() {
+    super("contact_already_linked");
+    this.name = "ContactAlreadyLinkedError";
+  }
+}
+
 export type CreateOrganizationInput = Readonly<{
   tenantId: string;
   name: string;
@@ -69,6 +87,22 @@ export type UpdateContactInput = Readonly<{
   communicationPreference?: string | null;
 }>;
 
+export type NewOrganizationInput = Omit<CreateOrganizationInput, "tenantId">;
+export type NewContactInput = Omit<CreateContactInput, "tenantId" | "organizationId">;
+
+export type CreateContactWithOrganizationInput = Readonly<{
+  tenantId: string;
+  contact: NewContactInput;
+  organization: NewOrganizationInput;
+}>;
+
+export type CreateOrganizationWithContactInput = Readonly<{
+  tenantId: string;
+  organization: NewOrganizationInput;
+  contactId?: string | null;
+  contact?: NewContactInput | null;
+}>;
+
 export type ListOptions = Readonly<{ includeArchived?: boolean }>;
 
 export type OrganizationContactRepository = Readonly<{
@@ -82,6 +116,8 @@ export type OrganizationContactRepository = Readonly<{
     options?: ListOptions & Readonly<{ organizationId?: string }>,
   ) => Promise<readonly Contact[]>;
   createContact: (input: CreateContactInput) => Promise<Contact>;
+  createContactWithOrganization: (input: CreateContactWithOrganizationInput) => Promise<Readonly<{ contact: Contact; organization: Organization }>>;
+  createOrganizationWithContact: (input: CreateOrganizationWithContactInput) => Promise<Readonly<{ organization: Organization; contact: Contact | null }>>;
   findContact: (tenantId: string, contactId: string) => Promise<Contact | null>;
   updateContact: (input: UpdateContactInput) => Promise<Contact | null>;
   archiveContact: (tenantId: string, contactId: string) => Promise<Contact | null>;
@@ -96,6 +132,8 @@ export function createOrganizationContactRepository(db: Db): OrganizationContact
     archiveOrganization: (tenantId, organizationId) => archiveOrganization(db, tenantId, organizationId),
     listContacts: (tenantId, options) => listContacts(db, tenantId, options),
     createContact: (input) => createContact(db, input),
+    createContactWithOrganization: (input) => createContactWithOrganization(db, input),
+    createOrganizationWithContact: (input) => createOrganizationWithContact(db, input),
     findContact: (tenantId, contactId) => findContact(db, tenantId, contactId),
     updateContact: (input) => updateContact(db, input),
     archiveContact: (tenantId, contactId) => archiveContact(db, tenantId, contactId),
@@ -120,6 +158,67 @@ export async function createOrganization(db: Db, input: CreateOrganizationInput)
 
   if (!organization) throw new Error("Organization insert returned no row");
   return organization;
+}
+
+export async function createContactWithOrganization(
+  db: Db,
+  input: CreateContactWithOrganizationInput,
+): Promise<Readonly<{ contact: Contact; organization: Organization }>> {
+  return db.transaction(async (tx) => {
+    const organization = await createOrganization(tx, {
+      tenantId: input.tenantId,
+      ...input.organization,
+    });
+    const contact = await createContact(tx, {
+      tenantId: input.tenantId,
+      organizationId: organization.id,
+      ...input.contact,
+    });
+    return { organization, contact };
+  });
+}
+
+export async function createOrganizationWithContact(
+  db: Db,
+  input: CreateOrganizationWithContactInput,
+): Promise<Readonly<{ organization: Organization; contact: Contact | null }>> {
+  return db.transaction(async (tx) => {
+    const organization = await createOrganization(tx, {
+      tenantId: input.tenantId,
+      ...input.organization,
+    });
+
+    if (input.contact) {
+      const contact = await createContact(tx, {
+        tenantId: input.tenantId,
+        organizationId: organization.id,
+        ...input.contact,
+      });
+      return { organization, contact };
+    }
+
+    if (!input.contactId) return { organization, contact: null };
+
+    const existingContact = await findContact(tx, input.tenantId, input.contactId);
+    if (!existingContact || existingContact.status !== "active") {
+      throw new ContactNotFoundForOrganizationError();
+    }
+    if (existingContact.organizationId) throw new ContactAlreadyLinkedError();
+
+    const [contact] = await tx
+      .update(schema.contacts)
+      .set({ organizationId: organization.id, updatedAt: sql`now()` })
+      .where(and(
+        eq(schema.contacts.tenantId, input.tenantId),
+        eq(schema.contacts.id, input.contactId),
+        eq(schema.contacts.status, "active"),
+        sql`${schema.contacts.organizationId} is null`,
+      ))
+      .returning();
+
+    if (!contact) throw new ContactAlreadyLinkedError();
+    return { organization, contact };
+  });
 }
 
 export async function listOrganizations(

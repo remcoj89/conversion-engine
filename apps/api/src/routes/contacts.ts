@@ -6,6 +6,7 @@ import { DuplicateContactEmailError } from "../crm/organizationContactRepository
 import type {
   Contact,
   CreateContactInput,
+  NewOrganizationInput,
   OrganizationContactRepository,
   UpdateContactInput,
 } from "../crm/organizationContactRepository.js";
@@ -67,10 +68,16 @@ export function registerContactRoutes(
 
     let contact: Contact;
     try {
-      contact = await organizationContactRepository.createContact({
-        tenantId: context.tenantId,
-        ...input,
-      });
+      contact = input.organization
+        ? (await organizationContactRepository.createContactWithOrganization({
+          tenantId: context.tenantId,
+          contact: input.contact,
+          organization: input.organization,
+        })).contact
+        : await organizationContactRepository.createContact({
+          tenantId: context.tenantId,
+          ...input.contact,
+        });
     } catch (error) {
       if (error instanceof DuplicateContactEmailError) {
         return reply.code(409).send({ error: "duplicate_contact_email" });
@@ -178,17 +185,44 @@ export function toContactResponse(contact: Contact) {
   };
 }
 
-type ContactCreateBody = Omit<CreateContactInput, "tenantId">;
+type NewOrganizationBody = Omit<NewOrganizationInput, "tenantId">;
+type ContactCreateBody = Readonly<{
+  contact: Omit<CreateContactInput, "tenantId" | "organizationId">;
+  organizationId?: string | null;
+  organization?: NewOrganizationBody;
+}>;
 type ContactUpdateBody = Omit<UpdateContactInput, "tenantId" | "contactId">;
 
+const INLINE_ORGANIZATION_FIELDS = new Set([
+  "name",
+  "kvk_number",
+  "website",
+  "general_email",
+  "general_phone",
+  "address",
+  "industry",
+  "notes",
+]);
+
 function parseContactCreateBody(value: unknown): ContactCreateBody | null {
-  if (!isAllowedContactBody(value)) return null;
+  if (!isAllowedContactBody(value, new Set([...CONTACT_FIELD_SET, "organization"]))) return null;
   const body = value as Record<string, unknown>;
   const fullName = requiredText(body.full_name, 200);
   const email = parseEmail(body.email);
   if (!fullName || !email) return null;
   const optional = parseContactFields(body);
-  return optional ? { fullName, email, ...optional } : null;
+  if (!optional) return null;
+
+  const organization = body.organization === undefined ? undefined : parseInlineOrganization(body.organization);
+  if (organization === null) return null;
+  if (organization && optional.organizationId) return null;
+
+  const { organizationId, ...contact } = optional;
+  return {
+    contact: { fullName, email, ...contact },
+    ...(organizationId === undefined ? {} : { organizationId }),
+    ...(organization === undefined ? {} : { organization }),
+  };
 }
 
 function parseContactUpdateBody(value: unknown): ContactUpdateBody | null {
@@ -243,9 +277,35 @@ function parseContactFields(body: Record<string, unknown>): Record<string, strin
   return fields;
 }
 
-function isAllowedContactBody(value: unknown): value is Record<string, unknown> {
+function isAllowedContactBody(value: unknown, allowedKeys = CONTACT_FIELD_SET): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-    && Object.keys(value).every((key) => CONTACT_FIELD_SET.has(key));
+    && Object.keys(value).every((key) => allowedKeys.has(key));
+}
+
+function parseInlineOrganization(value: unknown): NewOrganizationBody | null {
+  if (!isAllowedContactBody(value, INLINE_ORGANIZATION_FIELDS)) return null;
+  const body = value as Record<string, unknown>;
+  const name = requiredText(body.name, 200);
+  if (!name) return null;
+
+  const fields: Record<string, string | null> = {};
+  const mappings = {
+    kvk_number: ["kvkNumber", 500],
+    website: ["website", 500],
+    general_email: ["generalEmail", 500],
+    general_phone: ["generalPhone", 500],
+    address: ["address", 500],
+    industry: ["industry", 500],
+    notes: ["notes", 10_000],
+  } as const;
+  for (const [inputKey, [outputKey, maxLength]] of Object.entries(mappings)) {
+    if (!Object.hasOwn(body, inputKey)) continue;
+    const parsed = nullableText(body[inputKey], maxLength);
+    if (parsed === undefined) return null;
+    fields[outputKey] = parsed;
+  }
+
+  return { name, ...fields };
 }
 
 function parseEmail(value: unknown): string | null {

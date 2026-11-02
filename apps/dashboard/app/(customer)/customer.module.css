@@ -306,6 +306,28 @@
   grid-column: 1 / -1;
 }
 
+.crmRelationSection {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: #f7f9fc;
+}
+
+.crmRelationSection legend {
+  padding: 0 6px;
+  color: var(--text-primary);
+  font-weight: 750;
+}
+
+.crmRelationDescription {
+  margin: -4px 0 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
 .crmDialogFeedback {
   min-height: 0;
 }

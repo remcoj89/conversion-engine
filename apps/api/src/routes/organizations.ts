@@ -2,6 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { getAuthContext } from "../auth/authHook.js";
 import { authorizeForUser } from "../auth/authorization.js";
 import { UUID_PATTERN } from "../auth/requestContext.js";
+import {
+  ContactAlreadyLinkedError,
+  ContactNotFoundForOrganizationError,
+  DuplicateContactEmailError,
+} from "../crm/organizationContactRepository.js";
 import type {
   CreateOrganizationInput,
   Organization,
@@ -55,10 +60,31 @@ export function registerOrganizationRoutes(
     const input = parseOrganizationCreateBody(request.body);
     if (!input) return reply.code(400).send({ error: "invalid_body" });
 
-    const organization = await organizationContactRepository.createOrganization({
-      tenantId: context.tenantId,
-      ...input,
-    });
+    let organization: Organization;
+    try {
+      organization = input.contactId !== undefined || input.contact
+        ? (await organizationContactRepository.createOrganizationWithContact({
+          tenantId: context.tenantId,
+          organization: input.organization,
+          contactId: input.contactId,
+          contact: input.contact,
+        })).organization
+        : await organizationContactRepository.createOrganization({
+          tenantId: context.tenantId,
+          ...input.organization,
+        });
+    } catch (error) {
+      if (error instanceof DuplicateContactEmailError) {
+        return reply.code(409).send({ error: "duplicate_contact_email" });
+      }
+      if (error instanceof ContactAlreadyLinkedError) {
+        return reply.code(409).send({ error: "contact_already_linked" });
+      }
+      if (error instanceof ContactNotFoundForOrganizationError) {
+        return reply.code(400).send({ error: "invalid_contact" });
+      }
+      throw error;
+    }
     return reply.code(201).send(toOrganizationResponse(organization));
   });
 
@@ -151,17 +177,61 @@ export function toOrganizationResponse(organization: Organization) {
   };
 }
 
-type OrganizationBody = Omit<CreateOrganizationInput, "tenantId">;
+type NewContactBody = Readonly<{
+  fullName: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  email: string;
+  phone?: string | null;
+  function?: string | null;
+  notes?: string | null;
+  communicationPreference?: string | null;
+}>;
+type OrganizationBody = Readonly<{
+  organization: Omit<CreateOrganizationInput, "tenantId">;
+  contactId?: string | null;
+  contact?: NewContactBody;
+}>;
 type OrganizationUpdateBody = Omit<UpdateOrganizationInput, "tenantId" | "organizationId">;
 
+const INLINE_CONTACT_FIELDS = new Set([
+  "full_name",
+  "first_name",
+  "last_name",
+  "email",
+  "phone",
+  "function",
+  "notes",
+  "communication_preference",
+]);
+
 function parseOrganizationCreateBody(value: unknown): OrganizationBody | null {
-  if (!isRecordWithAllowedKeys(value) || !Object.hasOwn(value, "name")) return null;
+  if (!isRecordWithAllowedKeys(value, new Set([...ORGANIZATION_FIELD_SET, "contact_id", "contact"])) || !Object.hasOwn(value, "name")) return null;
   const body = value as Record<string, unknown>;
   const name = requiredText(body.name, 200);
   if (!name) return null;
 
   const optional = parseOrganizationFields(body);
-  return optional ? { name, ...optional } : null;
+  if (!optional) return null;
+
+  const contactId = body.contact_id === undefined
+    ? undefined
+    : body.contact_id === null
+      ? null
+      : typeof body.contact_id === "string" && UUID_PATTERN.test(body.contact_id)
+        ? body.contact_id
+        : "invalid";
+  if (contactId === "invalid") return null;
+
+  const contact = body.contact === undefined ? undefined : parseInlineContact(body.contact);
+  if (contact === null) return null;
+  if (contactId !== undefined && contact !== undefined) return null;
+
+  return {
+    organization: { name, ...optional },
+    ...(contactId === undefined ? {} : { contactId }),
+    ...(contact === undefined ? {} : { contact }),
+  };
 }
 
 function parseOrganizationUpdateBody(value: unknown): OrganizationUpdateBody | null {
@@ -190,9 +260,35 @@ function parseOrganizationFields(body: Record<string, unknown>): Record<string, 
   return fields;
 }
 
-function isRecordWithAllowedKeys(value: unknown): value is Record<string, unknown> {
+function isRecordWithAllowedKeys(value: unknown, allowedKeys = ORGANIZATION_FIELD_SET): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-    && Object.keys(value).every((key) => ORGANIZATION_FIELD_SET.has(key));
+    && Object.keys(value).every((key) => allowedKeys.has(key));
+}
+
+function parseInlineContact(value: unknown): NewContactBody | null {
+  if (!isRecordWithAllowedKeys(value, INLINE_CONTACT_FIELDS)) return null;
+  const body = value as Record<string, unknown>;
+  const fullName = requiredText(body.full_name, 200);
+  const email = requiredText(body.email, 320);
+  if (!fullName || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+
+  const fields: Record<string, string | null> = {};
+  const mappings = {
+    first_name: ["firstName", 100],
+    last_name: ["lastName", 100],
+    phone: ["phone", 100],
+    function: ["function", 150],
+    notes: ["notes", 10_000],
+    communication_preference: ["communicationPreference", 100],
+  } as const;
+  for (const [inputKey, [outputKey, maxLength]] of Object.entries(mappings)) {
+    if (!Object.hasOwn(body, inputKey)) continue;
+    const parsed = nullableText(body[inputKey], maxLength);
+    if (parsed === undefined) return null;
+    fields[outputKey] = parsed;
+  }
+
+  return { fullName, email: email.toLowerCase(), ...fields };
 }
 
 function requiredText(value: unknown, maxLength: number): string | null {

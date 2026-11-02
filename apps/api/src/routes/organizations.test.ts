@@ -52,11 +52,16 @@ function repository(overrides: Partial<OrganizationContactRepository> = {}): Org
   return {
     listOrganizations: async () => [],
     createOrganization: async (input) => ({ ...organization(randomUUID(), input.tenantId), name: input.name }),
+    createOrganizationWithContact: async (input) => ({
+      organization: { ...organization(randomUUID(), input.tenantId), name: input.organization.name },
+      contact: null,
+    }),
     findOrganization: async () => null,
     updateOrganization: async () => null,
     archiveOrganization: async () => null,
     listContacts: async () => [],
     createContact: async () => { throw new Error("not used"); },
+    createContactWithOrganization: async () => { throw new Error("not used"); },
     findContact: async () => null,
     updateContact: async () => null,
     archiveContact: async () => null,
@@ -220,4 +225,38 @@ test("organization repository errors return a generic response", async (t) => {
   assert.equal(response.statusCode, 500);
   assert.deepEqual(response.json(), { error: "internal_error" });
   assert.ok(!response.body.includes("database secret"));
+});
+
+test("POST organization can create a new contact or link an existing one", async (t) => {
+  const calls: Array<{ contactId?: string | null; hasNewContact: boolean }> = [];
+  const app = setup(t, repository({
+    createOrganizationWithContact: async (input) => {
+      calls.push({ contactId: input.contactId, hasNewContact: Boolean(input.contact) });
+      return { organization: { ...organization(organizationA, input.tenantId), name: input.organization.name }, contact: null };
+    },
+  }));
+
+  const newContact = await app.inject({
+    method: "POST",
+    url: "/v1/organizations",
+    headers: ownerHeaders,
+    payload: {
+      name: "Nieuwe organisatie",
+      contact: { full_name: "Nieuwe contactpersoon", email: "new@example.test" },
+    },
+  });
+  assert.equal(newContact.statusCode, 201);
+
+  const existingContact = randomUUID();
+  const linked = await app.inject({
+    method: "POST",
+    url: "/v1/organizations",
+    headers: ownerHeaders,
+    payload: { name: "Bestaande relatie", contact_id: existingContact },
+  });
+  assert.equal(linked.statusCode, 201);
+  assert.deepEqual(calls, [
+    { contactId: undefined, hasNewContact: true },
+    { contactId: existingContact, hasNewContact: false },
+  ]);
 });

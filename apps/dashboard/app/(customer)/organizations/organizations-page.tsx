@@ -6,7 +6,7 @@ import { EmptyState, ForbiddenState, LoadingState, UnauthenticatedState, Unavail
 import { useWorkspaceContext } from "../../workspace-context";
 import { CrmHeader, CrmToolbar } from "../crm/crm-ui";
 import { ArchiveButton, OrganizationFormDialog } from "../crm/crm-dialogs";
-import { fetchOrganizationsWithOptions, type CrmFetchResult, type OrganizationRecord } from "../crm/crm-data";
+import { fetchContactsWithOptions, fetchOrganizationsWithOptions, type ContactRecord, type CrmFetchResult, type OrganizationRecord } from "../crm/crm-data";
 import styles from "../customer.module.css";
 
 type OrganizationsState = { status: "loading" } | { status: Exclude<CrmFetchResult<OrganizationRecord>["status"], "ready"> } | { status: "ready"; data: Extract<CrmFetchResult<OrganizationRecord>, { status: "ready" }>["data"] };
@@ -17,6 +17,7 @@ export default function OrganizationsPage() {
   const [search, setSearch] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [contacts, setContacts] = useState<readonly ContactRecord[]>([]);
   const [dialogMode, setDialogMode] = useState<"create" | "edit" | null>(null);
   const [editingOrganization, setEditingOrganization] = useState<OrganizationRecord | null>(null);
   const [operationMessage, setOperationMessage] = useState<string | null>(null);
@@ -25,9 +26,13 @@ export default function OrganizationsPage() {
     let cancelled = false;
 
     async function loadOrganizations() {
-      const result = await fetchOrganizationsWithOptions(workspaceFetch, { includeArchived });
+      const [result, contactsResult] = await Promise.all([
+        fetchOrganizationsWithOptions(workspaceFetch, { includeArchived }),
+        fetchContactsWithOptions(workspaceFetch, { includeArchived: false }),
+      ]);
       if (cancelled) return;
       setState(result.status === "ready" ? { status: "ready", data: result.data } : { status: result.status });
+      setContacts(contactsResult.status === "ready" ? contactsResult.data.items : []);
     }
 
     void loadOrganizations();
@@ -85,7 +90,7 @@ export default function OrganizationsPage() {
           {state.data.items.length === 0 ? <div className={styles.crmEmptyWithAction}><EmptyState title="Nog geen organisaties" message="Er zijn nog geen organisaties beschikbaar in deze klantomgeving." /><button className="button button-primary" type="button" onClick={openCreateDialog}>Eerste organisatie toevoegen</button></div> : filteredOrganizations.length === 0 ? <div className="card empty-state"><h3>Geen organisaties gevonden</h3><p>Pas je zoekterm aan om opnieuw te zoeken.</p></div> : <OrganizationTable organizations={filteredOrganizations} fetcher={workspaceFetch} onEdit={openEditDialog} onArchived={handleSaved} onError={setOperationMessage} />}
         </section>
       ) : null}
-      {dialogMode !== null ? <OrganizationFormDialog key={`${dialogMode}-${editingOrganization?.id ?? "new"}`} open record={dialogMode === "edit" ? editingOrganization : null} fetcher={workspaceFetch} onClose={() => setDialogMode(null)} onSaved={handleSaved} /> : null}
+      {dialogMode !== null ? <OrganizationFormDialog key={`${dialogMode}-${editingOrganization?.id ?? "new"}`} open record={dialogMode === "edit" ? editingOrganization : null} contacts={contacts} fetcher={workspaceFetch} onClose={() => setDialogMode(null)} onSaved={handleSaved} /> : null}
     </CrmHeader>
   );
 }

@@ -72,11 +72,16 @@ function repository(overrides: Partial<OrganizationContactRepository> = {}): Org
   return {
     listOrganizations: async () => [],
     createOrganization: async () => { throw new Error("not used"); },
+    createOrganizationWithContact: async () => { throw new Error("not used"); },
     findOrganization: async () => null,
     updateOrganization: async () => null,
     archiveOrganization: async () => null,
     listContacts: async () => [],
     createContact: async (input) => ({ ...contact(randomUUID(), input.tenantId), ...input, organizationId: input.organizationId ?? null }),
+    createContactWithOrganization: async (input) => ({
+      organization: organization(organizationA, input.tenantId),
+      contact: { ...contact(randomUUID(), input.tenantId), ...input.contact, organizationId: organizationA },
+    }),
     findContact: async () => null,
     updateContact: async () => null,
     archiveContact: async () => null,
@@ -234,4 +239,32 @@ test("contact CRUD validates, uses auth tenant, and archives without leaking cro
   assert.equal(archivedResponse.statusCode, 200);
   assert.equal(archivedResponse.json().status, "archived");
   assert.equal(archived, true);
+});
+
+test("POST contact can create and link a new organization atomically", async (t) => {
+  let receivedOrganizationName: string | undefined;
+  const app = setup(t, repository({
+    createContactWithOrganization: async (input) => {
+      receivedOrganizationName = input.organization.name;
+      return {
+        organization: organization(organizationA, input.tenantId),
+        contact: { ...contact(contactA, input.tenantId), ...input.contact, organizationId: organizationA },
+      };
+    },
+  }));
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/contacts",
+    headers: ownerHeaders,
+    payload: {
+      full_name: "Nieuwe contactpersoon",
+      email: "new@example.test",
+      organization: { name: "Nieuwe organisatie" },
+    },
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.json().organization_id, organizationA);
+  assert.equal(receivedOrganizationName, "Nieuwe organisatie");
 });

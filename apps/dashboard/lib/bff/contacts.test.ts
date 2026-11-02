@@ -127,6 +127,37 @@ test("contacts BFF whitelist create en patch en valideert organization_id", asyn
   assert.equal(patch.calls[0]!.init.body, JSON.stringify({ notes: "updated" }));
 });
 
+test("contacts BFF accepteert alleen gecontroleerde relationele createvelden", async () => {
+  const create = setup(() => Response.json(contact, { status: 201 }));
+  const response = await create.list(request(
+    "https://app.test/api/contacts",
+    "POST",
+    {
+      full_name: "Lisa de Vries",
+      email: "lisa@example.test",
+      organization: { name: " Northline Fysio ", website: "https://northline.example" },
+    },
+    { origin: "https://app.test" },
+  ));
+
+  assert.equal(response.status, 201);
+  assert.equal(create.calls[0]!.init.body, JSON.stringify({
+    full_name: "Lisa de Vries",
+    email: "lisa@example.test",
+    organization: { name: "Northline Fysio", website: "https://northline.example" },
+  }));
+
+  const invalid = setup();
+  const invalidResponse = await invalid.list(request(
+    "https://app.test/api/contacts",
+    "POST",
+    { full_name: "Lisa", email: "lisa@example.test", organization: { name: "Northline", secret: "drop" } },
+    { origin: "https://app.test" },
+  ));
+  assert.equal(invalidResponse.status, 400);
+  assert.equal(invalid.calls.length, 0);
+});
+
 test("contacts BFF geeft zonder sessie geen API-call", async () => {
   const { list, calls } = setup();
   const response = await list(new NextRequest("https://app.test/api/contacts"));

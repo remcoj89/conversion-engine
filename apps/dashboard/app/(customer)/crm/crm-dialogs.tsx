@@ -91,12 +91,14 @@ export function CrmDialog({ open, title, description, onClose, children }: CrmDi
 export function OrganizationFormDialog({
   open,
   record,
+  contacts,
   fetcher,
   onClose,
   onSaved,
 }: Readonly<{
   open: boolean;
   record: OrganizationRecord | null;
+  contacts: readonly ContactRecord[];
   fetcher: WorkspaceFetch;
   onClose: () => void;
   onSaved: (message: string) => void;
@@ -141,6 +143,7 @@ export function OrganizationFormDialog({
     }
     setFormState({ busy: false, error: null, success: record ? "Organisatie bijgewerkt." : "Organisatie aangemaakt." });
     onSaved(record ? "Organisatie bijgewerkt." : "Organisatie aangemaakt.");
+    onClose();
   }
 
   const editing = Boolean(record);
@@ -158,6 +161,22 @@ export function OrganizationFormDialog({
           <TextAreaField label="Adres" name="address" value={form.address} onChange={updateForm(setForm, "address")} disabled={loadingDetail || formState.busy} />
           <TextAreaField label="Notities" name="notes" value={form.notes} onChange={updateForm(setForm, "notes")} disabled={loadingDetail || formState.busy} fullWidth />
         </div>
+        {!editing ? <RelationSection title="Contactpersoon koppelen" description="Je kunt direct een bestaande contactpersoon koppelen of er één samen met deze organisatie aanmaken.">
+          <SelectField label="Contactpersoon" name="contact_mode" value={form.contact_mode} onChange={(value) => setForm((current) => ({ ...current, contact_mode: value as OrganizationFormValues["contact_mode"], contact_id: value === "existing" ? current.contact_id : "" }))} disabled={loadingDetail || formState.busy}>
+            <option value="none">Geen contactpersoon</option>
+            <option value="existing">Bestaande contactpersoon</option>
+            <option value="new">Nieuwe contactpersoon</option>
+          </SelectField>
+          {form.contact_mode === "existing" ? <SelectField label="Bestaande contactpersoon" name="contact_id" value={form.contact_id} onChange={updateForm(setForm, "contact_id")} error={fieldErrors.contact_id} required disabled={loadingDetail || formState.busy}>
+            <option value="">Kies een contactpersoon</option>
+            {contacts.filter((contact) => contact.status === "active" && !contact.organization_id).map((contact) => <option key={contact.id} value={contact.id}>{contact.name} — {contact.email ?? "geen e-mail"}</option>)}
+          </SelectField> : null}
+          {form.contact_mode === "new" ? <div className={styles.crmFormGrid}>
+            <TextField label="Naam contactpersoon" name="contact_full_name" value={form.contact_full_name} onChange={updateForm(setForm, "contact_full_name")} error={fieldErrors.contact_full_name} required disabled={loadingDetail || formState.busy} />
+            <TextField label="E-mailadres contactpersoon" name="contact_email" type="email" value={form.contact_email} onChange={updateForm(setForm, "contact_email")} error={fieldErrors.contact_email} required disabled={loadingDetail || formState.busy} />
+            <TextField label="Telefoonnummer contactpersoon" name="contact_phone" type="tel" value={form.contact_phone} onChange={updateForm(setForm, "contact_phone")} disabled={loadingDetail || formState.busy} />
+          </div> : null}
+        </RelationSection> : null}
         <DialogFeedback state={formState} />
         <FormActions busy={formState.busy || loadingDetail} submitDisabled={detailError} onClose={onClose} submitLabel={editing ? "Wijzigingen opslaan" : "Organisatie opslaan"} />
       </form>
@@ -220,6 +239,7 @@ export function ContactFormDialog({
     }
     setFormState({ busy: false, error: null, success: record ? "Contactpersoon bijgewerkt." : "Contactpersoon aangemaakt." });
     onSaved(record ? "Contactpersoon bijgewerkt." : "Contactpersoon aangemaakt.");
+    onClose();
   }
 
   const editing = Boolean(record);
@@ -234,10 +254,18 @@ export function ContactFormDialog({
           <TextField label="Achternaam" name="last_name" value={form.last_name} onChange={updateForm(setForm, "last_name")} disabled={loadingDetail || formState.busy} />
           <TextField label="Telefoonnummer" name="phone" type="tel" value={form.phone} onChange={updateForm(setForm, "phone")} disabled={loadingDetail || formState.busy} />
           <TextField label="Functie" name="function" value={form.function} onChange={updateForm(setForm, "function")} disabled={loadingDetail || formState.busy} />
-          <SelectField label="Organisatie" name="organization_id" value={form.organization_id} onChange={updateForm(setForm, "organization_id")} disabled={loadingDetail || formState.busy}>
-            <option value="">Geen organisatie</option>
-            {organizations.filter((organization) => organization.status === "active").map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}
-          </SelectField>
+          <RelationSection title="Organisatie koppelen" description="Koppel een bestaande organisatie, maak er direct één aan of laat de contactpersoon zelfstandig.">
+            <SelectField label="Organisatiekoppeling" name="organization_mode" value={form.organization_mode} onChange={(value) => setForm((current) => ({ ...current, organization_mode: value as ContactFormValues["organization_mode"], organization_id: value === "existing" ? current.organization_id : "" }))} disabled={loadingDetail || formState.busy}>
+              <option value="none">Geen organisatie</option>
+              <option value="existing">Bestaande organisatie</option>
+              {!editing ? <option value="new">Nieuwe organisatie</option> : null}
+            </SelectField>
+            {form.organization_mode === "existing" ? <SelectField label="Bestaande organisatie" name="organization_id" value={form.organization_id} onChange={updateForm(setForm, "organization_id")} error={fieldErrors.organization_id} required disabled={loadingDetail || formState.busy}>
+              <option value="">Kies een organisatie</option>
+              {organizations.filter((organization) => organization.status === "active").map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}
+            </SelectField> : null}
+            {form.organization_mode === "new" ? <TextField label="Naam nieuwe organisatie" name="new_organization_name" value={form.new_organization_name} onChange={updateForm(setForm, "new_organization_name")} error={fieldErrors.new_organization_name} required disabled={loadingDetail || formState.busy} /> : null}
+          </RelationSection>
           <SelectField label="Voorkeur communicatie" name="communication_preference" value={form.communication_preference} onChange={updateForm(setForm, "communication_preference")} disabled={loadingDetail || formState.busy}>
             <option value="">Niet opgegeven</option>
             <option value="email">E-mail</option>
@@ -293,8 +321,13 @@ function TextAreaField({ label, name, value, onChange, disabled = false, fullWid
   return <div className={`field ${fullWidth ? styles.crmFormFull : ""}`}><label className="field-label" htmlFor={name}>{label}<span className="field-optional">Optioneel</span></label><textarea className="field-control" id={name} name={name} value={value} onChange={(event) => onChange(event.currentTarget.value)} disabled={disabled} rows={3} /></div>;
 }
 
-function SelectField({ label, name, value, onChange, disabled, children }: Readonly<{ label: string; name: string; value: string; onChange: (value: string) => void; disabled: boolean; children: ReactNode }>) {
-  return <div className="field"><label className="field-label" htmlFor={name}>{label}<span className="field-optional">Optioneel</span></label><select className="field-control" id={name} name={name} value={value} onChange={(event) => onChange(event.currentTarget.value)} disabled={disabled}>{children}</select></div>;
+function SelectField({ label, name, value, onChange, error, required = false, disabled, children }: Readonly<{ label: string; name: string; value: string; onChange: (value: string) => void; error?: string; required?: boolean; disabled: boolean; children: ReactNode }>) {
+  const errorId = `${name}-error`;
+  return <div className={`field ${error ? "field-has-error" : ""}`}><label className="field-label" htmlFor={name}>{label}{required ? <span className="field-required">Verplicht</span> : <span className="field-optional">Optioneel</span>}</label><select className="field-control" id={name} name={name} value={value} onChange={(event) => onChange(event.currentTarget.value)} disabled={disabled} required={required} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined}>{children}</select>{error ? <p className="field-error" id={errorId}>{error}</p> : null}</div>;
+}
+
+function RelationSection({ title, description, children }: Readonly<{ title: string; description: string; children: ReactNode }>) {
+  return <fieldset className={`${styles.crmRelationSection} ${styles.crmFormFull}`}><legend>{title}</legend><p className={styles.crmRelationDescription}>{description}</p>{children}</fieldset>;
 }
 
 function FormActions({ busy, submitDisabled = false, onClose, submitLabel }: Readonly<{ busy: boolean; submitDisabled?: boolean; onClose: () => void; submitLabel: string }>) {
@@ -314,5 +347,6 @@ function mutationError(result: Exclude<CrmMutationResult<unknown>, { status: "su
   if (result.status === "unauthenticated") return "Je sessie is verlopen. Meld je opnieuw aan.";
   if (result.status === "forbidden") return "Je account heeft geen toestemming voor deze CRM-actie.";
   if (result.status === "not_found") return "Dit CRM-record bestaat niet meer.";
+  if (result.status === "conflict") return "Dit e-mailadres of deze koppeling bestaat al. Controleer de gegevens en probeer het opnieuw.";
   return "De CRM-actie is tijdelijk niet beschikbaar. Probeer het opnieuw.";
 }

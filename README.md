@@ -221,7 +221,7 @@ Platform Admin kan een tenant aanmaken als `pending`, hernoemen, uitschakelen en
 
 De acceptatie verloopt via een aparte identity-only scope met sterke MFA/AAL. Een nieuwe ZITADEL-subject kan daardoor zonder bestaande membership transactioneel als lokale user worden aangemaakt, owner worden gekoppeld en de pending tenant activeren. De Next.js invitepagina gebruikt een vaste `/invite`-logincontinuatie, same-origin BFF-mutaties, geen tenantheader en geen localStorage/sessionStorage.
 
-De admin-interface verzendt nog geen e-mail: de link wordt één keer aan de Platform Admin getoond om veilig handmatig te delen. Het ingevulde e-mailadres is voorlopig metadata en wordt niet als geverifieerd identiteitsbewijs gebruikt. De database-migratie `0020_premium_bromley.sql` is gegenereerd maar moet nog handmatig worden toegepast voordat de invitation-flow tegen de database kan draaien.
+De admin-interface verzendt nog geen e-mail: de link wordt één keer aan de Platform Admin getoond om veilig handmatig te delen. Het ingevulde e-mailadres is voorlopig metadata en wordt niet als geverifieerd identiteitsbewijs gebruikt. De migraties `0020` en `0021` zijn lokaal op development en test toegepast.
 
 ## Live CRM-leads lezen — 29 oktober 2026
 
@@ -245,7 +245,7 @@ De klantomgeving kan een lead via `PATCH /v1/leads/:leadId/status` gecontroleerd
 - `/pipeline` toont dezelfde live tenantgebonden leads als een read-only Kanban over de zes lifecycle-statussen, met bestaande leadfilters, detaillinks en expliciete loading-, lege-, auth- en unavailable-states. Drag-and-drop, pipelineconfiguratie en taak/follow-up-CRUD vallen nog buiten scope.
 - De backend-foundation voor deals is toegevoegd: tenantgebonden deals horen bij één bestaand contact, gebruiken dezelfde zes lifecycle-fasen, ondersteunen EUR-bedragen, optionele actieve owner, verwachte sluitdatum, optionele verliesreden en soft-archiving. `POST/GET/PATCH /v1/deals` en `POST /v1/deals/:dealId/archive` gebruiken het bestaande `crm:*`-permissioncontract. Won/lost zijn alleen bereikbaar via de bestaande voorwaartse stage-overgangen; een deal start standaard in `new`. Iedere stagewijziging schrijft een immutable audit-event.
 - De klantomgeving toont op `/pipeline` naast de leads een afzonderlijke deal-Kanban. De dashboard-BFF gebruikt uitsluitend de HttpOnly-sessie, forwardt alleen de expliciete `include_archived`-flag, dwingt same-origin JSON-mutaties af en geeft na strikte parsing alleen veilige velden door. Nieuwe deals gebruiken een live selectie van actieve contactpersonen; `/pipeline/[id]` ondersteunt server-confirmed bewerken en soft-archiveren. De UI biedt geen ownerkeuze zonder functionele live teamdata, kan `won`/`lost` niet heropenen en toont validatie-, conflict- en unavailable-states. Drag-and-drop, pipelineconfiguratie en taken zijn nog niet beschikbaar.
-- Migraties `0042_lead_lifecycle_status_audit.sql` en `0043_crm_deals_foundation.sql` zijn gegenereerd maar nog niet lokaal uitgevoerd.
+- Migraties `0042_lead_lifecycle_status_audit.sql` en `0043_crm_deals_foundation.sql` zijn lokaal op development en test toegepast. De daaropvolgende publieke tenant-policy-migraties `0044` en `0045` zijn eveneens toegepast; de API- en databasesuites zijn groen.
 
 ## CRM deals backend foundation — 2 november 2026
 
@@ -255,7 +255,11 @@ De deal-kern is bewust klein gehouden voor de latere frontend: een deal hoort bi
 - Deals kunnen alleen voorwaarts door de pipeline; `won` en `lost` zijn terminaal. Directe creatie als `won` of `lost` is niet toegestaan.
 - De API geeft bij deals geen `tenant_id` terug. Cross-tenant contact- en ownercombinaties, ontbrekende CRM-rechten, platform/reviewer-contexten en archived updates worden geweigerd.
 - `0043_crm_deals_foundation.sql` bevat de tabellen, owner-validatietrigger, immutable stage-audit, `ENABLE/FORCE RLS` en policies. De runtime allowlist geeft `ce_api_runtime` alleen `SELECT/INSERT/UPDATE` op deals en `SELECT/INSERT` op de audit-tabel.
-- De lokale development- en testmigratie, role-bootstrap en `npm --workspace api run db:test` blijven handmatige gates; productie/VPS is niet geraakt.
+- De lokale development- en testmigratie, role-bootstrap en `npm --workspace api run db:test` zijn uitgevoerd en groen; productie/VPS is niet geraakt.
+
+## CRM-relatie-aanmaak — 2 november 2026
+
+Bij het aanmaken van een contactpersoon kan de klant optioneel direct een nieuwe organisatie aanmaken en koppelen. Bij het aanmaken van een organisatie kan een bestaande, nog niet gekoppelde contactpersoon worden geselecteerd of inline een nieuwe contactpersoon worden aangemaakt. Beide richtingen gebruiken transactionele repositorymethodes, tenantgebonden API-routes, strict BFF-bodyvalidatie en server-confirmed dashboardmutaties. Een duplicate e-mailadres, een al gekoppelde contactpersoon of een ongeldig contact geeft een veilige fout zonder een half opgeslagen organisatie-record. De API-, dashboard-, database-, lint-, typecheck- en build-gates zijn groen; een ingelogde browser-smoke-check met echte tenantdata staat nog open.
 
 ## Westend-review: wijzigingen aanvragen — 27 oktober 2026
 

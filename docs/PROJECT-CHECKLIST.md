@@ -80,7 +80,13 @@ Legenda: `[x]` afgerond · `[~]` gebouwd, wacht op controle of acceptatie · `[ 
   npm --workspace api run db:test
   ```
 
-  Gebruik voor TCP-verbindingen de bestaande lokale wachtwoordvoorziening van de shell; zet wachtwoorden nooit in Git of in documentatie. Controleer na de gate dat de migratieketen `0033`–`0043` is toegepast voordat deze checklistregel naar `[x]` gaat.
+  Gebruik voor TCP-verbindingen de bestaande lokale wachtwoordvoorziening van de shell; zet wachtwoorden nooit in Git of in documentatie. Controleer na de gate dat de migratieketen `0033`–`0045` is toegepast voordat deze checklistregel naar `[x]` gaat. Deze lokale gate is op 2 november 2026 uitgevoerd; alleen de demo-site/outbox blijft nog open.
+
+## Actuele statuscorrectie — 2 november 2026
+
+De CRM- en databasegates die in oudere checklistregels nog als open staan, zijn inmiddels uitgevoerd in commit `42fc7bf`. Migraties `0033` t/m `0045`, role-bootstrap en `npm --workspace api run db:test` zijn lokaal op development en test groen. De transactionele CRM-relatie-aanmaak is nu toegevoegd en gecontroleerd; de geauthenticeerde browser-smoke-check met echte tenantdata blijft apart open.
+
+- [x] **CRM-relatie-aanmaak:** bij het aanmaken van een contactpersoon kan optioneel inline een nieuwe organisatie worden aangemaakt en gekoppeld. Bij het aanmaken van een organisatie kan optioneel een bestaande, nog niet gekoppelde contactpersoon worden gekoppeld of inline een nieuwe contactpersoon worden aangemaakt. De save is transactioneel, tenantgebonden en behoudt de bestaande deduplicatie- en soft-archive-regels. API-, BFF-, dashboard-, database-, typecheck-, lint- en build-gates zijn groen.
 
 ## Websiteproductie-architectuur
 
@@ -103,6 +109,6 @@ Legenda: `[x]` afgerond · `[~]` gebouwd, wacht op controle of acceptatie · `[ 
 - [x] Migraties `0020` en `0021` voor uitnodigingen en lead assignments zijn lokaal toegepast op ontwikkel- en testdatabase.
 - [~] Migraties `0022` t/m `0025` voor PostgreSQL-RLS zijn lokaal toegepast op ontwikkel- en testdatabase; production database-rollen en deploymentprocedure zijn nog open.
 - [x] Migratie `0032_crm_tenant_settings.sql` is lokaal op development en test uitgevoerd en gecontroleerd met de settings-, RLS- en volledige database-tests.
-- [~] Migraties `0033_public_lead_intake.sql` t/m `0043_crm_deals_foundation.sql` zijn gegenereerd en wachten op lokale development/test-uitvoering, role-bootstrap en aansluitende `db:test`-controle.
+- [x] Migraties `0033_public_lead_intake.sql` t/m `0045_public_tenant_policy_hardening.sql` zijn lokaal op development en test uitgevoerd, inclusief role-bootstrap en aansluitende `db:test`-controle. Productie blijft een aparte releasegate.
 - [ ] De lokale **ontwikkel**database apart migreren (`0007` t/m `0018`); alleen na expliciete opdracht.
 - [ ] De **productie**database apart migreren; alleen na expliciete opdracht en na de releasegates.

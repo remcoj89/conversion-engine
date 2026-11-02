@@ -10,7 +10,9 @@ import {
   archiveContact,
   archiveOrganization,
   createContact,
+  createContactWithOrganization,
   createOrganization,
+  createOrganizationWithContact,
   findContact,
   findOrganization,
   listContacts,
@@ -145,6 +147,80 @@ test("organization and contact repository keeps tenants isolated", async () => {
     } finally {
       await client.query("rollback to savepoint cross_tenant_contact");
     }
+  });
+});
+
+test("CRM repository creates related records atomically in both directions", async () => {
+  await withRollback(async (tx) => {
+    const tenantId = randomUUID();
+    await tx.insert(schema.tenants).values({ id: tenantId, name: "CRM relation tenant" });
+
+    const contactWithOrganization = await createContactWithOrganization(tx, {
+      tenantId,
+      organization: { name: "Contact organization" },
+      contact: { fullName: "Contact creator", email: `contact-${randomUUID()}@example.test` },
+    });
+    assert.equal(contactWithOrganization.contact.organizationId, contactWithOrganization.organization.id);
+
+    const standaloneContact = await createContact(tx, {
+      tenantId,
+      fullName: "Existing contact",
+      email: `existing-${randomUUID()}@example.test`,
+    });
+    const organizationWithExistingContact = await createOrganizationWithContact(tx, {
+      tenantId,
+      organization: { name: "Existing contact organization" },
+      contactId: standaloneContact.id,
+    });
+    assert.equal(organizationWithExistingContact.contact?.id, standaloneContact.id);
+    assert.equal(organizationWithExistingContact.contact?.organizationId, organizationWithExistingContact.organization.id);
+  });
+});
+
+test("CRM repository rolls back a combined create when the contact cannot be created or linked", async () => {
+  await withRollback(async (tx) => {
+    const tenantId = randomUUID();
+    await tx.insert(schema.tenants).values({ id: tenantId, name: "CRM rollback tenant" });
+    const email = `duplicate-${randomUUID()}@example.test`;
+    await createContact(tx, { tenantId, fullName: "Existing", email });
+
+    await assert.rejects(
+      createContactWithOrganization(tx, {
+        tenantId,
+        organization: { name: "Rolled back organization" },
+        contact: { fullName: "Duplicate", email },
+      }),
+      (error: unknown) => error instanceof Error && error.message === "duplicate_contact_email",
+    );
+    assert.equal((await listOrganizations(tx, tenantId, { includeArchived: true })).length, 0);
+  });
+
+  await withRollback(async (tx) => {
+    const tenantId = randomUUID();
+    await tx.insert(schema.tenants).values({ id: tenantId, name: "CRM link rollback tenant" });
+    const linkedContact = await createContact(tx, {
+      tenantId,
+      fullName: "Already linked",
+      email: `linked-${randomUUID()}@example.test`,
+    });
+    const firstOrganization = await createOrganizationWithContact(tx, {
+      tenantId,
+      organization: { name: "First organization" },
+      contactId: linkedContact.id,
+    });
+
+    await assert.rejects(
+      createOrganizationWithContact(tx, {
+        tenantId,
+        organization: { name: "Rolled back second organization" },
+        contactId: linkedContact.id,
+      }),
+      (error: unknown) => error instanceof Error && error.message === "contact_already_linked",
+    );
+    assert.deepEqual(
+      (await listOrganizations(tx, tenantId, { includeArchived: true })).map((item) => item.name),
+      [firstOrganization.organization.name],
+    );
   });
 });
 

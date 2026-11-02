@@ -51,6 +51,11 @@ function organizationForm(overrides: Partial<OrganizationFormValues> = {}): Orga
     address: "",
     industry: " Webdesign ",
     notes: "",
+    contact_mode: "none",
+    contact_id: "",
+    contact_full_name: "",
+    contact_email: "",
+    contact_phone: "",
     ...overrides,
   };
 }
@@ -66,6 +71,8 @@ function contactForm(overrides: Partial<ContactFormValues> = {}): ContactFormVal
     function: "",
     notes: "",
     communication_preference: "",
+    organization_mode: "none",
+    new_organization_name: "",
     ...overrides,
   };
 }
@@ -80,6 +87,11 @@ test("CRM-formulieren trimmen waarden en maken lege optionele velden null", () =
     address: null,
     industry: "Webdesign",
     notes: null,
+    contact_mode: "none",
+    contact_id: null,
+    contact_full_name: null,
+    contact_email: null,
+    contact_phone: null,
   });
   assert.deepEqual(validateContactForm(contactForm()).values, {
     organization_id: null,
@@ -91,6 +103,8 @@ test("CRM-formulieren trimmen waarden en maken lege optionele velden null", () =
     function: null,
     notes: null,
     communication_preference: null,
+    organization_mode: "none",
+    new_organization_name: null,
   });
 });
 
@@ -137,4 +151,62 @@ test("CRM-mutaties gebruiken de bestaande BFF-paden en ondersteunen een contact 
   assert.equal(calls[1]?.url, `/api/contacts/${contactResponse.id}/archive`);
   assert.equal(calls[1]?.method, "POST");
   assert.equal(calls[1]?.body, "");
+});
+
+test("CRM-mutaties kunnen een contact met een nieuwe organisatie aanmaken", async () => {
+  let requestBody: unknown;
+  const fetcher = async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify(contactResponse), { status: 201 });
+  };
+
+  const result = await saveContact(fetcher, null, contactForm({
+    organization_mode: "new",
+    new_organization_name: "Nieuwe Organisatie",
+  }));
+
+  assert.equal(result.status, "success");
+  assert.deepEqual(requestBody, {
+    full_name: "Voorbeeld Contact",
+    first_name: null,
+    last_name: null,
+    email: "contact@example.test",
+    phone: null,
+    function: null,
+    notes: null,
+    communication_preference: null,
+    organization: { name: "Nieuwe Organisatie" },
+  });
+});
+
+test("CRM-mutaties kunnen een organisatie met een nieuw contact aanmaken", async () => {
+  let requestBody: unknown;
+  const fetcher = async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify(organizationResponse), { status: 201 });
+  };
+
+  const result = await saveOrganization(fetcher, null, organizationForm({
+    contact_mode: "new",
+    contact_full_name: "Nieuwe Contactpersoon",
+    contact_email: "nieuw@example.test",
+    contact_phone: "0612345678",
+  }));
+
+  assert.equal(result.status, "success");
+  assert.deepEqual(requestBody, {
+    name: "Westend Digital",
+    kvk_number: null,
+    website: "https://example.test",
+    general_email: "info@example.test",
+    general_phone: null,
+    address: null,
+    industry: "Webdesign",
+    notes: null,
+    contact: {
+      full_name: "Nieuwe Contactpersoon",
+      email: "nieuw@example.test",
+      phone: "0612345678",
+    },
+  });
 });
